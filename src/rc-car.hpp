@@ -8,6 +8,8 @@
 
 #include "network_interface/udp_socket.hpp"
 
+#include <thread>
+
 
 class RcCar {
 public:
@@ -15,11 +17,18 @@ public:
     ~RcCar();
 
     void doRCMain(void);
+    void joinThread(void);
 private:
     bool isControllerConnected = false;
+    bool threadCanRun          = true;
     PeripheralCtrl* peripherals = nullptr;
 
     Network::UDPSocket* commandServer = nullptr;
+    std::thread configurationInterfaceThread;
+    std::thread mainThread;
+
+private:
+    void configInterfaceProcess(void);
 };
 
 

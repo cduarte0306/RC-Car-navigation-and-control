@@ -32,27 +32,7 @@ bool PeripheralCtrl::doConfigureDevice(void) {
         return false;
     }
 
-    while (true) {
-        uint8_t tx[1] = { 0xAA };
-        uint8_t rx[1] = { 0x00 };
-        const uint32_t length = 1;
-
-        struct spi_ioc_transfer tr = {};
-        tr.tx_buf = reinterpret_cast<__u64>(tx);
-        tr.rx_buf = reinterpret_cast<__u64>(rx);
-        tr.len = length;
-        tr.speed_hz = this->speed;
-        tr.bits_per_word = this->bitsPerWord;
-
-        int ret = ioctl(this->spiFd, SPI_IOC_MESSAGE(1), &tr);
-        if (ret < 1) {
-            std::cerr << "SPI transfer failed: " << strerror(errno) << std::endl;
-            return false;
-        }
-
-        std::cout << "Received: 0x" << std::hex << static_cast<int>(rx[0]) << std::endl;
-        usleep(1000);
-    }
+    // Add further configuration here
 
     return true;
 }
