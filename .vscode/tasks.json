@@ -1,0 +1,24 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CMake: Build",
+      "type": "shell",
+      "command": "cmake --build build",  // assumes your build directory is called 'build'
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Invokes the CMake Tools build"
+    },
+    {
+      "label": "Upload and Start GDBServer",
+      "type": "shell",
+      "dependsOn": ["CMake: Build"],
+      "command": "${workspaceFolder}/scripts/rc_car_toolbox.sh",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}

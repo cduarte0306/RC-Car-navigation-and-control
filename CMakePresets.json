@@ -1,0 +1,13 @@
+{
+    "version": 3,
+    "configurePresets": [
+      {
+        "name": "rc-car-poky",
+        "hidden": false,
+        "displayName": "RC Car (Poky Toolchain)",
+        "description": "Cross-compile for Jetson Nano using Poky SDK",
+        "generator": "Ninja",
+        "binaryDir": "${sourceDir}/build"
+      }
+    ]
+}
