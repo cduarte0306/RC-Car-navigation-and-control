@@ -16,7 +16,7 @@
 
 
 PeripheralCtrl::PeripheralCtrl():
-speed(10000),
+speed(1000000),
 bitsPerWord(8) {
 
 }
@@ -50,7 +50,7 @@ bool PeripheralCtrl::doDetectDevice(void) {
     uint8_t errCount = 0;
     val_type_t data;
     
-    while( !this->psocXferRead(&data)) {
+    while( !this->xfer(&data)) {
         if ( errCount > MAX_ATTEMPT_COUNT ) {
             return false;
         }
@@ -98,23 +98,6 @@ bool PeripheralCtrl::configSPI(void) {
 }
 
 
-bool PeripheralCtrl::psocXferWrite(val_type_t* data) {
-    if (data == nullptr) {
-        return false;
-    }
-
-    bool ret;
-    PeripheralCtrl::spiTransactionStruct dataOut;
-    dataOut.data.u32 = data->u32;
-
-    ret = this->xfer(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
-    if ( !ret ) {
-        return false;
-    }
-
-    return true;
-}
-
 
 /**
  * @brief 
@@ -123,7 +106,7 @@ bool PeripheralCtrl::psocXferWrite(val_type_t* data) {
  * @return true 
  * @return false 
  */
-bool PeripheralCtrl::psocXferRead(val_type_t* data) {
+bool PeripheralCtrl::xfer(val_type_t* data) {
     if (data == nullptr) {
         return false;
     }
@@ -132,13 +115,12 @@ bool PeripheralCtrl::psocXferRead(val_type_t* data) {
     PeripheralCtrl::spiTransactionStruct dataOut;
     dataOut.data.u32 = data->u32;
 
-    ret = this->xfer(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
+    ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
     if ( !ret || !dataOut.ack ) {
         return false;
     }
 
     data->u32 = dataOut.data.u32;
-
     return true;
 }
 
@@ -151,7 +133,7 @@ bool PeripheralCtrl::psocXferRead(val_type_t* data) {
  * @return true 
  * @return false 
  */
-bool PeripheralCtrl::xfer(uint8_t* pbuf, size_t length) {
+bool PeripheralCtrl::xferSPI(uint8_t* pbuf, size_t length) {
     if (pbuf == nullptr || length == 0) {
         return false;
     }

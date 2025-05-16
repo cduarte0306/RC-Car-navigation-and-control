@@ -24,6 +24,7 @@ public:
 
     bool doConfigureDevice(void);
     bool doDetectDevice(void);
+    bool xfer(val_type_t* data);
 
 private:
     typedef struct
@@ -34,10 +35,8 @@ private:
         uint8_t ack;
     } spiTransactionStruct;
 
-    bool configSPI(void);
-    bool psocXferWrite(val_type_t* data);
-    bool psocXferRead(val_type_t* data);
-    bool xfer(uint8_t* pbuf, size_t length);
+    bool configSPI(void);  
+    bool xferSPI(uint8_t* pbuf, size_t length);
 
 private:
     int spiFd = -1;

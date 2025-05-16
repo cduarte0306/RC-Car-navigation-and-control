@@ -1,13 +1,17 @@
 cmake_minimum_required(VERSION 3.10)
 
-set(PROJECT_NAME "rc-car-nav")
-
 # Set the project name
-project(${PROJECT_NAME})
+project(rc-car-nav)
 
 # Specify the C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
+
+# Find Boost libraries (replace placeholders with actual components)
+find_package(Boost REQUIRED COMPONENTS system filesystem thread)
+
+# Add Boost headers globally
+include_directories(${Boost_INCLUDE_DIRS})
 
 # Add the subdirectory containing the bottom-level CMakeLists.txt
 add_subdirectory(src)
