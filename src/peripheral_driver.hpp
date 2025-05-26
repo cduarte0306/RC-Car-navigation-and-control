@@ -26,7 +26,7 @@ public:
 
     bool isDeviceConnected(void) const { return this->isDeviceConnected_; }
     bool doConfigureDevice(void);
-    bool doDetectDevice(void);
+    bool doDetectDevice(uint32_t& version);
     int readData(psocDataStruct& data);
 
 private:

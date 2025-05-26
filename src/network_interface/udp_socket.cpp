@@ -18,7 +18,7 @@
 using namespace Network;
 
 
-UDPSocket::UDPSocket(int sPort, int dPort) {
+UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
     sport_ = sPort;
     dport_ = dPort;
 
@@ -77,7 +77,6 @@ UDPSocket::UDPSocket(int sPort, int dPort) {
 }
 
 
-
 UDPSocket::~UDPSocket() {
     // Close the socket
     close(socketFD_);
@@ -96,7 +95,7 @@ UDPSocket::~UDPSocket() {
  * @return false Transmission failed
  */
 bool UDPSocket::transmit(uint8_t* pBuf, size_t length) {
-    if (pBuf == nullptr || length == 0) {
+    if (pBuf == nullptr || length == 0 || lastClientAddress.sin_family != AF_INET) {
         return false;
     }
 
@@ -136,6 +135,8 @@ void UDPSocket::transmissionThreadHandler(void) {
                 continue;
             }
         }
+
+        this->lastClientAddress = clientAddress;
 
         // Fire the signal to notify data has been received
         onDataReceived(reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(bytesRead));  // Emit the data received signal

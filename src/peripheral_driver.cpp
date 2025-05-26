@@ -44,7 +44,7 @@ bool PeripheralCtrl::doConfigureDevice(void) {
  * @return true Controller connected
  * @return false No peripheral controller detected
  */
-bool PeripheralCtrl::doDetectDevice(void) {
+bool PeripheralCtrl::doDetectDevice(uint32_t& version) {
     // Attempt to read the dummy register
     bool ret;
     uint8_t errCount = 0;
@@ -84,6 +84,8 @@ bool PeripheralCtrl::doDetectDevice(void) {
               << "Version " << static_cast<int>(this->psocData.version_major.u8) << "."  // Fixed static_cast
               << static_cast<int>(this->psocData.version_minor.u8) << "."  // Fixed static_cast
               << static_cast<int>(this->psocData.version_build.u8) << std::endl;  // Fixed static_cast
+
+    version = this->psocData.version_major.u8 << 16 | this->psocData.version_major.u8 << 8 | this->psocData.version_major.u8;
     return true;
 }
 

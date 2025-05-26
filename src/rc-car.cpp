@@ -6,12 +6,20 @@
 #include <chrono>
 
 #include <nlohmann/json.hpp>
+#include <iostream>
 
 
 RcCar::RcCar( void ) {
     this->peripherals = new PeripheralCtrl();
     this->peripherals->doConfigureDevice();
-    this->isControllerConnected = this->peripherals->doDetectDevice();
+    
+    uint32_t psocVersion = 0;
+    this->isControllerConnected = this->peripherals->doDetectDevice(psocVersion);
+    if (this->isControllerConnected) {
+        std::cout << "PSoC version detedcted: " << ((psocVersion >> 16 ) & 0xFF) << "." 
+                                                << ((psocVersion >> 16 ) & 0xFF) << "."
+                                                << (psocVersion & 0xFF);
+    }
 
     this->commandServer = new Network::UDPSocket(65000);
     this->commandServer->setOnReceiveCallback(nullptr);
