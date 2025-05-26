@@ -20,7 +20,7 @@ RcCar::RcCar( void ) {
     // the wifi access point.
     this->configurationInterfaceThread = std::thread(&RcCar::configInterfaceProcess, this);
     this->mainThread = std::thread(&RcCar::rcCarThread, this);
-
+    
 }
 
 

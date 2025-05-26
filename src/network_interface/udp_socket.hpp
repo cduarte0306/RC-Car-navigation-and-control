@@ -24,9 +24,9 @@ private:
     int socket_ = -1;
 
     bool threadCanRun = true;
-
+    struct sockaddr_in lastClientAddress;
 private:
-
+    
 };
 
 }
