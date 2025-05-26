@@ -11,7 +11,7 @@ namespace Network {
 
 class UDPSocket : public Sockets {
 public:
-    UDPSocket(int port);
+    UDPSocket(int sPort, int dPort=-1);
     ~UDPSocket();
 
     bool transmit(uint8_t* pBuf, size_t length) override;
@@ -26,9 +26,9 @@ private:
     bool threadCanRun = true;
 
 private:
+
 };
 
 }
-
 
 #endif

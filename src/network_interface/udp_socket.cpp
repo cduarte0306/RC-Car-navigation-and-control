@@ -10,10 +10,14 @@
 using namespace Network;
 
 
-UDPSocket::UDPSocket(int port){
+UDPSocket::UDPSocket(int sPort, int dPort) {
+    // Initialize inherited variables
+    sport_ = sPort;
+    dport_ = dPort;
+
     // Create a UDP socket
-    socket_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (socket_ < 0) {
+    socketFD_ = socket(AF_INET, SOCK_DGRAM, 0);
+    if (socketFD_ < 0) {
         throw(0);
     }
 
@@ -22,10 +26,10 @@ UDPSocket::UDPSocket(int port){
     memset((void*)&serverAddress, 0, sizeof(serverAddress));
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_addr.s_addr = INADDR_ANY;
-    serverAddress.sin_port = htons(port);
+    serverAddress.sin_port = htons(sPort);
 
     // Bind the socket to the server address
-    if (bind(socket_, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0) {
+    if (bind(socketFD_, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0) {
         throw("Failed to open socket");
     }
 
@@ -58,15 +62,8 @@ void UDPSocket::transmissionThreadHandler(void) {
         ssize_t bytesRead = recvfrom(socket_, buffer, sizeof(buffer), 0, (struct sockaddr *)&clientAddress, &clientAddressLength);
         
         if (bytesRead > 0) {
-            // Process the received data
-            // ...
-            
-            // Call the reception callback
-            if (receptionCallback) {
-                receptionCallback();
-            }
+            // Fire the signal to notify data has been received
+            onDataReceived(reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(bytesRead));  // Emit the data received signal
         }
-
-        // Fire the signal notify data has been received
     }
 }

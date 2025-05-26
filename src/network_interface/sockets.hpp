@@ -7,6 +7,8 @@
 #include <functional>
 #include <thread>
 
+#include <boost/signals2.hpp> // Added for boost signals
+
 
 class Sockets {
 public:
@@ -22,7 +24,7 @@ public:
         return true;   
     }
 
-    bool setOnReceiveCallback(std::function<void(void)> callback=nullptr) {
+    bool setOnReceiveCallback(std::function<void(const uint8_t* data, size_t length)> callback=nullptr) {
         if (!callback) {
             return false;
         }
@@ -38,11 +40,15 @@ public:
 protected:
     bool threadCanRun = true;
 
-    int port_ = -1;
+    int sport_ = -1;
+    int dport_ = -1;
     int socketFD_ = -1;
 
     std::thread transmissionThread;
-    std::function<void(void)> receptionCallback = nullptr;   
+    std::function<void(const uint8_t* data, size_t length)> receptionCallback = nullptr;
+    
+    // Signal to notify when data is received
+    boost::signals2::signal<void(const uint8_t* data, size_t length)> onDataReceived;
 };
 
 

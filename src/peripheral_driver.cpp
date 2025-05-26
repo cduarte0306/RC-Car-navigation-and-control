@@ -16,7 +16,7 @@
 
 
 PeripheralCtrl::PeripheralCtrl():
-speed(1000000),
+speed(100000),
 bitsPerWord(8) {
 
 }
@@ -50,18 +50,95 @@ bool PeripheralCtrl::doDetectDevice(void) {
     uint8_t errCount = 0;
     val_type_t data;
     
-    while( !this->xfer(&data)) {
-        if ( errCount > MAX_ATTEMPT_COUNT ) {
-            return false;
+    for (int i = 0; i < MAX_ATTEMPT_COUNT; i ++) {
+        ret = this->xfer(&data, REG_NOOP);
+        if (!ret) {
+            continue;
         }
+        
+        this->isDeviceConnected_ = true;
     }
 
+    ret = this->xfer(&data, REG_VER_MAJOR);
+    if (!ret) {
+        std::cerr << "Failed to read version major register." << std::endl;
+        return false;
+    }
+    this->psocData.version_major.u8 = data.u8;  // Fixed assignment
+
+    ret = this->xfer(&data, REG_VER_MINOR);
+    if (!ret) {
+        std::cerr << "Failed to read version minor register." << std::endl;
+        return false;
+    }
+    this->psocData.version_minor.u8 = data.u8;  // Fixed assignment
+
+    ret = this->xfer(&data, REG_VER_BUILD);
+    if (!ret) {
+        std::cerr << "Failed to read version build register." << std::endl;
+        return false;
+    }
+    this->psocData.version_build.u8 = data.u8;  // Fixed assignment
+
+    std::cout << "Peripheral controller detected: "
+              << "Version " << static_cast<int>(this->psocData.version_major.u8) << "."  // Fixed static_cast
+              << static_cast<int>(this->psocData.version_minor.u8) << "."  // Fixed static_cast
+              << static_cast<int>(this->psocData.version_build.u8) << std::endl;  // Fixed static_cast
     return true;
 }
 
 
+/**
+ * @brief Read data from the peripheral controller
+ * 
+ * @param psocData Reference to the psocDataStruct to fill with data
+ * @return int 0 on success, -1 on failure
+ */
+int PeripheralCtrl::readData(psocDataStruct& data) {
+    if (!this->isDeviceConnected_) {
+        std::cerr << "Peripheral controller not connected." << std::endl;
+        return -1;
+    }
+    
+    bool ret = this->xfer(&data.speed, REG_SPEED);
+    if (!ret) {
+        std::cerr << "Failed to read speed register." << std::endl;
+        return -1;
+    }
+
+    ret = this->xfer(&data.frontDistance, REG_FRONT_DISTANCE);
+    if (!ret) {
+        std::cerr << "Failed to read front distance register." << std::endl;
+        return -1;
+    }
+
+    ret = this->xfer(&data.leftDistance, REG_LEFT_DISTANCE);
+    if (!ret) {
+        std::cerr << "Failed to read left distance register." << std::endl;
+        return -1;
+    }
+
+    ret = this->xfer(&data.rightDistance, REG_RIGHT_DISTANCE);
+    if (!ret) {
+        std::cerr << "Failed to read right distance register." << std::endl;
+        return -1;
+    }
+
+    data.version_major = this->psocData.version_major;
+    data.version_minor = this->psocData.version_minor;
+    data.version_build = this->psocData.version_build;
+    return 0;
+}
+
+
+/**
+ * @brief Configure the SPI device
+ * 
+ * @return true Configuration successful
+ * @return false Configuration failed
+ */
 bool PeripheralCtrl::configSPI(void) {
-    std::string spiDev("/dev/spidev1.0");  // <-- include .0 for CS0
+    std::string spiDev("/dev/spidev0.0");  // <-- include .0 for CS0
     this->spiFd = open(spiDev.c_str(), O_RDWR);
     if (this->spiFd < 0) {
         std::cerr << "Failed to open SPI device: " << strerror(errno) << std::endl;
@@ -93,26 +170,35 @@ bool PeripheralCtrl::configSPI(void) {
         return false;
     }
 
+    uint32_t actual_speed;
+    if (ioctl(this->spiFd, SPI_IOC_RD_MAX_SPEED_HZ, &actual_speed) == 0) {
+        std::cout << "SPI actual speed set to: " << actual_speed << " Hz" << std::endl;
+    } else {
+        std::cerr << "Failed to read back SPI speed." << std::endl;
+    }
+
     std::cout << "SPI device configured successfully." << std::endl;
     return true;
 }
 
 
-
 /**
- * @brief 
+ * @brief Transfer data to the peripheral controller
  * 
- * @param data 
- * @return true 
- * @return false 
+ * @param data Pointer to the data structure to transfer
+ * @return true Transfer successful
+ * @return false Transfer failed
  */
-bool PeripheralCtrl::xfer(val_type_t* data) {
+bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg) {
     if (data == nullptr) {
         return false;
     }
 
     bool ret;
     PeripheralCtrl::spiTransactionStruct dataOut;
+    dataOut.ack = 0x00;
+    dataOut.transactionType = 0xFF;
+    dataOut.reg = reg;
     dataOut.data.u32 = data->u32;
 
     ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));

@@ -14,3 +14,8 @@ set(SOURCE  main.cpp
             )
 
 add_executable(${PROJECT_NAME} ${SOURCE})
+
+# Add this near the top
+target_include_directories(rc-car-nav PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/json/include
+)

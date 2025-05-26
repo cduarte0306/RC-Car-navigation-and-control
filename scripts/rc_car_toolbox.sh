@@ -18,6 +18,6 @@ ssh root@${NANO_IP} "
 "
 
 echo "Starting gdbserver on Nano..."
-ssh root@${NANO_IP} "nohup gdbserver :2345 ${TARGET_DIR}/${APP_NAME} >/dev/null 2>&1 &"
+ssh root@${NANO_IP} "nohup gdbserver :2345 ${TARGET_DIR}/${APP_NAME} >${TARGET_DIR}/gdbserverlog 2>&1 &"
 
 # === DONE ===

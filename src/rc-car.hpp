@@ -28,7 +28,9 @@ private:
     std::thread mainThread;
 
 private:
+    void transmitTelemetryData(void);
     void configInterfaceProcess(void);
+    void rcCarThread(void);
 };
 
 
