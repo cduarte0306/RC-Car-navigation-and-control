@@ -8,8 +8,6 @@
 
 class PeripheralCtrl {
 public:
-    
-
     typedef struct {
         val_type_t version_major;   // Major version
         val_type_t version_minor;   // Minor version
@@ -20,6 +18,11 @@ public:
         val_type_t rightDistance;  // Distance in mm
     } psocDataStruct;
 
+    typedef enum
+    {
+        MANUAL,
+        AUTOMATIC,
+    } driveModes;
 public:
     PeripheralCtrl();
     ~PeripheralCtrl();
@@ -28,6 +31,9 @@ public:
     bool doConfigureDevice(void);
     bool doDetectDevice(uint32_t& version);
     int readData(psocDataStruct& data);
+    int setMotorState(bool state);
+    int setDriveMode(bool state);
+    int setPIParams(float p, float i, float d);
 
 private:
     typedef enum
@@ -41,7 +47,17 @@ private:
         REG_LEFT_DISTANCE,
         REG_RIGHT_DISTANCE,
         REG_RO_END
-    } registerEnums;
+    } registerEnumsReadOnly;
+
+    typedef enum
+    {
+        REG_SET_MOTOR_STATUS = REG_RO_END,
+        REG_SPEED_SETPOINT,
+        REG_PID_P,
+        REG_PID_I,
+        REG_PID_D,
+        REG_WR_END,
+    } registerEnumReadWrites;
 
     typedef struct __attribute__((__packed__))
     {

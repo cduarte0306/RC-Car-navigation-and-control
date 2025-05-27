@@ -91,6 +91,80 @@ bool PeripheralCtrl::doDetectDevice(uint32_t& version) {
 
 
 /**
+ * @brief Set the drive mode of the peripheral controller
+ * 
+ * @param state true for forward, false for reverse
+ * @return int 0 on success, -1 on failure
+ */
+int PeripheralCtrl::setMotorState(bool state) {
+    bool ret;
+    val_type_t data;
+
+    data.u8 = state;
+    ret = this->xfer(&data, PeripheralCtrl::REG_SET_MOTOR_STATUS);
+    if (!ret) {
+        return -1;
+    }
+
+    return 0;
+}
+
+
+/**
+ * @brief Set the drive mode of the peripheral controller
+ * 
+ * @param state true for automatic, false for manual
+ * @return int 0 on success, -1 on failure
+ */
+int PeripheralCtrl::setDriveMode(bool state) {
+    bool ret;
+    val_type_t data;
+
+    data.u8 = state ? 1 : 0;  // Assuming 1 for forward, 0 for reverse
+    ret = this->xfer(&data, PeripheralCtrl::REG_SPEED_SETPOINT);
+    if (!ret) {
+        return -1;
+    }
+
+    return 0;
+}
+
+
+/**
+ * @brief Set the PID parameters for the peripheral controller
+ * 
+ * @param p Proportional gain
+ * @param i Integral gain
+ * @param d Derivative gain
+ * @return int 0 on success, -1 on failure
+ */
+int PeripheralCtrl::setPIParams(float p, float i, float d) {
+    bool ret;
+    val_type_t data;
+
+    data.f32 = p;
+    ret = this->xfer(&data, PeripheralCtrl::REG_PID_P);
+    if (!ret) {
+        return -1;
+    }
+
+    data.f32 = i;
+    ret = this->xfer(&data, PeripheralCtrl::REG_PID_I);
+    if (!ret) {
+        return -1;
+    }
+
+    data.f32 = d;
+    ret = this->xfer(&data, PeripheralCtrl::REG_PID_D);
+    if (!ret) {
+        return -1;
+    }
+
+    return 0;
+}
+
+
+/**
  * @brief Read data from the peripheral controller
  * 
  * @param psocData Reference to the psocDataStruct to fill with data

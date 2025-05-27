@@ -24,14 +24,7 @@ public:
         return true;   
     }
 
-    bool setOnReceiveCallback(std::function<void(const uint8_t* data, size_t length)> callback=nullptr) {
-        if (!callback) {
-            return false;
-        }
-        
-        this->receptionCallback = callback;
-        return true;
-    }
+    boost::signals2::signal<void(const uint8_t* data, size_t length)> onDataReceived;
 
     virtual void transmissionThreadHandler(void) {
         
@@ -45,10 +38,8 @@ protected:
     int socketFD_ = -1;
 
     std::thread transmissionThread;
-    std::function<void(const uint8_t* data, size_t length)> receptionCallback = nullptr;
     
     // Signal to notify when data is received
-    boost::signals2::signal<void(const uint8_t* data, size_t length)> onDataReceived;
 };
 
 
