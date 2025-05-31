@@ -101,8 +101,17 @@ bool UDPSocket::transmit(uint8_t* pBuf, size_t length) {
 
     // Set up the destination address
     struct sockaddr_in destAddress;
-    memset((void*)&destAddress, 0, sizeof(destAddress));
+    std::memcpy(&destAddress, &lastClientAddress, sizeof(destAddress));
+
     destAddress.sin_family = AF_INET;
+    destAddress.sin_port = htons(dport_);
+    destAddress.sin_addr = this->lastClientAddress.sin_addr;
+    // Send the data
+    ssize_t bytesSent = sendto(socketFD_, pBuf, length, 0, (struct sockaddr *)&destAddress, sizeof(destAddress));
+    if (bytesSent < 0) {
+        perror("sendto");
+        return false;
+    }
     
     return true;
 }

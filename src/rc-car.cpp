@@ -30,14 +30,13 @@ RcCar::RcCar( void ) {
 
     this->commandServer = new Network::UDPSocket(TELEMETRY_PORT);
     this->commandServer->onDataReceived.connect(
-        boost::bind(&RcCar::processCommand, this)
+        boost::bind(&RcCar::processCommand, this, _1, _2)
     );
 
     // Open up the configuration port. This is a LAN port that is used to configure items such as 
     // the wifi access point.
     this->configurationInterfaceThread = std::thread(&RcCar::configInterfaceProcess, this);
     this->mainThread = std::thread(&RcCar::rcCarThread, this);
-    
 }
 
 
@@ -116,26 +115,24 @@ void RcCar::processCommand(const uint8_t* pData, size_t length) {
     switch(clientData->payload.command) {
         case CMD_NOOP:
             // No operation command, do nothing
-            reply.state = 0; // Success
+            reply.state = true; // Success
             break;
 
         case CMD_FWD_DIR:
-            reply.state = 1; // Example state for success
+            reply.state = true; // Example state for success
             break;
 
         case CMD_STEER:
             // Handle steering command
-            reply.state = 2; // Example state for success
+            reply.state = true; // Example state for success
             break;
 
         default:
             // Unknown command, set error state
-            reply.state = 255; // Error state
+            reply.state = true; // Error state
             break;
     }
 
-    // Process the command data here
-    // For example, you can parse the command and execute actions on the car
-    std::cout << "Received command of length: " << length << std::endl;
-    // Add command processing logic here
+    // Prepare the reply
+    this->commandServer->transmit(reinterpret_cast<uint8_t*>(&reply), sizeof(reply));
 }

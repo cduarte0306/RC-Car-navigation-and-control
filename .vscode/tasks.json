@@ -10,15 +10,18 @@
       "detail": "Invokes the CMake Tools build"
     },
     {
-      "label": "Upload and Start GDBServer",
+      "label": "Run GDB Server (QEMU - Local)",
       "type": "shell",
-      "dependsOn": ["CMake: Build"],
       "command": "${workspaceFolder}/scripts/rc_car_toolbox.sh",
-      "problemMatcher": [],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      }
+      "args": ["local"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Run GDB Server (Jetson - Remote)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/rc_car_toolbox.sh",
+      "args": ["remote"],
+      "problemMatcher": []
     }
   ]
 }
