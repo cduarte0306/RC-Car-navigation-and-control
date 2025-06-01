@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CMake: Build",
+      "type": "shell",
+      "command": "cmake --build build",  // assumes your build directory is called 'build'
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Invokes the CMake Tools build"
+    },
+    {
+      "label": "Run GDB Server (QEMU - Local)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/rc_car_toolbox.sh",
+      "args": ["local"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Run GDB Server (Jetson - Remote)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/rc_car_toolbox.sh",
+      "args": ["remote"],
+      "problemMatcher": []
+    }
+  ]
+}
