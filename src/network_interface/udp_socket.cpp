@@ -1,6 +1,7 @@
 #include "udp_socket.hpp"
 #include "sockets.hpp"
 #include <functional>
+#include <ostream>
 #include <regex>
 #include <sys/socket.h>
 #include <ifaddrs.h>
@@ -35,12 +36,14 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
         throw std::runtime_error("Failed to get network interfaces");
     }
 
+    std::cout << "Available interfaces:\n";
     std::string ipAddress;
     for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
         if (ifa->ifa_addr == nullptr) continue;
 
         if (ifa->ifa_addr->sa_family == AF_INET &&
             std::string(ifa->ifa_name) == "ens33") {
+            std::cout << ifa->ifa_name << std::endl;
             char host[NI_MAXHOST];
             int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
                                 host, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);

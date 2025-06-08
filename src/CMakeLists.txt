@@ -11,6 +11,7 @@ set(SOURCE  main.cpp
             peripheral_driver.hpp
             network_interface/udp_socket.hpp
             network_interface/udp_socket.cpp
+            gps_interface/gps_interface.cpp
             )
 
 add_executable(${PROJECT_NAME} ${SOURCE})
