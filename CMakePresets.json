@@ -1,13 +1,26 @@
 {
-    "version": 3,
-    "configurePresets": [
-      {
-        "name": "rc-car-poky",
-        "hidden": false,
-        "displayName": "RC Car (Poky Toolchain)",
-        "description": "Cross-compile for Jetson Nano using Poky SDK",
-        "generator": "Ninja",
-        "binaryDir": "${sourceDir}/build"
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "arm",
+      "description": "Cross-compile for ARM using Yocto SDK",
+      "hidden": false,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "/opt/poky/4.0.26/environment-setup-armv8a-poky-linux",
+        "CMAKE_BUILD_TYPE": "Release"
       }
-    ]
+    },
+    {
+      "name": "x86",
+      "description": "Native build for x86_64",
+      "hidden": false,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "TEST": "ON",
+        "GPS_TEST": "ON"
+      }
+    }
+  ]
 }

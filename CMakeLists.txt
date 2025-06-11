@@ -1,20 +1,36 @@
 cmake_minimum_required(VERSION 3.10)
 
-# Set the project name
 project(rc-car-nav)
 
-# Specify the C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-# Find Boost libraries (replace placeholders with actual components)
-find_package(Boost REQUIRED COMPONENTS system filesystem thread)
+option(TEST "Build tests" OFF)
+option(GPS_TEST "Build GPS tests" OFF)
 
-# Add Boost headers globally
-include_directories(${Boost_INCLUDE_DIRS})
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "Debug build detected; adding debug-specific flags.")
+    add_compile_options(-Wall -Wextra -g)
+endif()
 
-# When linking your target:
-# target_link_libraries(rc-car-nav PRIVATE nlohmann_json::nlohmann_json)
-
-# Add the subdirectory containing the bottom-level CMakeLists.txt
-add_subdirectory(src)
+if(TEST)
+    if(GPS_TEST)
+        message(STATUS "Building GPS tests")
+        set(TESTS_DIR ${CMAKE_SOURCE_DIR}/tests/gps)
+        if(EXISTS ${TESTS_DIR}/CMakeLists.txt)
+            add_subdirectory(${TESTS_DIR})
+        else()
+            message(WARNING "GPS tests directory not found: ${TESTS_DIR}")
+        endif()
+    else()
+        message(STATUS "General tests requested (not GPS-specific)")
+        set(TESTS_DIR ${CMAKE_SOURCE_DIR}/tests)
+        if(EXISTS ${TESTS_DIR}/CMakeLists.txt)
+            add_subdirectory(${TESTS_DIR})
+        else()
+            message(WARNING "Tests directory not found: ${TESTS_DIR}")
+        endif()
+    endif()
+else()
+    add_subdirectory(src)
+endif()

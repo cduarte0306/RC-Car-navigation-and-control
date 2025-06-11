@@ -27,6 +27,9 @@ PeripheralCtrl::~PeripheralCtrl() {
 }
 
 
+/**
+ * 
+ */
 bool PeripheralCtrl::doConfigureDevice(void) {
     if (!this->configSPI()) {
         return false;
