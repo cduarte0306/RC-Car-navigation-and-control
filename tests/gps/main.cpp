@@ -13,7 +13,7 @@
 #include <sstream>
 
 
-#define SENTENCE_HEADER "$GNRMC"
+#define SENTENCE_HEADER "GNRMC"
 #define DELIMITER ";"
 
 
@@ -33,15 +33,55 @@ Coordinates coor = {
 };
 
 
+/**
+ * @brief Parse incoming data from the GPS device
+ * 
+ * @param data Pointer to the incoming data
+ * @param length Length of the incoming data
+ * @return int 0 on success, -1 on error
+ */
 int parseIncomingData(const char* data, size_t length) {
     // Example parsing logic, modify as needed
     if (data == nullptr) {
         return -1;
     }
 
-    std::string s = std::string(data);
+    auto asteriskPos = std::string(data).find('*');
+    if (asteriskPos == std::string::npos) {
+        return -2;
+    }
+
+    std::string messageChecksum = std::string(data).substr(asteriskPos + 1, 2);
+    auto startChar =  std::string(data).find('$');
+    if (startChar == std::string::npos) {
+        return -2;
+    }
+
+    std::string s = std::string(data).substr(startChar + 1, asteriskPos - startChar - 1);
+    
+    if (s.length() > length) {
+        return -2;
+    }
+
+    // Calculate checksum
+    unsigned char checksum = 0;
+    for (char c : s) {
+        checksum ^= static_cast<unsigned char>(c);
+    }
+
+    std::stringstream ss_checksum;
+    ss_checksum << std::uppercase << std::hex << (checksum & 0xFF);
+    std::string checksumStr = ss_checksum.str();
+    if (checksumStr.length() == 1) {
+        checksumStr = "0" + checksumStr;
+    }
+
+    if (checksumStr != messageChecksum) {
+        return -2;
+    }
+
     std::vector<std::string> fields;
-    std::stringstream ss(data);
+    std::stringstream ss(s);
     std::string field;
     while (std::getline(ss, field, ',')) {
         fields.push_back(field);
@@ -51,7 +91,6 @@ int parseIncomingData(const char* data, size_t length) {
         return 0;
     }
 
-    std::cout << data << std::endl;
     std::string latitudeMin, latitudeDegrees, longitudeMin, longitudeDegrees;
 
     latitudeDegrees = fields[3].substr(0, 2);
@@ -66,7 +105,6 @@ int parseIncomingData(const char* data, size_t length) {
     coor.longitudeMinutes = std::stof(longitudeMin);
     std::cout << "Latitude: " << coor.latitudeDegrees << "° " << coor.latitudeMinutes << "'\n";
     std::cout << "Longitude: " << coor.longitudeDegrees << "° " << coor.longitudeMinutes << "'\n";
-    // Here you can add more parsing logic as needed
     
     // Return a dummy value
     return 0;
@@ -92,6 +130,8 @@ int main() {
     tcsetattr(fd, TCSANOW, &options);
 
     char buf[512];
+    memset(buf, 0, sizeof(buf));  // Initialize the buffer
+    
     int ret = -1;
 
     while(true) {
@@ -104,8 +144,11 @@ int main() {
 
         ret = parseIncomingData(buf, n);
         if (ret < 0) {
-            std::cerr << "Error parsing incoming data." << std::endl;
+            if (ret == -1)
+                std::cerr << "Error parsing incoming data." << std::endl;
         }
+
+        memset(buf, 0, n);  // Clear the buffer for the next read
 
         // Keep the program running to maintain the serial connection
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
