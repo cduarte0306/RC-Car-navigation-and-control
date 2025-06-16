@@ -12,7 +12,7 @@
       }
     },
     {
-      "name": "x86",
+      "name": "x86-test",
       "description": "Native build for x86_64",
       "hidden": false,
       "generator": "Ninja",
@@ -20,6 +20,15 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "TEST": "ON",
         "GPS_TEST": "ON"
+      }
+    },
+    {
+      "name": "x86",
+      "description": "Native build for x86_64",
+      "hidden": false,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
       }
     }
   ]

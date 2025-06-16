@@ -23,9 +23,9 @@ RcCar::RcCar( void ) {
     uint32_t psocVersion = 0;
     this->isControllerConnected = this->peripherals->doDetectDevice(psocVersion);
     if (this->isControllerConnected) {
-        std::cout << "PSoC version detedcted: " << ((psocVersion >> 16 ) & 0xFF) << "." 
-                                                << ((psocVersion >> 16 ) & 0xFF) << "."
-                                                << (psocVersion & 0xFF);
+        std::cout << "PSoC version detected: " << ((psocVersion >> 16 ) & 0xFF) << "." 
+                                                << ((psocVersion >> 8 ) & 0xFF) << "."
+                                                << (psocVersion & 0xFF) << std::endl;
     }
 
     this->commandServer = new Network::UDPSocket(TELEMETRY_PORT);
@@ -70,6 +70,8 @@ void RcCar::transmitTelemetryData(void) {
         telemetryJson["rightDistance"] = data.rightDistance.u32;
 
         std::string jsonString = telemetryJson.dump();
+        std::cout << jsonString << std::endl;
+
         this->commandServer->transmit((uint8_t*)jsonString.c_str(), jsonString.size());
     }
 }
@@ -82,7 +84,11 @@ void RcCar::transmitTelemetryData(void) {
 void RcCar::configInterfaceProcess(void) {
     while(threadCanRun) {
         this->transmitTelemetryData();
+#if defined(__aarch64__)
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+#else
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+#endif
     }
 }
 
