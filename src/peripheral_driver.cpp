@@ -10,6 +10,10 @@
 #include <iostream>
 #include <cstring>
 #include <stdexcept>
+#include <termios.h>
+#include <sstream>
+#include <chrono>
+#include <thread>
 
 
 #define MAX_ATTEMPT_COUNT   5u
@@ -18,7 +22,6 @@
 PeripheralCtrl::PeripheralCtrl():
 speed(100000),
 bitsPerWord(8) {
-
 }
 
 
@@ -31,7 +34,7 @@ PeripheralCtrl::~PeripheralCtrl() {
  * 
  */
 bool PeripheralCtrl::doConfigureDevice(void) {
-    if (!this->configSPI()) {
+    if (!this->configSerial()) {
         return false;
     }
 
@@ -54,7 +57,11 @@ bool PeripheralCtrl::doDetectDevice(uint32_t& version) {
     val_type_t data;
     
     for (int i = 0; i < MAX_ATTEMPT_COUNT; i ++) {
+#if defined(__aarch64__)
         ret = this->xfer(&data, REG_NOOP);
+#else
+        ret = this->rdReg(data, REG_NOOP);
+#endif
         if (!ret) {
             continue;
         }
@@ -62,6 +69,7 @@ bool PeripheralCtrl::doDetectDevice(uint32_t& version) {
         this->isDeviceConnected_ = true;
     }
 
+#if defined(__aarch64__)
     ret = this->xfer(&data, REG_VER_MAJOR);
     if (!ret) {
         std::cerr << "Failed to read version major register." << std::endl;
@@ -83,12 +91,32 @@ bool PeripheralCtrl::doDetectDevice(uint32_t& version) {
     }
     this->psocData.version_build.u8 = data.u8;  // Fixed assignment
 
+#else
+    ret = this->rdReg(this->psocData.version_major, REG_VER_MAJOR);
+    if (!ret) {
+        std::cerr << "Failed to read version major register." << std::endl;
+        return false;
+    }
+
+    ret = this->rdReg(this->psocData.version_minor, REG_VER_MINOR);
+    if (!ret) {
+        std::cerr << "Failed to read version minor register." << std::endl;
+        return false;
+    }
+
+    ret = this->rdReg(this->psocData.version_build, REG_VER_BUILD);
+    if (!ret) {
+        std::cerr << "Failed to read version build register." << std::endl;
+        return false;
+    }
+#endif
+
     std::cout << "Peripheral controller detected: "
               << "Version " << static_cast<int>(this->psocData.version_major.u8) << "."  // Fixed static_cast
               << static_cast<int>(this->psocData.version_minor.u8) << "."  // Fixed static_cast
               << static_cast<int>(this->psocData.version_build.u8) << std::endl;  // Fixed static_cast
 
-    version = this->psocData.version_major.u8 << 16 | this->psocData.version_major.u8 << 8 | this->psocData.version_major.u8;
+    version = this->psocData.version_major.u8 << 16 | this->psocData.version_minor.u8 << 8 | this->psocData.version_build.u8;
     return true;
 }
 
@@ -178,8 +206,10 @@ int PeripheralCtrl::readData(psocDataStruct& data) {
         std::cerr << "Peripheral controller not connected." << std::endl;
         return -1;
     }
-    
-    bool ret = this->xfer(&data.speed, REG_SPEED);
+    bool ret;
+
+#if defined(__aarch64__)
+    ret = this->xfer(&data.speed, REG_SPEED);
     if (!ret) {
         std::cerr << "Failed to read speed register." << std::endl;
         return -1;
@@ -202,10 +232,36 @@ int PeripheralCtrl::readData(psocDataStruct& data) {
         std::cerr << "Failed to read right distance register." << std::endl;
         return -1;
     }
+#else
+    ret = this->rdReg(data.speed, REG_SPEED);
+    if (!ret) {
+        std::cerr << "Failed to read speed register." << std::endl;
+        return -1;
+    }
+
+    ret = this->rdReg(data.frontDistance, REG_FRONT_DISTANCE);
+    if (!ret) {
+        std::cerr << "Failed to read front distance register." << std::endl;
+        return -1;
+    }
+
+    ret = this->rdReg(data.leftDistance, REG_LEFT_DISTANCE);
+    if (!ret) {
+        std::cerr << "Failed to read left distance register." << std::endl;
+        return -1;
+    }
+
+    ret = this->rdReg(data.rightDistance, REG_RIGHT_DISTANCE);
+    if (!ret) {
+        std::cerr << "Failed to read right distance register." << std::endl;
+        return -1;
+    }
+#endif
 
     data.version_major = this->psocData.version_major;
     data.version_minor = this->psocData.version_minor;
     data.version_build = this->psocData.version_build;
+
     return 0;
 }
 
@@ -216,7 +272,8 @@ int PeripheralCtrl::readData(psocDataStruct& data) {
  * @return true Configuration successful
  * @return false Configuration failed
  */
-bool PeripheralCtrl::configSPI(void) {
+bool PeripheralCtrl::configSerial(void) {
+#if defined(__aarch64__)
     std::string spiDev("/dev/spidev0.0");  // <-- include .0 for CS0
     this->spiFd = open(spiDev.c_str(), O_RDWR);
     if (this->spiFd < 0) {
@@ -258,6 +315,29 @@ bool PeripheralCtrl::configSPI(void) {
 
     std::cout << "SPI device configured successfully." << std::endl;
     return true;
+
+#else
+    this->serialFd = open("/dev/ttyACM0", O_RDWR | O_NOCTTY); 
+    if (this->serialFd == -1) {
+        perror("open");
+        return 1;
+    }
+
+    struct termios options;
+    tcgetattr(this->serialFd, &options);
+    cfsetispeed(&options, B115200);  // set baud rate
+    cfsetospeed(&options, B115200);
+    options.c_iflag &= ~(IXON | IXOFF | IXANY); // Disable software flow control
+    options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG); // Raw input mode
+    options.c_oflag &= ~OPOST; // Raw output
+    options.c_cc[VMIN] = 1;  // Read at least 1 byte
+    options.c_cc[VTIME] = 1; // 100ms timeout
+
+    tcsetattr(this->serialFd, TCSANOW, &options);
+#endif
+
+    std::cout << "Serial device configured successfully." << std::endl;
+    return true;
 }
 
 
@@ -274,6 +354,7 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg) {
     }
 
     bool ret;
+
     PeripheralCtrl::spiTransactionStruct dataOut;
     dataOut.ack = 0x00;
     dataOut.transactionType = 0xFF;
@@ -286,6 +367,83 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg) {
     }
 
     data->u32 = dataOut.data.u32;
+    return true;
+}
+
+
+/**
+ * @brief Write data to the peripheral controller via serial
+ * 
+ * @param data Data to write
+ * @param reg Register to write to
+ * @return true Write successful
+ * @return false Write failed
+ */
+bool PeripheralCtrl::wrtReg(val_type_t data, uint8_t reg) {
+    if (data.u32 == 0) {
+        return false;
+    }
+
+    std::stringstream ss;
+    ss << "write-cmd-reg " << static_cast<int>(reg) << " " << data.u32 << "\n";
+    ssize_t written = write(this->serialFd, ss.str().c_str(), ss.str().size());
+    if (written < 0) {
+        std::cerr << "Failed to write to serial: " << strerror(errno) << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+
+/**
+ * @brief Read data from the peripheral controller via serial
+ * 
+ * @param data Reference to the data structure to fill with read data
+ * @param reg Register to read from
+ * @return true Read successful
+ * @return false Read failed
+ */
+bool PeripheralCtrl::rdReg(val_type_t& data, uint8_t reg) {
+    int n = 0;
+    tcflush(this->serialFd, TCIOFLUSH);  // Clear both in and out
+    std::stringstream ss;
+    ss << "read-cmd-reg " << static_cast<int>(reg) << "\r\n";
+    std::string cmd = ss.str();
+
+    for (char c : cmd) {
+        write(this->serialFd, &c, 1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    usleep(100000);  // Give time for MCU to respond
+
+    memset(this->serialBuffer, 0, sizeof(this->serialBuffer));
+    n = read(this->serialFd, this->serialBuffer, sizeof(this->serialBuffer));
+    if (n < 0) {
+        std::cerr << "Failed to read from serial: " << strerror(errno) << std::endl;
+        return false;
+    }
+
+    std::string response(this->serialBuffer, n);
+
+    auto pos = response.find("Reg value: ");
+    if (pos == std::string::npos) {
+        std::cerr << "Invalid response from peripheral controller: " << response << std::endl;
+        return false;
+    }
+
+    std::string valueStr = response.substr(pos + std::string("Reg value: ").length());
+    try {
+        data.u32 = std::stoul(valueStr);
+    } catch (const std::invalid_argument& e) {
+        std::cerr << "Invalid data received: " << valueStr << std::endl;
+        return false;
+    } catch (const std::out_of_range& e) {
+        std::cerr << "Data out of range: " << valueStr << std::endl;
+        return false;
+    }
+
     return true;
 }
 

@@ -88,7 +88,11 @@
         "__split_buffer": "cpp",
         "locale": "cpp",
         "__locale": "cpp",
-        "__string": "cpp"
+        "__string": "cpp",
+        "__hash_table": "cpp",
+        "__tree": "cpp",
+        "queue": "cpp",
+        "stack": "cpp"
     },
     "cmake.buildArgs": ["-j16"]
 }

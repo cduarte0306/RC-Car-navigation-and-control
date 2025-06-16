@@ -37,23 +37,40 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
     }
 
     std::cout << "Available interfaces:\n";
+    
+    bool foundInterface = false;
     std::string ipAddress;
     for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
         if (ifa->ifa_addr == nullptr) continue;
 
         if (ifa->ifa_addr->sa_family == AF_INET &&
-            std::string(ifa->ifa_name) == "ens33") {
+
+#if defined(__aarch64__)
+            std::string(ifa->ifa_name) == "wlan") {
+#else
+            std::string(ifa->ifa_name) == "eth0") {
+#endif
             std::cout << ifa->ifa_name << std::endl;
             char host[NI_MAXHOST];
             int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
                                 host, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
             if (s == 0) {
                 ipAddress = host;
+                foundInterface = true;
                 break;
             }
         }
     }
     freeifaddrs(ifaddr);
+
+    if (!foundInterface) {
+#if defined(__aarch64__)
+        std::cerr << "wlan interface not found.\n";
+#else
+        std::cerr << "eth0 interface not found.\n";
+#endif  
+        throw std::runtime_error("interface not found");
+    }
 
     if (ipAddress.empty()) {
         throw std::runtime_error("Could not find IP for interface ens33");
