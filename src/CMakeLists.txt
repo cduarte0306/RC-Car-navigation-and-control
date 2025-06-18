@@ -1,5 +1,3 @@
-set(CMAKE_CXX_STANDARD 11)
-
 # Add debug flags
 set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
@@ -14,6 +12,7 @@ set(SOURCE
     network_interface/udp_socket.hpp
     network_interface/udp_socket.cpp
     gps_interface/gps_interface.cpp
+    navigation.cpp
 )
 
 # Only look for Boost if not cross-compiling
@@ -22,8 +21,14 @@ if(NOT CMAKE_CROSSCOMPILING)
     include_directories(${Boost_INCLUDE_DIRS})
 endif()
 
+include_directories(
+    ${CMAKE_SOURCE_DIR}/external/libosmium/include
+)
+
 # Define the executable
 add_executable(${PROJECT_NAME} ${SOURCE})
+
+target_link_libraries(${PROJECT_NAME} ${Boost_LIBRARIES})
 
 # JSON dependency
 target_include_directories(${PROJECT_NAME} PRIVATE

@@ -10,12 +10,19 @@ public:
 
 public:
     // Example method to get current coordinates
-    virtual void getCoordinates(double& latitude, double& longitude) const = 0;
+    void getCoordinates(double& latitude, double& longitude) {
+        latitude = coordinates.latitudeDegrees + (coordinates.latitudeMinutes / 60.0);
+        longitude = coordinates.longitudeDegrees + (coordinates.longitudeMinutes / 60.0);
+    }
 
 protected:
-    // Placeholder for GPS data, can be extended with more attributes
-    double latitude_ = 0.0;
-    double longitude_ = 0.0;
+    typedef struct {
+        float latitudeDegrees;
+        float latitudeMinutes;
+        float longitudeDegrees;
+        float longitudeMinutes;
+    } Coordinates;
+protected:
 
     int openPort(const char* devPath,
                   int baud = 9600,
@@ -23,9 +30,14 @@ protected:
     void gpsInterface(void);
     int readData(char* pBuf, size_t maxLength);
 
+    int parseIncomingData(char* pBuf, size_t length);
+
 protected:
     std::thread gpsThread_;  // Thread for GPS data processing
     bool threadCanRun_ = true;  // Control flag for the GPS thread
 
-    int fd_ = -1;  // File descriptor for the GPS device
+    Coordinates coordinates = {0.0, 0.0, 0.0, 0.0};
+
+    char buf[256];
+    int fd = -1;  // File descriptor for the GPS device
 };

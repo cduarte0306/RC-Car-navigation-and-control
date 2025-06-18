@@ -7,6 +7,7 @@
 #include "types.h"
 
 #include "network_interface/udp_socket.hpp"
+#include "gps_interface/gps_interface.hpp"
 
 #include <thread>
 
@@ -53,6 +54,8 @@ private:
     Network::UDPSocket* commandServer = nullptr;
     std::thread configurationInterfaceThread;
     std::thread mainThread;
+
+    GPSInterface* gps = nullptr;
 
 private:
     void transmitTelemetryData(void);
