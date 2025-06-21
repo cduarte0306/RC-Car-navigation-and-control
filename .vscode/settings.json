@@ -92,7 +92,9 @@
         "__hash_table": "cpp",
         "__tree": "cpp",
         "queue": "cpp",
-        "stack": "cpp"
+        "stack": "cpp",
+        "strstream": "cpp",
+        "future": "cpp"
     },
     "cmake.buildArgs": ["-j16"]
 }

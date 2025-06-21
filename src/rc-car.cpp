@@ -18,15 +18,15 @@ using namespace boost::placeholders;
 
 RcCar::RcCar( void ) {
     this->peripherals = new PeripheralCtrl();
-    this->gps = new GPSInterface();
+    this->navigation = new Navigation(this->peripherals);
     this->peripherals->doConfigureDevice();
     
     uint32_t psocVersion = 0;
     this->isControllerConnected = this->peripherals->doDetectDevice(psocVersion);
     if (this->isControllerConnected) {
         std::cout << "PSoC version detected: " << ((psocVersion >> 16 ) & 0xFF) << "." 
-                                                << ((psocVersion >> 8 ) & 0xFF) << "."
-                                                << (psocVersion & 0xFF) << std::endl;
+                                               << ((psocVersion >> 8 ) & 0xFF) << "."
+                                               << (psocVersion & 0xFF) << std::endl;
     }
 
     this->commandServer = new Network::UDPSocket(TELEMETRY_PORT);

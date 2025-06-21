@@ -4,3 +4,6 @@
 [submodule "external/libosmium"]
 	path = external/libosmium
 	url = https://github.com/osmcode/libosmium.git
+[submodule "external/protozero"]
+	path = external/protozero
+	url = https://github.com/mapbox/protozero.git

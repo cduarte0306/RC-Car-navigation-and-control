@@ -9,6 +9,8 @@
 #include "network_interface/udp_socket.hpp"
 #include "gps_interface/gps_interface.hpp"
 
+#include "navigation.hpp"
+
 #include <thread>
 
 
@@ -55,7 +57,7 @@ private:
     std::thread configurationInterfaceThread;
     std::thread mainThread;
 
-    GPSInterface* gps = nullptr;
+    Navigation* navigation = nullptr;
 
 private:
     void transmitTelemetryData(void);

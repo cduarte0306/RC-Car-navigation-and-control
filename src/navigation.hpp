@@ -8,11 +8,21 @@
 #include <thread>
 #include <osmium/osm/types.hpp>
 #include <vector>
+#include <string>
+
+#include <osmium/io/any_input.hpp>
+#include <osmium/handler.hpp>
+#include <osmium/visitor.hpp>
+#include <osmium/handler/node_locations_for_ways.hpp>
+#include <osmium/index/map/sparse_mem_array.hpp>
+#include <osmium/geom/haversine.hpp>
+#include <unordered_map>
+#include <limits>
 
 
 class Navigation {
 public:
-    Navigation();
+    Navigation(PeripheralCtrl* peripheralCtrl);;
     ~Navigation();
 
     void startNavigation();
@@ -30,6 +40,9 @@ private:
     std::thread navigationThread_;
 
     std::thread navThread;
+    std::unordered_map<osmium::object_id_type, osmium::Location> node_locations;
+    osmium::object_id_type current_node_id_ = 0;
+    GPSInterface* gps = nullptr;
 
 private:
     struct OSMNode {
@@ -44,6 +57,19 @@ private:
     };
 
     void navigationLoop();
+    void node(const osmium::Node& node);
+
+protected:
+    class SimpleHandler : public osmium::handler::Handler {
+    public:
+        std::unordered_map<osmium::object_id_type, osmium::Location> node_locations;
+
+        void node(const osmium::Node& node) {
+            if (node.location()) {
+                node_locations[node.id()] = node.location();
+            }
+        }
+    };
 };
 
 #endif // NAVIGATION_HPP

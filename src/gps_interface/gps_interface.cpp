@@ -13,13 +13,11 @@
 #define DELIMITER ";"
 
 
-GPSInterface::GPSInterface() {
+GPSInterface::GPSInterface(char* devPath, int baud) {
     // Initialize GPS interface
-    if (openPort("/dev/ttyUSB0", B9600, /*nonBlocking=*/false) < 0) {
+    if (openPort(devPath, baud, /*nonBlocking=*/false) < 0) {
         throw std::runtime_error("Failed to open GPS interface");
     }
-    
-    this->gpsThread_ = std::thread(&GPSInterface::gpsInterface, this);
 }
 
 
@@ -90,10 +88,19 @@ int GPSInterface::parseIncomingData(char* pBuf, size_t length) {
     longitudeDegrees = fields[5].substr(0, 3);
     longitudeMin = fields[5].substr(longitudeDegrees.length(), fields[3].length() - longitudeDegrees.length());
 
-    coordinates.latitudeDegrees = std::stof(latitudeDegrees);
-    coordinates.latitudeMinutes = std::stof(latitudeMin);
-    coordinates.longitudeDegrees = std::stof(longitudeDegrees);
-    coordinates.longitudeMinutes = std::stof(longitudeMin);
+    try {
+        coordinates.latitudeDegrees = std::stof(latitudeDegrees);
+        coordinates.latitudeMinutes = std::stof(latitudeMin);
+        coordinates.longitudeDegrees = std::stof(longitudeDegrees);
+        coordinates.longitudeMinutes = std::stof(longitudeMin);
+    } catch (const std::invalid_argument& e) {
+        std::cerr << "Invalid argument: " << e.what() << std::endl;
+        return -2;
+    } catch (const std::out_of_range& e) {
+        std::cerr << "Out of range: " << e.what() << std::endl;
+        return -2;
+    }
+    
     return 0;
 }
 
@@ -104,28 +111,25 @@ int GPSInterface::parseIncomingData(char* pBuf, size_t length) {
  * This method runs in a separate thread and continuously reads GPS data from the device.
  * It can be extended to parse the GPS data and update the latitude and longitude attributes.
  */
-void GPSInterface::gpsInterface(void) {
+void GPSInterface::gpsDoInterface(double& latitude, double& longitude) {
     // This method would contain the logic to read GPS data from the device
     // For now, we will just simulate reading coordinates
-    while (threadCanRun_) {
-        int n = read(fd, buf, sizeof(buf));
-        if (n < 0) {
-            perror("read");
-        }
-
-        // std::cout << buf << std::endl;
-
-        int ret = parseIncomingData(buf, n);
-        if (ret < 0) {
-            if (ret == -1)
-                std::cerr << "Error parsing incoming data." << std::endl;
-        }
-
-        memset(buf, 0, n);  // Clear the buffer for the next read
-
-        // Keep the program running to maintain the serial connection
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    int n = read(fd, buf, sizeof(buf));
+    if (n < 0) {
+        perror("read");
     }
+
+    int ret = parseIncomingData(buf, n);
+    if (ret < 0) {
+        if (ret == -1)
+            std::cerr << "Error parsing incoming data." << std::endl;
+            throw std::runtime_error("Error parsing incoming data.");
+    }
+
+    memset(buf, 0, n);  // Clear the buffer for the next read
+
+    latitude = coordinates.latitudeDegrees + (coordinates.latitudeMinutes / 60.0);
+    longitude = coordinates.longitudeDegrees + (coordinates.longitudeMinutes / 60.0);
 }
 
 

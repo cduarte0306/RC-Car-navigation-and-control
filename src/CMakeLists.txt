@@ -28,9 +28,19 @@ include_directories(
 # Define the executable
 add_executable(${PROJECT_NAME} ${SOURCE})
 
-target_link_libraries(${PROJECT_NAME} ${Boost_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${Boost_LIBRARIES} 
+    pthread
+    z
+    bz2
+    expat
+)
 
 # JSON dependency
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/external/json/include
+    expat
 )
+
+find_package(EXPAT REQUIRED)
+
+include_directories(${CMAKE_SOURCE_DIR}/external/protozero/include)
