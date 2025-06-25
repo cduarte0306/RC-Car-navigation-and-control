@@ -48,24 +48,13 @@ void Navigation::updateMyLocation(OsmiumHandler& handler, double latitude, doubl
             continue;
         }
 
-        // Iterate through the refence nodes to extract the coordinates
-        for(const auto& nodeRef : way->nodes()) {            
-            // Extract coordinates
-            auto it = handler.node_locations.find(nodeRef.ref());
-            if (it != handler.node_locations.end()) {
-                const osmium::Location& loc = it->second;
-                double lat = loc.lat();
-                double lon = loc.lon();
-                
-                osmium::Location current_loc{lon, lat};
+        osmium::Location current_loc{longitude, latitude};
 
-                for (const auto& [id, loc] : handler.node_locations) {
-                    double dist = osmium::geom::haversine::distance(current_loc, loc);
-                    if (dist < min_distance) {
-                        min_distance = dist;
-                        wayRef = way;
-                    }
-                }
+        for (const auto& [id, loc] : handler.node_locations) {
+            double dist = osmium::geom::haversine::distance(current_loc, loc);
+            if (dist < min_distance) {
+                min_distance = dist;
+                wayRef = way;
             }
         }
     }
@@ -103,7 +92,7 @@ void Navigation::navigationLoop(void) {
             }
 
             break;
-        } while(!read);
+        } while(!read && lat && lon);
 
         // Where am I?
         this->updateMyLocation(handler, lat, lon);
