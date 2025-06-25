@@ -88,19 +88,10 @@ int GPSInterface::parseIncomingData(char* pBuf, size_t length) {
     longitudeDegrees = fields[5].substr(0, 3);
     longitudeMin = fields[5].substr(longitudeDegrees.length(), fields[3].length() - longitudeDegrees.length());
 
-    try {
-        coordinates.latitudeDegrees = std::stof(latitudeDegrees);
-        coordinates.latitudeMinutes = std::stof(latitudeMin);
-        coordinates.longitudeDegrees = std::stof(longitudeDegrees);
-        coordinates.longitudeMinutes = std::stof(longitudeMin);
-    } catch (const std::invalid_argument& e) {
-        std::cerr << "Invalid argument: " << e.what() << std::endl;
-        return -2;
-    } catch (const std::out_of_range& e) {
-        std::cerr << "Out of range: " << e.what() << std::endl;
-        return -2;
-    }
-    
+    coordinates.latitudeDegrees = std::stof(latitudeDegrees);
+    coordinates.latitudeMinutes = std::stof(latitudeMin);
+    coordinates.longitudeDegrees = std::stof(longitudeDegrees);
+    coordinates.longitudeMinutes = std::stof(longitudeMin);
     return 0;
 }
 
@@ -121,9 +112,10 @@ void GPSInterface::gpsDoInterface(double& latitude, double& longitude) {
 
     int ret = parseIncomingData(buf, n);
     if (ret < 0) {
-        if (ret == -1)
+        if (ret == -1) {
             std::cerr << "Error parsing incoming data." << std::endl;
             throw std::runtime_error("Error parsing incoming data.");
+        }
     }
 
     memset(buf, 0, n);  // Clear the buffer for the next read
@@ -145,6 +137,10 @@ int GPSInterface::openPort(const char* devPath, int baud, bool nonBlocking) {
     int flags = O_RDWR | O_NOCTTY;
     if (nonBlocking) flags |= O_NONBLOCK;
     fd = ::open(devPath, flags);
+    if (fd < 0 && errno == EINTR) {
+        // Retry if interrupted by signal
+        fd = ::open(devPath, flags);
+    }
     if (fd < 0) { perror("open"); return -1; }
 
     termios tty{};

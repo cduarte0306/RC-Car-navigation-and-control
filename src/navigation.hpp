@@ -9,6 +9,7 @@
 #include <osmium/osm/types.hpp>
 #include <vector>
 #include <string>
+#include <iostream>
 
 #include <osmium/io/any_input.hpp>
 #include <osmium/handler.hpp>
@@ -29,22 +30,50 @@ public:
     void stopNavigation();
     void updatePosition(double latitude, double longitude);
     void getCurrentPosition(double& latitude, double& longitude) const;
-private:
+protected:
     PeripheralCtrl* peripheralCtrl_;
     GPSInterface* gpsInterface_;
 
     double currentLatitude_;
     double currentLongitude_;
 
+    double lastLatDiff = -1;
+    double lastLonDiff = -1;
+
     bool isNavigating_;
     std::thread navigationThread_;
+
+    char currentLocationBuff[256] = {0};
 
     std::thread navThread;
     std::unordered_map<osmium::object_id_type, osmium::Location> node_locations;
     osmium::object_id_type current_node_id_ = 0;
     GPSInterface* gps = nullptr;
 
-private:
+protected:
+    // std::vector<osmium::Way> ways; 
+
+    struct OsmiumHandler : public osmium::handler::Handler {
+        int numNodes, numWays = 0;
+
+        std::unordered_map<osmium::object_id_type, osmium::Location> node_locations;
+        std::vector<const osmium::Way*> ways; // Store pointers to all parsed ways
+
+        void node(const osmium::Node& node) {
+            this->numNodes++;
+
+            if (node.location()) {
+                node_locations[node.id()] = node.location();
+            }
+        }
+
+        void way(const osmium::Way& way) {
+            this->numWays ++;
+            this->ways.push_back(&way); // Store pointer to the way
+        }
+    };
+
+protected:
     struct OSMNode {
         osmium::object_id_type id;
         double lat;
@@ -58,18 +87,7 @@ private:
 
     void navigationLoop();
     void node(const osmium::Node& node);
-
-protected:
-    class SimpleHandler : public osmium::handler::Handler {
-    public:
-        std::unordered_map<osmium::object_id_type, osmium::Location> node_locations;
-
-        void node(const osmium::Node& node) {
-            if (node.location()) {
-                node_locations[node.id()] = node.location();
-            }
-        }
-    };
+    void updateMyLocation(OsmiumHandler& handler, double latitude, double longitude);
 };
 
 #endif // NAVIGATION_HPP
