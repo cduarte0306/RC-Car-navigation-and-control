@@ -97,21 +97,6 @@ void Navigation::navigationLoop(void) {
         // Where am I?
         this->updateMyLocation(handler, lat, lon);
 
-        osmium::Location current_loc{lon, lat};
-        osmium::object_id_type closest_node_id = 0;
-        double min_distance = std::numeric_limits<double>::max();
-
-        for (const auto& [id, loc] : handler.node_locations) {
-            double dist = osmium::geom::haversine::distance(current_loc, loc);
-            if (dist < min_distance) {
-                min_distance = dist;
-                closest_node_id = id;
-            }
-        }
-
-        // Save for pathfinding later
-        this->current_node_id_ = closest_node_id;
-
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
