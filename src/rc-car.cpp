@@ -18,7 +18,7 @@ using namespace boost::placeholders;
 
 RcCar::RcCar( void ) {
     this->peripherals = new PeripheralCtrl();
-    this->navigation = new Navigation(this->peripherals);
+    this->navigation = new GPS::Navigation(this->peripherals);
     this->peripherals->doConfigureDevice();
     
     uint32_t psocVersion = 0;

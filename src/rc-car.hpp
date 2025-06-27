@@ -57,7 +57,7 @@ private:
     std::thread configurationInterfaceThread;
     std::thread mainThread;
 
-    Navigation* navigation = nullptr;
+    GPS::Navigation* navigation = nullptr;
 
 private:
     void transmitTelemetryData(void);

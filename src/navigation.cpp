@@ -9,9 +9,10 @@
 #include <sstream>
 
 
+namespace GPS {
 Navigation::Navigation(PeripheralCtrl* peripheralCtrl) 
     : peripheralCtrl_(peripheralCtrl), gpsInterface_(new GPSInterface("/dev/ttyUSB0", 9600)),
-      currentLatitude_(0.0), currentLongitude_(0.0), isNavigating_(false) {
+      currentLatitude_(0.0), currentLongitude_(0.0), isNavigating_(false), handler(this->availableWays, this->poiMapper) {
 
     this->navThread = std::thread(&Navigation::navigationLoop, this);
 }
@@ -70,7 +71,6 @@ void Navigation::updateMyLocation(OsmiumHandler& handler, double latitude, doubl
 void Navigation::navigationLoop(void) {
     osmium::io::Reader reader("/opt/map.osm");
 
-    OsmiumHandler handler;
     osmium::apply(reader, handler);
     reader.close();
     
@@ -82,17 +82,14 @@ void Navigation::navigationLoop(void) {
 
     // Read from the GPS device
     while (true) {
-        bool read = false;
-        do {
-            try {
-                this->gpsInterface_->gpsDoInterface(lat, lon); 
-                read = true;
-            } catch (const std::exception& e) {
-                continue; // Retry on error
-            }
+        try {
+            this->gpsInterface_->gpsDoInterface(lat, lon); 
+        } catch (const std::exception& e) {
+            continue; // Retry on error
+        }
 
-            break;
-        } while(!read && lat && lon);
+        if ( ! lat || !lon )
+            continue;
 
         // Where am I?
         this->updateMyLocation(handler, lat, lon);
@@ -102,3 +99,5 @@ void Navigation::navigationLoop(void) {
 
     reader.close();
 }
+}
+
