@@ -11,6 +11,8 @@
 #include <string>
 #include <sstream>
 #include <iostream>
+#include <mutex>
+#include <atomic>
 
 #include <osmium/io/any_input.hpp>
 #include <osmium/handler.hpp>
@@ -46,8 +48,10 @@ namespace GPS {
         Navigation(PeripheralCtrl* peripheralCtrl);
         ~Navigation();
 
-        void startNavigation();
+        void calculatePath(Poi& targetLocation);
+        void startNavigation(Poi& targetLocation);
         void stopNavigation();
+        void getDirection();
         void updatePosition(double latitude, double longitude);
         void getCurrentPosition(double& latitude, double& longitude) const;
 
@@ -70,7 +74,7 @@ namespace GPS {
         
     protected:
         PeripheralCtrl* peripheralCtrl_;
-        GPSInterface* gpsInterface_ = nullptr;
+        GPSInterface* gpsDev = nullptr;
 
         double currentLatitude_;
         double currentLongitude_;
@@ -80,18 +84,25 @@ namespace GPS {
 
         bool isNavigating_;
         std::thread navigationThread_;
+        std::thread wayfinder;
 
         char currentLocationBuff[256] = {0};
 
         std::thread navThread;
         std::unordered_map<osmium::object_id_type, osmium::Location> node_locations;
         osmium::object_id_type current_node_id_ = 0;
-        GPSInterface* gps = nullptr;
         std::vector<std::string> availableWays;
         std::unordered_map<std::string, Poi> poiMapper;
 
+        std::mutex devGpsMutex;
+        std::atomic<bool> threadRun = {true};
+
     protected:
-        // std::vector<osmium::Way> ways; 
+        // std::vector<osmium::Way> ways;
+        struct PathNode {
+            
+            std::vector<GPS::Navigation::PathNode*> neighborsNodes;
+        };
 
         struct OsmiumHandler : public osmium::handler::Handler {
             OsmiumHandler(std::vector<std::string>& waysContainer, std::unordered_map<std::string, Poi>& poisContainer)
@@ -146,9 +157,9 @@ namespace GPS {
         };
 
         OsmiumHandler handler;
-        void navigationLoop();
+        void myLocationUpdtaeLoop();
         void node(const osmium::Node& node);
-        void updateMyLocation(OsmiumHandler& handler, double latitude, double longitude);
+        void updateMyLocation(double latitude, double longitude);
     };
 
 };
