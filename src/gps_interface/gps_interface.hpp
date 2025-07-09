@@ -16,7 +16,7 @@ public:
         float longitudeMinutes;
     } Coordinates;
 
-    void gpsDoInterface(double& latitude, double& longitude);
+    int gpsDoInterface(double& latitude, double& longitude);
 
 protected:
 

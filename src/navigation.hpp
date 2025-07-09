@@ -13,6 +13,7 @@
 #include <iostream>
 #include <mutex>
 #include <atomic>
+#include <optional>
 
 #include <osmium/io/any_input.hpp>
 #include <osmium/handler.hpp>
@@ -28,7 +29,7 @@
 namespace GPS {
     class Poi {
         public:
-            Poi()=default;
+            Poi(const osmium::Way* way = nullptr) : way(way) { }
 
             std::string& operator[](const std::string& key) {
                 return poiContainer[key];  // creates if not exists
@@ -39,8 +40,14 @@ namespace GPS {
                 if (it != poiContainer.end()) return it->second;
                 throw std::out_of_range("Key not found");
             }
+            
+            const osmium::Way* getWay() const {
+                return way;
+            }
+
         private:
             std::unordered_map<std::string, std::string> poiContainer; 
+            const osmium::Way* way = nullptr;
     };
 
     class Navigation {
@@ -54,6 +61,7 @@ namespace GPS {
         void getDirection();
         void updatePosition(double latitude, double longitude);
         void getCurrentPosition(double& latitude, double& longitude) const;
+        void updateMyLocation(void);
 
         void getCurrentAddress(std::string& currentLoc) const {
             currentLoc = std::string(currentLocationBuff);
@@ -73,36 +81,6 @@ namespace GPS {
         }
         
     protected:
-        PeripheralCtrl* peripheralCtrl_;
-        GPSInterface* gpsDev = nullptr;
-
-        double currentLatitude_;
-        double currentLongitude_;
-
-        double lastLatDiff = -1;
-        double lastLonDiff = -1;
-
-        bool isNavigating_;
-        std::thread navigationThread_;
-        std::thread wayfinder;
-
-        char currentLocationBuff[256] = {0};
-
-        std::thread navThread;
-        std::unordered_map<osmium::object_id_type, osmium::Location> node_locations;
-        osmium::object_id_type current_node_id_ = 0;
-        std::vector<std::string> availableWays;
-        std::unordered_map<std::string, Poi> poiMapper;
-
-        std::mutex devGpsMutex;
-        std::atomic<bool> threadRun = {true};
-
-    protected:
-        // std::vector<osmium::Way> ways;
-        struct PathNode {
-            
-            std::vector<GPS::Navigation::PathNode*> neighborsNodes;
-        };
 
         struct OsmiumHandler : public osmium::handler::Handler {
             OsmiumHandler(std::vector<std::string>& waysContainer, std::unordered_map<std::string, Poi>& poisContainer)
@@ -113,6 +91,7 @@ namespace GPS {
             int numNodes, numWays = 0;
 
             std::unordered_map<osmium::object_id_type, osmium::Location> node_locations;
+            std::unordered_map<osmium::object_id_type, const osmium::Way*> waysMap;
             std::vector<const osmium::Way*> ways; // Store pointers to all parsed ways
 
             void node(const osmium::Node& node) {
@@ -137,29 +116,140 @@ namespace GPS {
                     this->waysContainer_.push_back(wayStream.str());
                     
                     // Add the way and it's totag to the map
-                    Poi thisPoi;
+                    Poi thisPoi(&way);
                     thisPoi["housenumber"] = way.tags()["addr:housenumber"];
+                    thisPoi["street-addr"] = way.tags()["addr:street"];
+                    thisPoi["full-addr"]   = wayStream.str();
+                    
                     this->poisContainer_[wayStream.str()] = thisPoi;
                 }
+
+                this->waysMap[way.id()] = &way;
             }
         };
 
-    protected:
         struct OSMNode {
             osmium::object_id_type id;
             double lat;
             double lon;
         };
 
-        struct Way {
-            std::vector<osmium::object_id_type> node_ids;
+        struct StreetInfo;
+
+        struct IntersectionDescriptor {
+            std::string intersectionStreetName;
+            osmium::object_id_type id;
+            const osmium::Way* way = nullptr;
+            StreetInfo* street = nullptr; // Remove 'struct' and use the correct scope
+        };
+
+        struct StreetInfo {
+            std::vector<osmium::Location> nodeLocations; 
+            std::vector<osmium::object_id_type> nodeIds;  // All nodes in the street
+            const osmium::Way* way;
+            std::unordered_map<osmium::object_id_type, IntersectionDescriptor> intersections;
+
+            std::string streetName = "";
             std::string highway_type;
+            double streetLength;
+
+            // Returns true if the node exists in this street, false otherwise
+            bool nodeExists(const osmium::object_id_type node) const {
+                for(const auto& nodeInst : this->nodeIds) {
+                    if (nodeInst == node) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            std::optional<const osmium::object_id_type*> getClosestNode(OsmiumHandler& handler, osmium::Location& loc) const {
+                const osmium::object_id_type* closestNodeId = nullptr;
+                double min_distance = std::numeric_limits<double>::max();
+                for (const auto& [id, nodeloc] : handler.node_locations) {
+                    double dist = osmium::geom::haversine::distance(loc, nodeloc);
+                    if (dist < min_distance) {
+                        min_distance = dist;
+                        closestNodeId = &id;
+                    }
+                }
+
+                if (!this->nodeExists(*closestNodeId)) {
+                    return std::nullopt;
+                }
+
+                return closestNodeId;
+            }
+        };       
+
+        struct Paths {
+            const StreetInfo* way;
+            struct Paths* prev;
+            struct Paths* next;
+        };
+
+        // std::vector<osmium::Way> ways;
+        struct PathNode {
+            
+            std::vector<GPS::Navigation::PathNode*> neighborsNodes;
         };
 
         OsmiumHandler handler;
+        Paths* path = nullptr;
         void myLocationUpdtaeLoop();
         void node(const osmium::Node& node);
-        void updateMyLocation(double latitude, double longitude);
+
+        PeripheralCtrl* peripheralCtrl_;
+        GPSInterface* gpsDev = nullptr;
+
+        double latitude;
+        double longitude;
+
+        double lastLatDiff = -1;
+        double lastLonDiff = -1;
+
+        bool isNavigating_;
+        std::thread navigationThread_;
+        std::thread wayfinder;
+
+        char currentLocationBuff[256] = {0};
+
+        std::thread navThread;
+        std::unordered_map<osmium::object_id_type, osmium::Location> node_locations;
+        std::unordered_map<std::string, GPS::Navigation::StreetInfo> streetInfoMap;
+    
+        std::vector<GPS::Navigation::StreetInfo> directions;
+
+        osmium::object_id_type current_node_id_ = 0;
+        std::vector<std::string> availableWays;
+        std::unordered_map<std::string, Poi> poiMapper;
+
+        std::mutex devGpsMutex;
+        std::atomic<bool> threadRun = {true};
+
+        
+        /**
+         * @brief Get the Transverse Distance of a road
+         * 
+         * @param way 
+         * @return double 
+         */
+        inline double getTransverseDistance(const osmium::Way* way) const {
+            if (!way || way->nodes().size() < 2) return 0.0;
+            double total = 0.0;
+            auto it = way->nodes().begin();
+            auto prev = it++;
+            for (; it != way->nodes().end(); ++it, ++prev) {
+                auto loc1 = this->handler.node_locations.find(prev->ref());
+                auto loc2 = this->handler.node_locations.find(it->ref());
+                if (loc1 != this->handler.node_locations.end() && loc2 != this->handler.node_locations.end()) {
+                    total += osmium::geom::haversine::distance(loc1->second, loc2->second);
+                }
+            }
+            return total;
+        }
+
+        int parseMap(void);
     };
 
 };

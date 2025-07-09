@@ -88,10 +88,16 @@ int GPSInterface::parseIncomingData(char* pBuf, size_t length) {
     longitudeDegrees = fields[5].substr(0, 3);
     longitudeMin = fields[5].substr(longitudeDegrees.length(), fields[3].length() - longitudeDegrees.length());
 
-    coordinates.latitudeDegrees = std::stof(latitudeDegrees);
-    coordinates.latitudeMinutes = std::stof(latitudeMin);
-    coordinates.longitudeDegrees = std::stof(longitudeDegrees);
-    coordinates.longitudeMinutes = std::stof(longitudeMin);
+    try {
+        coordinates.latitudeDegrees = std::stof(latitudeDegrees);
+        coordinates.latitudeMinutes = std::stof(latitudeMin);
+        coordinates.longitudeDegrees = std::stof(longitudeDegrees);
+        coordinates.longitudeMinutes = std::stof(longitudeMin);
+    } catch (const std::exception& e) {
+        std::cerr << "Error parsing coordinates: " << e.what() << std::endl;
+        return -1;
+    }
+    
     return 0;
 }
 
@@ -102,7 +108,7 @@ int GPSInterface::parseIncomingData(char* pBuf, size_t length) {
  * This method runs in a separate thread and continuously reads GPS data from the device.
  * It can be extended to parse the GPS data and update the latitude and longitude attributes.
  */
-void GPSInterface::gpsDoInterface(double& latitude, double& longitude) {
+int GPSInterface::gpsDoInterface(double& latitude, double& longitude) {
     // This method would contain the logic to read GPS data from the device
     // For now, we will just simulate reading coordinates
     int n = read(fd, buf, sizeof(buf));
@@ -112,16 +118,26 @@ void GPSInterface::gpsDoInterface(double& latitude, double& longitude) {
 
     int ret = parseIncomingData(buf, n);
     if (ret < 0) {
-        if (ret == -1) {
-            std::cerr << "Error parsing incoming data." << std::endl;
-            throw std::runtime_error("Error parsing incoming data.");
+        switch(ret) {
+            case -1:
+                std::cerr << "ERROR: Parsing incoming data." << std::endl;
+                break;
+            case -2:
+                std::cerr << "ERROR: Bad CRC" << std::endl;
+                break;
+            default:
+                std::cerr << "Unrecognized error, code: " << ret << std::endl;
         }
+
+        return ret;
     }
 
     memset(buf, 0, n);  // Clear the buffer for the next read
 
     latitude = coordinates.latitudeDegrees + (coordinates.latitudeMinutes / 60.0);
     longitude = coordinates.longitudeDegrees + (coordinates.longitudeMinutes / 60.0);
+
+    return 0;
 }
 
 
