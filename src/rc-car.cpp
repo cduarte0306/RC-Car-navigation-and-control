@@ -12,6 +12,7 @@
 #include <boost/bind/bind.hpp>
 
 
+
 #define TELEMETRY_PORT 65000
 using namespace boost::placeholders;
 
@@ -71,7 +72,7 @@ void RcCar::transmitTelemetryData(void) {
         telemetryJson["rightDistance"] = data.rightDistance.u32;
 
         std::string jsonString = telemetryJson.dump();
-        std::cout << jsonString << std::endl;
+        // std::cout << jsonString << std::endl;
 
         this->commandServer->transmit((uint8_t*)jsonString.c_str(), jsonString.size());
     }

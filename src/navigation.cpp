@@ -202,6 +202,14 @@ namespace GPS {
         while(true) {
             // First, we check if the node is in our current way reference
             if(streetReference->nodeExists(*closestNodeToTargetWay)) {
+                // Make sure this path doesn't already exist
+                for(auto it = directionsBank.begin(); it != directionsBank.end(); it++) {
+                    
+                }
+                
+                std::pair<double, std::vector<std::string>> entry = {distance, directions};
+                directionsBank.push_back(entry);
+                directions.clear();
                 break;
             }
 
@@ -215,10 +223,7 @@ namespace GPS {
                 // Make sure this isn't a dead end
                 if(nextStreet->intersections.size() == 1) {
                     deadEnds.insert(streetReference->streetName);
-                    exploredPath.clear();
-
-                    // Pop from the top
-                    directions.clear();
+                    continue;
                 }
 
                 // Avoid dead-ends

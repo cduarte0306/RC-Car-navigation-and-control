@@ -18,7 +18,15 @@ class RcCar {
 public:
     RcCar(void);
     ~RcCar();
+    
+    PeripheralCtrl* getPeripheralDev(void) const {
+        return this->peripherals;
+    }
 
+    GPS::Navigation* getNavObject(void) const {
+        return this->navigation;
+    }
+    
     void doRCMain(void);
     void joinThread(void);
 private:

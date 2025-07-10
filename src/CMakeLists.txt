@@ -12,6 +12,7 @@ set(SOURCE
     network_interface/udp_socket.hpp
     network_interface/udp_socket.cpp
     gps_interface/gps_interface.cpp
+    cli/cli.cpp
     navigation.cpp
 )
 

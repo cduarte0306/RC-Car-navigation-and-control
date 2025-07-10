@@ -129,6 +129,7 @@ int GPSInterface::gpsDoInterface(double& latitude, double& longitude) {
                 std::cerr << "Unrecognized error, code: " << ret << std::endl;
         }
 
+        memset(buf, 0, n);  // Clear the buffer for the next read
         return ret;
     }
 
