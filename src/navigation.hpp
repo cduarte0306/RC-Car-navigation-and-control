@@ -35,6 +35,15 @@ namespace GPS {
                 return poiContainer[key];  // creates if not exists
             }
 
+            std::vector<std::string> ways() const {
+                std::vector<std::string> result;
+                for (const auto& pair : poiContainer) {
+                    result.push_back(pair.first);
+                }
+
+                return result;
+            }
+
             const std::string& operator[](const std::string& key) const {
                 auto it = poiContainer.find(key);
                 if (it != poiContainer.end()) return it->second;
@@ -54,6 +63,15 @@ namespace GPS {
     public:
         Navigation(PeripheralCtrl* peripheralCtrl);
         ~Navigation();
+
+        std::vector<std::string> ways() const {
+            std::vector<std::string> result;
+            for (const auto& pair : this->poiMapper) {
+                result.push_back(pair.first);
+            }
+
+            return result;
+        }
 
         void calculatePath(Poi& targetLocation);
         void startNavigation(Poi& targetLocation);

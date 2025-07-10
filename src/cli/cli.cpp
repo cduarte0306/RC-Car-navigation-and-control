@@ -35,6 +35,10 @@ void CLI::cliProcess(void) {
                 std::cerr << "ERROR: Invalid navigation object\r\n";
             }
 
+            std::vector<std::string>ways = nav->ways();
+            for( const auto& way : ways) {
+                streamOut << way << "\r\n";
+            }
             
         } else {
             streamOut << "Invalid input" << std::endl;
