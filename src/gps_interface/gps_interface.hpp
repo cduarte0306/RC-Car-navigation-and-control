@@ -11,9 +11,7 @@ public:
 public:
     typedef struct {
         float latitudeDegrees;
-        float latitudeMinutes;
         float longitudeDegrees;
-        float longitudeMinutes;
     } Coordinates;
 
     int gpsDoInterface(double& latitude, double& longitude);
@@ -31,7 +29,7 @@ protected:
     std::thread gpsThread_;  // Thread for GPS data processing
     bool threadCanRun_ = true;  // Control flag for the GPS thread
 
-    Coordinates coordinates = {0.0, 0.0, 0.0, 0.0};
+    Coordinates coordinates = {0.0, 0.0};
 
     char buf[256];
     int fd = -1;  // File descriptor for the GPS device

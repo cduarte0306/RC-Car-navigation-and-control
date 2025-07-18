@@ -8,6 +8,7 @@
 #include <chrono>
 #include <sstream>
 #include <unordered_set>
+#include <utility>
 
 
 namespace GPS {
@@ -42,7 +43,8 @@ namespace GPS {
             GPS::Navigation::StreetInfo roadInfo;
 
             for (const auto& nodeRef : way->nodes()) {
-                roadInfo.nodeIds.push_back(nodeRef.ref()); // Use ref() instead of id()
+                roadInfo.nodeIds.insert(nodeRef.ref()); // Use ref() instead of id()
+                this->nodeToWayMap[nodeRef.ref()] = way;
             }
 
             roadInfo.streetLength = this->getTransverseDistance(way);
@@ -74,6 +76,7 @@ namespace GPS {
                             // Removed unused variable intSec
                             const char* streetName = way_->tags()["name"];
                             if (streetName) {
+                                
                                 GPS::Navigation::IntersectionDescriptor inter;
                                 inter.way = way_;
                                 inter.intersectionStreetName = std::string(streetName);
@@ -85,12 +88,16 @@ namespace GPS {
                                 
                                 std::string wayName = way->tags()["name"];
                                 this->streetInfoMap[wayName].intersections[nodeRef.ref()] = inter;
+
                             }
                         }
                     }
+
                 }
             }    
         }
+
+        // Find then 
 
         return 0;
     }
@@ -127,9 +134,15 @@ namespace GPS {
      * 
      * @param targetLocation The target location to navigate to.
      */
-    void Navigation::calculatePath(Poi& targetLocation) {
+    int Navigation::calculatePath(std::string& targetLocation) {
         // Find my current node
-        const osmium::Way* targetWay = targetLocation.getWay();
+        auto it = this->poiMapper.find(targetLocation);
+        if(it == this->poiMapper.end()) {
+            return -1;
+        }
+
+        Poi& poi = this->poiMapper[targetLocation];
+        const osmium::Way* targetWay = poi.getWay();
         osmium::Location current_loc{this->longitude, this->latitude};
 
         // Generalized lambda: finds closest node to a given location, returns pair<node id, distance>
@@ -164,90 +177,58 @@ namespace GPS {
         // closestNodeToTargetWay now points to the node id closest to the target way
 
         // Find my location's node and street address
-        const osmium::object_id_type* closestNodeToCurrentLoc = nullptr;
-        const osmium::Way* wayReference = nullptr; // <-- Add this to store the current way
         std::string wayName;
+        const osmium::object_id_type* startingNode = this->getClosestNode(this->handler, current_loc); 
 
-        // Find the closest node to the current location among all streets
+        // Find out which way this node belongs to
         for (const auto& [streetName, streetInfo] : this->streetInfoMap) {
-            auto maybeNodeIdPtr = streetInfo.getClosestNode(this->handler, current_loc);
-            if (maybeNodeIdPtr) {
-                closestNodeToCurrentLoc = maybeNodeIdPtr.value();
+            bool ret = streetInfo.hasNode(*startingNode);
+            if (ret) {
                 wayName = streetName;
                 break; // Found the closest node in a street, exit loop
             }
         }
 
-        wayReference = this->streetInfoMap[wayName].way;        
-        if(!wayReference) {
-            return;
-        }
+        // Generate a graph
+        std::unordered_map<osmium::object_id_type, int> nodeOcurrenceCounter;
 
-        // Now we move on to iterating until we find our target location
-        auto findElement = [](const std::unordered_set<std::string>& set, std::string& streetName) -> bool {
-            auto iter = set.find(streetName);
-            return iter == set.end();
-        };
-
-        StreetInfo* streetReference = &this->streetInfoMap[wayName];
-
-        std::unordered_set<std::string> exploredPath;  // This stores the explored paths
-        std::unordered_set<std::string> deadEnds;  // This stores the dead ends 
-        
-        std::vector<std::string> directions;
-        std::vector<std::pair<double, std::vector<std::string>>> directionsBank;
-        double distance = 0;
-
-        // Search the map 
-        while(true) {
-            // First, we check if the node is in our current way reference
-            if(streetReference->nodeExists(*closestNodeToTargetWay)) {
-                // Make sure this path doesn't already exist
-                for(auto it = directionsBank.begin(); it != directionsBank.end(); it++) {
-                    
-                }
-                
-                std::pair<double, std::vector<std::string>> entry = {distance, directions};
-                directionsBank.push_back(entry);
-                directions.clear();
-                break;
-            }
-
-            const osmium::object_id_type* closestNodeId = nullptr;
-            double minDistance = std::numeric_limits<double>::max();  // Initialize minimm distance as a max double
-            
-            // Node does not exist, now we search all intersections to see who's closest to the target 
-            for (const auto& [interNode, intDescriptor] : streetReference->intersections) {
-                StreetInfo* nextStreet = intDescriptor.street;
-
-                // Make sure this isn't a dead end
-                if(nextStreet->intersections.size() == 1) {
-                    deadEnds.insert(streetReference->streetName);
-                    continue;
-                }
-
-                // Avoid dead-ends
-                if(findElement(deadEnds, nextStreet->streetName)) {
-                    continue;
-                }
-
-                streetReference = nextStreet;
-                distance += streetReference->streetLength;
-                directions.push_back(streetReference->streetName);
-
-                // osmium::Location nodeLoc    = this->handler.node_locations[interNode];
-                // osmium::Location targetNode = this->handler.node_locations[*closestNodeToTargetWay];
-                // double distance = osmium::geom::haversine::distance(nodeLoc, targetNode);
-                // if(minDistance < distance ) {
-                //     minDistance = distance;
-                    
-                //     // Point to the next street
-                //     streetReference = *nextStreet;
-                //     exploredPath.insert(streetReference.streetName);
-                //     break;
-                // }
+        for (const osmium::Way* way : this->handler.ways) {
+            if (!way->tags().has_key("highway")) continue;
+            for (const auto& node : way->nodes()) {
+                nodeOcurrenceCounter[node.ref()]++;
             }
         }
+
+        for (const auto& [streetName, street] : this->streetInfoMap) {
+            osmium::object_id_type lastNode = *street.nodeIds.begin();
+            const osmium::Way* way = street.way;
+
+            for(auto it = way->nodes().begin(); it != way->nodes().end(); ++it) {
+                const osmium::object_id_type nodeRef = (*it).ref();
+
+                if (nodeRef == lastNode) continue;
+
+                if (nodeOcurrenceCounter[nodeRef] > 1 || it == way->nodes().end() - 1) {
+                    const auto& loc1 = this->handler.node_locations[lastNode];
+                    const auto& loc2 = this->handler.node_locations[nodeRef];
+                    if (!loc1.valid() || !loc2.valid()) continue;
+
+                    double distance = osmium::geom::haversine::distance(loc1, loc2);
+
+                    // Forward edge
+                    Edge edge{nodeRef, street.streetName, distance};
+                    this->mapGraph[lastNode].push_back(edge);
+
+                    // Reverse edge
+                    Edge reverse{lastNode, street.streetName, distance};
+                    this->mapGraph[nodeRef].push_back(reverse);
+
+                    lastNode = nodeRef;
+                }
+            }
+        }
+
+        return 0;
     }
 
 

@@ -80,19 +80,33 @@ int GPSInterface::parseIncomingData(char* pBuf, size_t length) {
         return 0;
     }
 
-    std::string latitudeMin, latitudeDegrees, longitudeMin, longitudeDegrees;
+    // Extract latitude (ddmm.mmmm)
+    std::string latitudeField = fields[3];
+    std::string latitudeDir = fields[4];
+    std::string longitudeField = fields[5];
+    std::string longitudeDir = fields[6];
 
-    latitudeDegrees = fields[3].substr(0, 2);
-    latitudeMin = fields[3].substr(latitudeDegrees.length(), fields[3].length() - latitudeDegrees.length());
+    std::string latitudeDegrees = latitudeField.substr(0, 2);
+    std::string latitudeMinutes = latitudeField.substr(2);
 
-    longitudeDegrees = fields[5].substr(0, 3);
-    longitudeMin = fields[5].substr(longitudeDegrees.length(), fields[3].length() - longitudeDegrees.length());
+    std::string longitudeDegrees = longitudeField.substr(0, 3);
+    std::string longitudeMinutes = longitudeField.substr(3);
 
     try {
-        coordinates.latitudeDegrees = std::stof(latitudeDegrees);
-        coordinates.latitudeMinutes = std::stof(latitudeMin);
-        coordinates.longitudeDegrees = std::stof(longitudeDegrees);
-        coordinates.longitudeMinutes = std::stof(longitudeMin);
+        double dlatitudeDegrees = std::stof(latitudeDegrees);
+        double dlatitudeMinutes = std::stof(latitudeMinutes);
+        double dlongitudeDegrees = std::stof(longitudeDegrees);
+        double dlongitudeMinutes = std::stof(longitudeMinutes);
+
+        // Convert to decimal degrees
+        coordinates.latitudeDegrees  = dlatitudeDegrees + (dlatitudeMinutes / 60.0);
+        coordinates.longitudeDegrees = dlongitudeDegrees + (dlongitudeMinutes / 60.0);
+
+        // Apply sign based on N/S/E/W
+        if (latitudeDir == "S") coordinates.latitudeDegrees = -coordinates.latitudeDegrees;
+        if (longitudeDir == "W") coordinates.longitudeDegrees = -coordinates.longitudeDegrees;
+
+        // Store or return lat/lon as needed
     } catch (const std::exception& e) {
         std::cerr << "Error parsing coordinates: " << e.what() << std::endl;
         return -1;
@@ -120,10 +134,10 @@ int GPSInterface::gpsDoInterface(double& latitude, double& longitude) {
     if (ret < 0) {
         switch(ret) {
             case -1:
-                std::cerr << "ERROR: Parsing incoming data." << std::endl;
+                // std::cerr << "ERROR: Parsing incoming data." << std::endl;
                 break;
             case -2:
-                std::cerr << "ERROR: Bad CRC" << std::endl;
+                // std::cerr << "ERROR: Bad CRC" << std::endl;
                 break;
             default:
                 std::cerr << "Unrecognized error, code: " << ret << std::endl;
@@ -135,8 +149,8 @@ int GPSInterface::gpsDoInterface(double& latitude, double& longitude) {
 
     memset(buf, 0, n);  // Clear the buffer for the next read
 
-    latitude = coordinates.latitudeDegrees + (coordinates.latitudeMinutes / 60.0);
-    longitude = coordinates.longitudeDegrees + (coordinates.longitudeMinutes / 60.0);
+    latitude = coordinates.latitudeDegrees;
+    longitude = coordinates.longitudeDegrees;
 
     return 0;
 }

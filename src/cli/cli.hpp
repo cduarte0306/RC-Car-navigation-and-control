@@ -3,6 +3,7 @@
 
 #include <thread>
 #include <string>
+#include <set>
 
 #include "../rc-car.hpp"
 

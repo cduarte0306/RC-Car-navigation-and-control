@@ -94,7 +94,10 @@
         "queue": "cpp",
         "stack": "cpp",
         "strstream": "cpp",
-        "future": "cpp"
+        "future": "cpp",
+        "__bit_reference": "cpp",
+        "filesystem": "cpp",
+        "__config": "cpp"
     },
     "cmake.buildArgs": ["-j16"]
 }

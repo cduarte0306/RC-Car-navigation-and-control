@@ -14,6 +14,9 @@
 #include <mutex>
 #include <atomic>
 #include <optional>
+#include <memory>
+#include <unordered_set>
+#include <set>
 
 #include <osmium/io/any_input.hpp>
 #include <osmium/handler.hpp>
@@ -73,7 +76,7 @@ namespace GPS {
             return result;
         }
 
-        void calculatePath(Poi& targetLocation);
+        int calculatePath(std::string& targetLocation);
         void startNavigation(Poi& targetLocation);
         void stopNavigation();
         void getDirection();
@@ -120,6 +123,7 @@ namespace GPS {
                 }
             }
 
+
             void way(const osmium::Way& way) {
                 this->numWays ++;
                 this->ways.push_back(&way); // Store pointer to the way
@@ -128,8 +132,8 @@ namespace GPS {
 
                 if (way.tags().has_key("addr:housenumber")) {
                     wayStream << way.tags()["addr:housenumber"] << " "
-                            << way.tags()["addr:street"] << ", " << way.tags()["addr:city"] << " " 
-                            << way.tags()["addr:state"] << ", "  << way.tags()["addr:postcode"];
+                              << way.tags()["addr:street"]      << ", " << way.tags()["addr:city"] << " " 
+                              << way.tags()["addr:state"]       << ", " << way.tags()["addr:postcode"];
                     
                     this->waysContainer_.push_back(wayStream.str());
                     
@@ -146,24 +150,36 @@ namespace GPS {
             }
         };
 
-        struct OSMNode {
-            osmium::object_id_type id;
-            double lat;
-            double lon;
-        };
-
+        
         struct StreetInfo;
+        struct MapNode;
 
         struct IntersectionDescriptor {
+            MapNode* node = nullptr;
             std::string intersectionStreetName;
             osmium::object_id_type id;
             const osmium::Way* way = nullptr;
             StreetInfo* street = nullptr; // Remove 'struct' and use the correct scope
         };
 
+        struct MapNode {
+            MapNode(const osmium::object_id_type* id, osmium::Location& loc) : id(id), loc(loc) {
+            }
+
+            std::map<std::string, std::pair<std::unique_ptr<MapNode>, StreetInfo*>> edges;  // Maps the edge to it's street name
+            const osmium::object_id_type* id = nullptr;  // ID of the vertice
+            osmium::Location loc;
+        };
+
+        struct Edge {
+            osmium::object_id_type id;
+            std::string streetName;
+            double weight;
+        };
+
         struct StreetInfo {
             std::vector<osmium::Location> nodeLocations; 
-            std::vector<osmium::object_id_type> nodeIds;  // All nodes in the street
+            std::set<osmium::object_id_type> nodeIds;  // All nodes in the street
             const osmium::Way* way;
             std::unordered_map<osmium::object_id_type, IntersectionDescriptor> intersections;
 
@@ -172,33 +188,10 @@ namespace GPS {
             double streetLength;
 
             // Returns true if the node exists in this street, false otherwise
-            bool nodeExists(const osmium::object_id_type node) const {
-                for(const auto& nodeInst : this->nodeIds) {
-                    if (nodeInst == node) {
-                        return true;
-                    }
-                }
-                return false;
+            bool hasNode(const osmium::object_id_type node) const {
+                return nodeIds.find(node) != nodeIds.end() ;
             }
-
-            std::optional<const osmium::object_id_type*> getClosestNode(OsmiumHandler& handler, osmium::Location& loc) const {
-                const osmium::object_id_type* closestNodeId = nullptr;
-                double min_distance = std::numeric_limits<double>::max();
-                for (const auto& [id, nodeloc] : handler.node_locations) {
-                    double dist = osmium::geom::haversine::distance(loc, nodeloc);
-                    if (dist < min_distance) {
-                        min_distance = dist;
-                        closestNodeId = &id;
-                    }
-                }
-
-                if (!this->nodeExists(*closestNodeId)) {
-                    return std::nullopt;
-                }
-
-                return closestNodeId;
-            }
-        };       
+        };
 
         struct Paths {
             const StreetInfo* way;
@@ -233,8 +226,11 @@ namespace GPS {
         char currentLocationBuff[256] = {0};
 
         std::thread navThread;
+        
+        std::unordered_map<osmium::object_id_type, std::vector<Edge>> mapGraph;
         std::unordered_map<osmium::object_id_type, osmium::Location> node_locations;
         std::unordered_map<std::string, GPS::Navigation::StreetInfo> streetInfoMap;
+        std::unordered_map<osmium::object_id_type, const osmium::Way*> nodeToWayMap;
     
         std::vector<GPS::Navigation::StreetInfo> directions;
 
@@ -267,9 +263,25 @@ namespace GPS {
             return total;
         }
 
+        const osmium::object_id_type* getClosestNode(OsmiumHandler& handler, osmium::Location& loc) const {
+                const osmium::object_id_type* closestNodeId = nullptr;
+                double min_distance = std::numeric_limits<double>::max();
+                for (const auto& [id, nodeloc] : handler.node_locations) {
+                    if(this->nodeToWayMap.find(id) == this->nodeToWayMap.end()) continue;
+                    double dist = osmium::geom::haversine::distance(loc, nodeloc);
+                    if (dist < min_distance) {
+                        min_distance = dist;
+                        closestNodeId = &id;
+                    }
+                }
+
+                return closestNodeId;
+            }
+
         int parseMap(void);
     };
 
 };
 
+//set-waypoint '11 Arbor Lane, Bordentown NJ, 08505'
 #endif // NAVIGATION_HPP
