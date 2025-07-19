@@ -4,6 +4,7 @@
 #include "types.h"
 #include <cstddef>
 #include <stdint.h>
+#include <thread>
 
 
 class PeripheralCtrl {
@@ -69,7 +70,18 @@ private:
 
     bool xfer(val_type_t* data, uint8_t reg);
     bool configSPI(void);  
+    bool configSerial(void);
     bool xferSPI(uint8_t* pbuf, size_t length);
+
+#if !defined(__aarch64__)
+    
+
+    bool wrtReg(val_type_t data, uint8_t reg);
+    bool rdReg(val_type_t& data, uint8_t reg);
+
+    bool wrtSerial(val_type_t data, uint8_t reg);
+    bool rdSerial(val_type_t& data, uint8_t reg);
+#endif
 
 private:
     bool isDeviceConnected_ = false;
@@ -78,6 +90,12 @@ private:
     uint8 bitsPerWord = 0;
 
     psocDataStruct psocData = {0};
+    
+#if !defined(__aarch64__)
+    std::thread serCommsThread;
+    int serialFd = -1;  // File descriptor for serial communication
+    char serialBuffer[1024] = {0};  // Buffer for serial communication
+#endif
 };
 
 #endif

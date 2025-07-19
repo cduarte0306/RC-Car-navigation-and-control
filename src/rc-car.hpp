@@ -7,6 +7,9 @@
 #include "types.h"
 
 #include "network_interface/udp_socket.hpp"
+#include "gps_interface/gps_interface.hpp"
+
+#include "navigation.hpp"
 
 #include <thread>
 
@@ -15,7 +18,15 @@ class RcCar {
 public:
     RcCar(void);
     ~RcCar();
+    
+    PeripheralCtrl* getPeripheralDev(void) const {
+        return this->peripherals;
+    }
 
+    GPS::Navigation* getNavObject(void) const {
+        return this->navigation;
+    }
+    
     void doRCMain(void);
     void joinThread(void);
 private:
@@ -53,6 +64,8 @@ private:
     Network::UDPSocket* commandServer = nullptr;
     std::thread configurationInterfaceThread;
     std::thread mainThread;
+
+    GPS::Navigation* navigation = nullptr;
 
 private:
     void transmitTelemetryData(void);

@@ -12,21 +12,23 @@
 #include <boost/bind/bind.hpp>
 
 
+
 #define TELEMETRY_PORT 65000
 using namespace boost::placeholders;
 
 
 RcCar::RcCar( void ) {
-    this->peripherals = new PeripheralCtrl();
-    this->peripherals->doConfigureDevice();
+    // this->peripherals = new PeripheralCtrl();
+    this->navigation = new GPS::Navigation(this->peripherals);
+    // this->peripherals->doConfigureDevice();
     
     uint32_t psocVersion = 0;
-    this->isControllerConnected = this->peripherals->doDetectDevice(psocVersion);
-    if (this->isControllerConnected) {
-        std::cout << "PSoC version detedcted: " << ((psocVersion >> 16 ) & 0xFF) << "." 
-                                                << ((psocVersion >> 16 ) & 0xFF) << "."
-                                                << (psocVersion & 0xFF);
-    }
+    // this->isControllerConnected = this->peripherals->doDetectDevice(psocVersion);
+    // if (this->isControllerConnected) {
+    //     std::cout << "PSoC version detected: " << ((psocVersion >> 16 ) & 0xFF) << "." 
+    //                                            << ((psocVersion >> 8 ) & 0xFF) << "."
+    //                                            << (psocVersion & 0xFF) << std::endl;
+    // }
 
     this->commandServer = new Network::UDPSocket(TELEMETRY_PORT);
     this->commandServer->onDataReceived.connect(
@@ -35,7 +37,7 @@ RcCar::RcCar( void ) {
 
     // Open up the configuration port. This is a LAN port that is used to configure items such as 
     // the wifi access point.
-    this->configurationInterfaceThread = std::thread(&RcCar::configInterfaceProcess, this);
+    // this->configurationInterfaceThread = std::thread(&RcCar::configInterfaceProcess, this);
     this->mainThread = std::thread(&RcCar::rcCarThread, this);
 }
 
@@ -46,7 +48,7 @@ RcCar::~RcCar() {
 
 
 void RcCar::joinThread(void) {
-    this->configurationInterfaceThread.join();
+    // this->configurationInterfaceThread.join();
     this->mainThread.join();
 }
 
@@ -70,6 +72,8 @@ void RcCar::transmitTelemetryData(void) {
         telemetryJson["rightDistance"] = data.rightDistance.u32;
 
         std::string jsonString = telemetryJson.dump();
+        // std::cout << jsonString << std::endl;
+
         this->commandServer->transmit((uint8_t*)jsonString.c_str(), jsonString.size());
     }
 }
@@ -82,7 +86,11 @@ void RcCar::transmitTelemetryData(void) {
 void RcCar::configInterfaceProcess(void) {
     while(threadCanRun) {
         this->transmitTelemetryData();
+#if defined(__aarch64__)
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+#else
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+#endif
     }
 }
 

@@ -1,3 +1,9 @@
 [submodule "external/json"]
 	path = external/json
 	url = https://github.com/nlohmann/json.git
+[submodule "external/libosmium"]
+	path = external/libosmium
+	url = https://github.com/osmcode/libosmium.git
+[submodule "external/protozero"]
+	path = external/protozero
+	url = https://github.com/mapbox/protozero.git
