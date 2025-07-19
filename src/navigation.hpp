@@ -76,8 +76,8 @@ namespace GPS {
             return result;
         }
 
-        int calculatePath(std::string& targetLocation);
-        void startNavigation(Poi& targetLocation);
+        void getDirections(void);
+        int startNavigation(std::string& targetLocation);
         void stopNavigation();
         void getDirection();
         void updatePosition(double latitude, double longitude);
@@ -219,20 +219,18 @@ namespace GPS {
         double lastLatDiff = -1;
         double lastLonDiff = -1;
 
-        bool isNavigating_;
+        std::atomic<bool> isNavigating_;
         std::thread navigationThread_;
-        std::thread wayfinder;
 
         char currentLocationBuff[256] = {0};
 
         std::thread navThread;
         
-        std::unordered_map<osmium::object_id_type, std::vector<Edge>> mapGraph;
         std::unordered_map<osmium::object_id_type, osmium::Location> node_locations;
         std::unordered_map<std::string, GPS::Navigation::StreetInfo> streetInfoMap;
         std::unordered_map<osmium::object_id_type, const osmium::Way*> nodeToWayMap;
     
-        std::vector<GPS::Navigation::StreetInfo> directions;
+        std::vector<osmium::object_id_type> directions;
 
         osmium::object_id_type current_node_id_ = 0;
         std::vector<std::string> availableWays;
@@ -241,7 +239,6 @@ namespace GPS {
         std::mutex devGpsMutex;
         std::atomic<bool> threadRun = {true};
 
-        
         /**
          * @brief Get the Transverse Distance of a road
          * 
@@ -263,15 +260,15 @@ namespace GPS {
             return total;
         }
 
-        const osmium::object_id_type* getClosestNode(OsmiumHandler& handler, osmium::Location& loc) const {
-                const osmium::object_id_type* closestNodeId = nullptr;
+        const osmium::object_id_type getClosestNode(OsmiumHandler& handler, osmium::Location& loc) const {
+                osmium::object_id_type closestNodeId;
                 double min_distance = std::numeric_limits<double>::max();
                 for (const auto& [id, nodeloc] : handler.node_locations) {
                     if(this->nodeToWayMap.find(id) == this->nodeToWayMap.end()) continue;
                     double dist = osmium::geom::haversine::distance(loc, nodeloc);
                     if (dist < min_distance) {
                         min_distance = dist;
-                        closestNodeId = &id;
+                        closestNodeId = id;
                     }
                 }
 

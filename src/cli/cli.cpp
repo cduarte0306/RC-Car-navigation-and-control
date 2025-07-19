@@ -64,7 +64,7 @@ void CLI::cliProcess(void) {
             GPS::Navigation* nav = this->rcCar.getNavObject();
 
             if(nav) {
-                int ret = nav->calculatePath(argBank[0]);
+                int ret = nav->startNavigation(argBank[0]);
                 if (ret < 0) {
                     streamOut << "ERROR: Invalid waypoint";
                 }

@@ -18,17 +18,17 @@ using namespace boost::placeholders;
 
 
 RcCar::RcCar( void ) {
-    this->peripherals = new PeripheralCtrl();
+    // this->peripherals = new PeripheralCtrl();
     this->navigation = new GPS::Navigation(this->peripherals);
-    this->peripherals->doConfigureDevice();
+    // this->peripherals->doConfigureDevice();
     
     uint32_t psocVersion = 0;
-    this->isControllerConnected = this->peripherals->doDetectDevice(psocVersion);
-    if (this->isControllerConnected) {
-        std::cout << "PSoC version detected: " << ((psocVersion >> 16 ) & 0xFF) << "." 
-                                               << ((psocVersion >> 8 ) & 0xFF) << "."
-                                               << (psocVersion & 0xFF) << std::endl;
-    }
+    // this->isControllerConnected = this->peripherals->doDetectDevice(psocVersion);
+    // if (this->isControllerConnected) {
+    //     std::cout << "PSoC version detected: " << ((psocVersion >> 16 ) & 0xFF) << "." 
+    //                                            << ((psocVersion >> 8 ) & 0xFF) << "."
+    //                                            << (psocVersion & 0xFF) << std::endl;
+    // }
 
     this->commandServer = new Network::UDPSocket(TELEMETRY_PORT);
     this->commandServer->onDataReceived.connect(
@@ -37,7 +37,7 @@ RcCar::RcCar( void ) {
 
     // Open up the configuration port. This is a LAN port that is used to configure items such as 
     // the wifi access point.
-    this->configurationInterfaceThread = std::thread(&RcCar::configInterfaceProcess, this);
+    // this->configurationInterfaceThread = std::thread(&RcCar::configInterfaceProcess, this);
     this->mainThread = std::thread(&RcCar::rcCarThread, this);
 }
 
@@ -48,7 +48,7 @@ RcCar::~RcCar() {
 
 
 void RcCar::joinThread(void) {
-    this->configurationInterfaceThread.join();
+    // this->configurationInterfaceThread.join();
     this->mainThread.join();
 }
 
