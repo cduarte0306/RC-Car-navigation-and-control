@@ -28,7 +28,7 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
         throw std::runtime_error("Failed to create socket");
     }
 
-    // Look for ens33 interface to bind to
+    // Look for enP8p1s0 interface to bind to
     struct ifaddrs* ifaddr;
     if (getifaddrs(&ifaddr) == -1) {
         perror("getifaddrs");
@@ -40,7 +40,7 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
         if (ifa->ifa_addr == nullptr) continue;
 
         if (ifa->ifa_addr->sa_family == AF_INET &&
-            std::string(ifa->ifa_name) == "ens33") {
+            std::string(ifa->ifa_name) == "enP8p1s0") {
             char host[NI_MAXHOST];
             int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
                                 host, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
@@ -53,7 +53,7 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
     freeifaddrs(ifaddr);
 
     if (ipAddress.empty()) {
-        throw std::runtime_error("Could not find IP for interface ens33");
+        throw std::runtime_error("Could not find IP for interface enP8p1s0");
     }
 
     // Set up the server address
