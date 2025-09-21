@@ -125,6 +125,7 @@ bool UDPSocket::transmit(uint8_t* pBuf, size_t length) {
  */
 void UDPSocket::transmissionThreadHandler(void) {
     char buffer[1500];
+    struct sockaddr_in clientAddress;
 
     struct timeval timeout;
     timeout.tv_sec = 1;
@@ -135,7 +136,6 @@ void UDPSocket::transmissionThreadHandler(void) {
 
     while( this->threadCanRun ) {
         // Receive data from the socket
-        struct sockaddr_in clientAddress;
         socklen_t clientAddressLength = sizeof(clientAddress);
         ssize_t bytesRead = recvfrom(socket_, buffer, sizeof(buffer), 0, (struct sockaddr *)&clientAddress, &clientAddressLength);
         if (bytesRead < 0) {

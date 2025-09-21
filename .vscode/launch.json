@@ -7,7 +7,7 @@
       "request": "launch",
       "program": "${workspaceFolder}/build/src/rc-car-nav",
       "miDebuggerServerAddress": "192.168.1.10:2345",
-      "miDebuggerPath": "/usr/bin/gdb-multiarch",
+      "miDebuggerPath": "/opt/poky/5.0.11/sysroots/x86_64-pokysdk-linux/usr/bin/aarch64-poky-linux/aarch64-poky-linux-gdb",
       "MIMode": "gdb",
       "targetArchitecture": "arm64",                 // explicit target arch
       "cwd": "${workspaceFolder}",

@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <unistd.h>
 
+#include <mutex>
+
 #include "sockets.hpp"
 
 
@@ -26,7 +28,6 @@ private:
     bool threadCanRun = true;
     struct sockaddr_in lastClientAddress;
 private:
-    
 };
 
 }
