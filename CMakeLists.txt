@@ -20,3 +20,4 @@ include_directories(${CMAKE_SOURCE_DIR})
 
 # Add the subdirectory containing the bottom-level CMakeLists.txt
 add_subdirectory(src)
+add_subdirectory(external/embedded-cli)

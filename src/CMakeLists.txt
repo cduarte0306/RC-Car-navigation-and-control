@@ -11,6 +11,7 @@ set(SOURCE  main.cpp
             peripheral_driver.hpp
             network_interface/udp_socket.hpp
             network_interface/udp_socket.cpp
+            cli/cli.cpp
             )
 
 add_executable(${PROJECT_NAME} ${SOURCE})
@@ -19,4 +20,5 @@ add_executable(${PROJECT_NAME} ${SOURCE})
 target_include_directories(rc-car-nav PRIVATE
     ${CMAKE_SOURCE_DIR}/external/json/include
     ${CMAKE_SOURCE_DIR}/external/json/include/lib
+    ${CMAKE_SOURCE_DIR}/external/embedded-cli/lib/include
 )
