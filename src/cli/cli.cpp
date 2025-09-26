@@ -48,31 +48,9 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
                 out << "Version: " << psocData.version_major.u8 << "." << psocData.version_minor.u8 << "." << psocData.version_build.u8 << "\r\n"
                 "Speed: " << psocData.speed.f32 << "\r\n" << "Front distance: " << psocData.frontDistance.f32 << "\r\n" << 
                 "Left distance: " << psocData.leftDistance.f32 << "\r\n" << psocData.rightDistance.f32 << "\r\n";
-                
-                std::cout << out.str();
-            }
-        },
-        (CliCommandBinding){
-            "read-psoc",
-            
-            "Reads PSoC data\r\n"
-                "\t\tread-psoc\r\n",
-            
-            false, this,
-            
-            [](EmbeddedCli *cli, char *args, void *context) {
-                AppCLI* _cli = static_cast<AppCLI*>(context);
-                RcCar& rcCar = _cli->mainObj;
-                PeripheralCtrl* psoc = rcCar.getModule<PeripheralCtrl>();
-                PeripheralCtrl::psocDataStruct psocData;
-                int ret = psoc->readData(psocData);
-                
-                std::stringstream out;
-                out << "Version: " << psocData.version_major.u8 << "." << psocData.version_minor.u8 << "." << psocData.version_build.u8 << "\r\n"
-                "Speed: " << psocData.speed.f32 << "\r\n" << "Front distance: " << psocData.frontDistance.f32 << "\r\n" << 
-                "Left distance: " << psocData.leftDistance.f32 << "\r\n" << psocData.rightDistance.f32 << "\r\n";
-                
-                std::cout << out.str();
+                std::cout << out.str().c_str() << std::endl;
+                std::string data = out.str();
+                _cli->writeIface(data);
             }
         }
     };
@@ -177,4 +155,20 @@ int AppCLI::openInterface() {
 
     tcsetattr(fd, TCSANOW, &options);
     return fd;
+}
+
+
+int AppCLI::writeIface(std::string& data) {
+    if (this->fd < 0) {
+        std::cerr << "TTY interface not opened" << std::endl;
+        return -1;
+    }
+
+    int len = data.length();
+    int ret = write(this->fd, data.c_str(), len);
+    if (ret < 0) {
+        std::cerr << "Error writing to TTY" << std::endl;
+        return -1;
+    }
+    return ret;
 }

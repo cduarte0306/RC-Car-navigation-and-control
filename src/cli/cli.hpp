@@ -15,6 +15,7 @@ private:
     int fd = -1;
 
     int openInterface();
+    int writeIface(std::string& data);
 };
 
 #endif

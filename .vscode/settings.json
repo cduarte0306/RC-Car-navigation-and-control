@@ -80,7 +80,12 @@
         "cinttypes": "cpp",
         "typeinfo": "cpp",
         "valarray": "cpp",
-        "variant": "cpp"
+        "variant": "cpp",
+        "charconv": "cpp",
+        "complex": "cpp",
+        "source_location": "cpp",
+        "typeindex": "cpp",
+        "format": "cpp"
     },
     "cmake.buildArgs": ["-j16"]
 }
