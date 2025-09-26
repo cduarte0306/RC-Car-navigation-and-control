@@ -1,23 +1,18 @@
 cmake_minimum_required(VERSION 3.10)
 
-# Set the project name
-project(rc-car-nav)
+# Make sure we enable both C and C++
+project(rc-car-nav LANGUAGES C CXX)
 
-# Specify the C++ standard
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find Boost libraries (replace placeholders with actual components)
+# Find Boost for your app (used in src/)
 find_package(Boost REQUIRED COMPONENTS system filesystem thread)
 
-# Add Boost headers globally
-include_directories(${Boost_INCLUDE_DIRS})
+# If the embedded-cli submodule exposes options like examples/tests, disable them here (harmless if they don't exist)
+# option(EMBEDDED_CLI_BUILD_EXAMPLES "Build embedded-cli examples" OFF)
+# option(EMBEDDED_CLI_BUILD_TESTS    "Build embedded-cli tests"    OFF)
 
-include_directories(${CMAKE_SOURCE_DIR})
-
-# When linking your target:
-# target_link_libraries(rc-car-nav PRIVATE nlohmann_json::nlohmann_json)
-
-# Add the subdirectory containing the bottom-level CMakeLists.txt
-add_subdirectory(src)
-add_subdirectory(external/embedded-cli)
+# Add subdirectories
+add_subdirectory(external/embedded-cli)   # builds the static lib: embedded_cli_lib
+add_subdirectory(src)                     # builds your app: rc-car-nav

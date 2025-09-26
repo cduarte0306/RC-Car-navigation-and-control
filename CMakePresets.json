@@ -6,7 +6,7 @@
         "hidden": false,
         "displayName": "RC Car (Poky Toolchain)",
         "description": "Cross-compile for Jetson Nano using Poky SDK",
-        "generator": "Ninja",
+        "generator": "Unix Makefiles",
         "binaryDir": "${sourceDir}/build"
       }
     ]

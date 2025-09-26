@@ -9,7 +9,12 @@ public:
     AppCLI(RcCar& mainObj);
     ~AppCLI();
 private:
+    const char* tty = "/dev/ttyTHS1";
     RcCar& mainObj;
+    EmbeddedCli *CLI = nullptr;
+    int fd = -1;
+
+    int openInterface();
 };
 
 #endif

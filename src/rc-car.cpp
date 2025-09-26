@@ -45,9 +45,9 @@ RcCar::~RcCar() {
 }
 
 
-template<typename PeripheralCtrl> PeripheralCtrl* RcCar::getModule(void) {
-    return peripherals;
-}
+// template<typename PeripheralCtrl> PeripheralCtrl* RcCar::getModule(void) {
+//     return peripherals;
+// }
 
 
 void RcCar::joinThread(void) {

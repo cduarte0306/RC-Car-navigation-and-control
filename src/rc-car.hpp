@@ -19,8 +19,10 @@ public:
     void doRCMain(void);
     void joinThread(void);
 
-    // Expose interface for CLI
-    template <typename T> T* getModule(void);
+    template <typename T>
+    T* getModule(void) {
+        return peripherals;
+    }
 private:
     enum {
         CMD_NOOP,

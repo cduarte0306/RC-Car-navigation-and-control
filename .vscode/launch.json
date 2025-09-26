@@ -18,9 +18,6 @@
           "text": "-enable-pretty-printing",
           "ignoreFailures": true }
       ],
-      "sourceFileMap": {                              // map remote paths to local
-        "/home/root": "${workspaceFolder}"
-      },
       "externalConsole": false
     }
   ]

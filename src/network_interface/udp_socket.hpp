@@ -14,10 +14,12 @@ namespace Network {
 class UDPSocket : public Sockets {
 public:
     UDPSocket(int sPort, int dPort=-1);
+    UDPSocket(int sPort, char* adapter, bool startThread=true);
     ~UDPSocket();
 
     bool transmit(uint8_t* pBuf, size_t length) override;
     void transmissionThreadHandler(void) override;
+    bool receive(uint8_t* pBuf, size_t length) override;
 
 private:
     static constexpr int BUFFER_SIZE = 1024;

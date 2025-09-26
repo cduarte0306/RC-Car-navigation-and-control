@@ -20,7 +20,6 @@ using namespace Network;
 
 UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
     sport_ = sPort;
-    dport_ = dPort;
 
     // Create a UDP socket
     socketFD_ = socket(AF_INET, SOCK_DGRAM, 0);
@@ -77,6 +76,68 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
 }
 
 
+UDPSocket::UDPSocket(int sPort, char* adapter, bool startThread):Sockets()  {
+    sport_ = sPort;
+
+    // Create a UDP socket
+    socketFD_ = socket(AF_INET, SOCK_DGRAM, 0);
+    if (socketFD_ < 0) {
+        throw std::runtime_error("Failed to create socket");
+    }
+
+    // Look for enP8p1s0 interface to bind to
+    struct ifaddrs* ifaddr;
+    if (getifaddrs(&ifaddr) == -1) {
+        perror("getifaddrs");
+        throw std::runtime_error("Failed to get network interfaces");
+    }
+
+    std::string ipAddress;
+    for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == nullptr) continue;
+
+        if (ifa->ifa_addr->sa_family == AF_INET &&
+            std::string(ifa->ifa_name) == adapter) {
+            char host[NI_MAXHOST];
+            int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
+                                host, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
+            if (s == 0) {
+                ipAddress = host;
+                break;
+            }
+        }
+    }
+    freeifaddrs(ifaddr);
+
+    if (ipAddress.empty()) {
+        std::stringstream errOut;
+        errOut << "Could not find IP for interface" << adapter;
+        throw std::runtime_error(errOut.str());
+    }
+
+    // Set up the server address
+    struct sockaddr_in serverAddress;
+    memset(&serverAddress, 0, sizeof(serverAddress));
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_port = htons(sPort);
+    inet_pton(AF_INET, ipAddress.c_str(), &serverAddress.sin_addr);
+
+    // Bind the socket
+    if (bind(socketFD_, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0) {
+        perror("bind");
+        throw std::runtime_error("Failed to bind socket");
+    }
+
+    std::cout << "UDP socket bound to " << ipAddress << ":" << sPort << "\n";
+
+    // Start the data transmission thread
+    if (!startThread) return;
+    
+    this->threadCanRun = true;
+    this->transmissionThread = std::thread(&UDPSocket::transmissionThreadHandler, this);
+}
+
+
 UDPSocket::~UDPSocket() {
     // Close the socket
     close(socketFD_);
@@ -104,7 +165,7 @@ bool UDPSocket::transmit(uint8_t* pBuf, size_t length) {
     std::memcpy(&destAddress, &lastClientAddress, sizeof(destAddress));
 
     destAddress.sin_family = AF_INET;
-    destAddress.sin_port = htons(dport_);
+    destAddress.sin_port = htons(this->sport_);
     destAddress.sin_addr = this->lastClientAddress.sin_addr;
     // Send the data
     ssize_t bytesSent = sendto(socketFD_, pBuf, length, 0, (struct sockaddr *)&destAddress, sizeof(destAddress));
@@ -113,6 +174,29 @@ bool UDPSocket::transmit(uint8_t* pBuf, size_t length) {
         return false;
     }
     
+    return true;
+}
+
+
+/**
+ * @brief Receive data from the UDP socket
+ * 
+ * @param pBuf Pointer to the buffer to store received data
+ * @param length Length of the buffer
+ * @return true Data received successfully
+ * @return false Data reception failed
+ */
+bool UDPSocket::receive(uint8_t* pBuf, size_t length) {
+    if (!pBuf) {
+        return false;
+    }
+
+    ssize_t bytesRead = recvfrom(socketFD_, pBuf, length, 0, nullptr, nullptr);
+    if (bytesRead < 0) {
+        perror("recvfrom");
+        return false;
+    }
+
     return true;
 }
 
