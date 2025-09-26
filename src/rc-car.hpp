@@ -18,6 +18,11 @@ public:
 
     void doRCMain(void);
     void joinThread(void);
+
+    template <typename T>
+    T* getModule(void) {
+        return peripherals;
+    }
 private:
     enum {
         CMD_NOOP,

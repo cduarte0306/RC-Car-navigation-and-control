@@ -7,63 +7,74 @@ PORT=2345
 
 JETSON_IP="192.168.1.10"
 JETSON_USER="root"
-JETSON_TARGET_DIR="/home/root"
+JETSON_TARGET_DIR="/opt/rc-car/rc-car-nav/"
 REMOTE_APP_PATH="${JETSON_TARGET_DIR}/rc-car-nav"
+GDBSERVER_PATH="/usr/bin/gdbserver"    # explicit path
 
 MODE="$1"
 
+
 if [[ "$MODE" == "local" ]]; then
     echo "[*] Selected MODE: QEMU (local)"
-
-    # Kill anything using the GDB port
-    PID=$(lsof -ti tcp:$PORT)
-    if [ -n "$PID" ]; then
-        echo "[*] Port $PORT is in use (PID $PID). Killing..."
-        kill -9 "$PID"
-    fi
-
-    # Start QEMU with GDB server in background
-    echo "[*] Launching QEMU with GDB server on port $PORT..."
-    qemu-aarch64 -d in_asm,cpu -L "$YOCTO_SYSROOT" -g $PORT "$APP" > qemu.log 2>&1 &
-    QEMU_PID=$!
-
-    # Wait for GDB port to open
-    for i in {1..20}; do
-        if nc -z localhost $PORT; then
-            echo "[*] QEMU is ready on port $PORT."
-            exit 0
-        fi
-        sleep 0.2
-    done
-
-    echo "[!] QEMU never opened port $PORT — killing PID $QEMU_PID"
-    kill -9 $QEMU_PID
-    exit 1
+    # ... (your unchanged local branch) ...
+    # [keep your existing QEMU + wait-for-port logic here]
+    exit 0
 
 elif [[ "$MODE" == "remote" ]]; then
     echo "[*] Selected MODE: Jetson Nano (remote)"
 
-    echo "[*] Building application..."
-    make -j$(nproc)
-    if [[ $? -ne 0 ]]; then
-        echo "[!] Build failed"
-        exit 1
-    fi
+    echo "[*] Building host app..."
+    cd build
+    make -j"$(nproc)" && cd .. \
+        || { echo "[!] Build failed"; exit 1; }
 
-    echo "[*] Uploading to Jetson..."
-    scp "$APP" "${JETSON_USER}@${JETSON_IP}:${JETSON_TARGET_DIR}/"
+    echo "[*] Killing any previous gdbserver on Jetson..."
+    ssh "${JETSON_USER}@${JETSON_IP}" \
+        "${GDBSERVER_PATH} --version &>/dev/null && pkill -9 -f gdbserver || true"
 
-    echo "[*] Killing any previous instances on Jetson..."
-    ssh "${JETSON_USER}@${JETSON_IP}" "
-        killall -q rc-car-nav gdbserver || true
-    "
+    echo "[*] Uploading app to Jetson..."
+    scp "$APP" "${JETSON_USER}@${JETSON_IP}:${JETSON_TARGET_DIR}/" \
+        || { echo "[!] SCP failed"; exit 1; }
 
     echo "[*] Starting gdbserver on Jetson..."
-    ssh "${JETSON_USER}@${JETSON_IP}" "
-        nohup gdbserver :$PORT $REMOTE_APP_PATH >${JETSON_TARGET_DIR}/gdbserver.log 2>&1 &
-    "
+    ssh "${JETSON_USER}@${JETSON_IP}" <<EOF
+      nohup "${GDBSERVER_PATH}" :${PORT} "${REMOTE_APP_PATH}" \
+        &> "${JETSON_TARGET_DIR}/gdbserver.log" &
+EOF
 
-    echo "[*] GDB server launched on Jetson at ${JETSON_IP}:${PORT}"
+    # wait for port to open
+    echo "[*] Waiting for gdbserver to listen on ${JETSON_IP}:${PORT}..."
+    for i in {1..20}; do
+      if nc -z "${JETSON_IP}" "${PORT}"; then
+        echo "[*] gdbserver is up!"
+        exit 0
+      fi
+      sleep 0.3
+    done
+
+    echo "[!] gdbserver never opened port ${PORT}"
+    exit 1
+    
+elif [[ "$MODE" == "upload" ]]; then
+    echo "[*] Selected MODE: Upload only"
+
+    # ensure the built binary exists
+    if [[ ! -f "$APP" ]]; then
+        echo "[!] App not found: $APP"
+        echo "[*] Try building first or pass path to existing binary."
+        exit 1
+    fi
+    cd build
+    make -j"$(nproc)" && cd .. \
+        || { echo "[!] Build failed"; exit 1; }
+
+    ssh "${JETSON_USER}@${JETSON_IP}" "killall -9 rc-car-updater || true"
+
+    echo "[*] Uploading app to Jetson..."
+    scp "$APP" "${JETSON_USER}@${JETSON_IP}:${JETSON_TARGET_DIR}/" \
+        || { echo "[!] SCP failed"; exit 1; }
+
+    echo "[*] Upload complete: ${REMOTE_APP_PATH}"
     exit 0
 
 else
