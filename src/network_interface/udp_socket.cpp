@@ -39,7 +39,7 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
         if (ifa->ifa_addr == nullptr) continue;
 
         if (ifa->ifa_addr->sa_family == AF_INET &&
-            std::string(ifa->ifa_name) == "enP8p1s0") {
+            std::string(ifa->ifa_name) == "wlP1p1s0") {
             char host[NI_MAXHOST];
             int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
                                 host, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
@@ -164,11 +164,8 @@ bool UDPSocket::transmit(uint8_t* pBuf, size_t length) {
     struct sockaddr_in destAddress;
     std::memcpy(&destAddress, &lastClientAddress, sizeof(destAddress));
 
-    destAddress.sin_family = AF_INET;
-    destAddress.sin_port = htons(this->sport_);
-    destAddress.sin_addr = this->lastClientAddress.sin_addr;
     // Send the data
-    ssize_t bytesSent = sendto(socketFD_, pBuf, length, 0, (struct sockaddr *)&destAddress, sizeof(destAddress));
+    ssize_t bytesSent = sendto(socketFD_, pBuf, length, 0, (struct sockaddr *)&this->lastClientAddress, sizeof(this->lastClientAddress));
     if (bytesSent < 0) {
         perror("sendto");
         return false;
@@ -210,23 +207,23 @@ bool UDPSocket::receive(uint8_t* pBuf, size_t length) {
 void UDPSocket::transmissionThreadHandler(void) {
     char buffer[1500];
     struct sockaddr_in clientAddress;
+    bool clientDetected = false;
 
     struct timeval timeout;
-    timeout.tv_sec = 1;
-    timeout.tv_usec = 0;
-    if (setsockopt(socketFD_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
-        perror("setsockopt SO_RCVTIMEO");
-    }
+    timeout.tv_sec = 60;  // 5 seconds
+    timeout.tv_usec = 0; // 0 microseconds
 
     while( this->threadCanRun ) {
         // Receive data from the socket
         socklen_t clientAddressLength = sizeof(clientAddress);
-        ssize_t bytesRead = recvfrom(socket_, buffer, sizeof(buffer), 0, (struct sockaddr *)&clientAddress, &clientAddressLength);
+        ssize_t bytesRead = recvfrom(this->socketFD_, buffer, sizeof(buffer), 0, (struct sockaddr *)&clientAddress, &clientAddressLength);
         if (bytesRead < 0) {
-            if (errno == EWOULDBLOCK || errno == EAGAIN) {
-                // Timeout occurred, just continue the loop
-                continue;
-            }
+            continue;
+        }
+
+        if (!clientDetected) {
+            std::cout << "Client detected: " << inet_ntoa(clientAddress.sin_addr) << ":" << ntohs(clientAddress.sin_port) << "\n";
+            clientDetected = true;
         }
 
         this->lastClientAddress = clientAddress;

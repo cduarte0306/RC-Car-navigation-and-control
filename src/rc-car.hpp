@@ -40,8 +40,6 @@ private:
             uint8_t    command;
             val_type_t data;
         } payload;
-        
-        uint32_t   crc_32;
     } client_req_t;
 
     typedef struct __attribute__((__packed__)) {

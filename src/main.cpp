@@ -6,7 +6,7 @@
 #include "rc-car.hpp"
 #include "cli/cli.hpp"
 
-int main(int argc, char* argv[]) {
+ int main(int argc, char* argv[]) {
     RcCar rcCar;
     AppCLI cli(rcCar);
 
