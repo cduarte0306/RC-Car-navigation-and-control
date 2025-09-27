@@ -12,6 +12,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <termios.h>
+#include <cstdarg>
+#include <sys/reboot.h>
+
+#include "../../version.h"
 
 
 /* Definations for CLI configurations */
@@ -28,6 +32,11 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
         throw("Failed to open TTY interface");
     }
 
+    this->writeIface("\033[2J\033[H");
+    this->writeIface("\r\n*************************RC Car CLI Interface*************************\r\n");
+    this->writeIface("Software version: %u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
+    this->writeIface("Please enter \"help\" to list available commands\r\n");
+
     const CliCommandBinding cmdBindings[] = {
         (CliCommandBinding){
             "read-psoc",
@@ -38,6 +47,9 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
             false, this,
             
             [](EmbeddedCli *cli, char *args, void *context) {
+                (void)args;
+                (void)cli;
+
                 AppCLI* _cli = static_cast<AppCLI*>(context);
                 RcCar& rcCar = _cli->mainObj;
                 PeripheralCtrl* psoc = rcCar.getModule<PeripheralCtrl>();
@@ -45,12 +57,31 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
                 int ret = psoc->readData(psocData);
                 
                 std::stringstream out;
-                out << "Version: " << psocData.version_major.u8 << "." << psocData.version_minor.u8 << "." << psocData.version_build.u8 << "\r\n"
-                "Speed: " << psocData.speed.f32 << "\r\n" << "Front distance: " << psocData.frontDistance.f32 << "\r\n" << 
-                "Left distance: " << psocData.leftDistance.f32 << "\r\n" << psocData.rightDistance.f32 << "\r\n";
-                std::cout << out.str().c_str() << std::endl;
-                std::string data = out.str();
-                _cli->writeIface(data);
+                out << "Version: "
+                << static_cast<int>(psocData.version_major.u8) << "."
+                << static_cast<int>(psocData.version_minor.u8) << "."
+                << static_cast<int>(psocData.version_build.u8) << "\r\n"
+                << "Speed: " << psocData.speed.f32 << "\r\n"
+                << "Front distance: " << psocData.frontDistance.f32 << "\r\n"
+                << "Left distance: " << psocData.leftDistance.f32 << "\r\n"
+                << psocData.rightDistance.f32;
+                _cli->writeIface("%s\r\n", out.str().c_str());
+            }
+        },
+        (CliCommandBinding){
+            "reboot-cpu",
+            
+            "Reboots CPU after shutting off all RC car components\r\n"
+                "\t\treboot-cpu\r\n",
+            
+            false, this,
+            
+            [](EmbeddedCli *cli, char *args, void *context) {
+                (void)args;
+                (void)cli;
+                AppCLI* _cli = static_cast<AppCLI*>(context);
+                _cli->writeIface("Rebooting CPU. This may take up to 2 minutes...\r\n");
+                reboot(RB_AUTOBOOT);
             }
         }
     };
@@ -106,6 +137,11 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
 
     std::thread cliThread([this]() {
         uint8_t buffer[128];
+        
+        // Simulate the enter key press to show the invitation prompt
+        embeddedCliReceiveChar(this->CLI, '\n');
+        embeddedCliProcess(this->CLI);
+
         while (true) {
             int ret = read(this->fd, buffer, sizeof(buffer));
             if (ret < 0) {
@@ -158,14 +194,29 @@ int AppCLI::openInterface() {
 }
 
 
-int AppCLI::writeIface(std::string& data) {
+/**
+ * @brief Writes formatted data to the TTY interface
+ * 
+ * @param format String format
+ * @param ... 
+ * @return int Number of bytes written, or -1 on error
+ */
+int AppCLI::writeIface(const char* format, ...) {
     if (this->fd < 0) {
         std::cerr << "TTY interface not opened" << std::endl;
         return -1;
     }
 
-    int len = data.length();
-    int ret = write(this->fd, data.c_str(), len);
+    char buffer[1024];
+    va_list args;
+    va_start(args, format);
+    int len = vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    if (len < 0) {
+        std::cerr << "Error formatting string" << std::endl;
+        return -1;
+    }
+    int ret = write(this->fd, buffer, len);
     if (ret < 0) {
         std::cerr << "Error writing to TTY" << std::endl;
         return -1;
