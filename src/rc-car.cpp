@@ -12,7 +12,7 @@
 #include <boost/bind/bind.hpp>
 
 
-#define TELEMETRY_PORT 65000
+#define COMMAND_PORT 65000
 using namespace boost::placeholders;
 
 
@@ -28,10 +28,9 @@ RcCar::RcCar( void ) {
                                                 << (psocVersion & 0xFF);
     }
 
-    this->commandServer = new Network::UDPSocket(TELEMETRY_PORT);
+    this->commandServer = new Network::UDPSocket(COMMAND_PORT);
     this->commandServer->onDataReceived.connect(
-        boost::bind(&RcCar::processCommand, this, _1, _2)
-    );
+    boost::bind(&RcCar::processCommand, this, _1, _2));
 
     // Open up the configuration port. This is a LAN port that is used to configure items such as 
     // the wifi access point.
@@ -110,7 +109,7 @@ void RcCar::rcCarThread(void) {
  * @param length Length of the received data
  */
 void RcCar::processCommand(const uint8_t* pData, size_t length) {
-    if (pData == nullptr || length == 0 || length < sizeof(RcCar::client_req_t)) {
+    if (pData == nullptr || length == 0 ) {
         return;
     }
 
@@ -124,6 +123,7 @@ void RcCar::processCommand(const uint8_t* pData, size_t length) {
             break;
 
         case CMD_FWD_DIR:
+            reply.data = clientData->payload.data; // Echo back the data
             reply.state = true; // Example state for success
             break;
 
