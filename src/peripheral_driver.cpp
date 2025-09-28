@@ -16,7 +16,7 @@
 
 
 PeripheralCtrl::PeripheralCtrl():
-speed(100000),
+speed(1000),
 bitsPerWord(8) {
 
 }
