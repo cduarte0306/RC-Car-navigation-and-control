@@ -85,7 +85,11 @@
         "complex": "cpp",
         "source_location": "cpp",
         "typeindex": "cpp",
-        "format": "cpp"
+        "format": "cpp",
+        "future": "cpp",
+        "shared_mutex": "cpp",
+        "cfenv": "cpp",
+        "stdfloat": "cpp"
     },
     "cmake.buildArgs": ["-j16"]
 }
