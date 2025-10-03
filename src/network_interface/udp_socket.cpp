@@ -16,6 +16,9 @@
 #include "utils/logger.hpp"
 
 
+#define WLAN_ADAPTER_ALIAS  "wlP1p1s0"
+#define ETH_ADAPTER_ALIAS   "enP8p1s0"
+
 using namespace Network;
 
 
@@ -29,34 +32,42 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
         throw std::runtime_error("Failed to create socket");
     }
 
-    // Look for enP8p1s0 interface to bind to
-    struct ifaddrs* ifaddr;
-    if (getifaddrs(&ifaddr) == -1) {
-        perror("getifaddrs");
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to get network interfaces\r\n");
-        throw std::runtime_error("");
-    }
+    auto getAdapter = [&logger](char* adapterName) -> std::string {
+        std::string ipAddress;
 
-    std::string ipAddress;
-    for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr == nullptr) continue;
+        // Look for enP8p1s0 interface to bind to
+        struct ifaddrs* ifaddr;
+        if (getifaddrs(&ifaddr) == -1) {
+            perror("getifaddrs");
+            logger->log(Logger::LOG_LVL_ERROR, "Failed to get network interfaces\r\n");
+            throw std::runtime_error("");
+        }
 
-        if (ifa->ifa_addr->sa_family == AF_INET &&
-            std::string(ifa->ifa_name) == "wlP1p1s0") {
-            char host[NI_MAXHOST];
-            int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
-                                host, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
-            if (s == 0) {
-                ipAddress = host;
-                break;
+        for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+            if (ifa->ifa_addr == nullptr) continue;
+
+            if (ifa->ifa_addr->sa_family == AF_INET &&
+                !(std::strcmp(ifa->ifa_name, adapterName))) {
+                char host[NI_MAXHOST];
+                int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
+                                    host, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
+                if (s == 0) {
+                    ipAddress = host;
+                    break;
+                }
             }
         }
-    }
-    freeifaddrs(ifaddr);
+        freeifaddrs(ifaddr);
+        return ipAddress;
+    };
 
+    std::string ipAddress = getAdapter(WLAN_ADAPTER_ALIAS);
     if (ipAddress.empty()) {
-        logger->log(Logger::LOG_LVL_ERROR, "Could not find IP for interface wlP1p1s0\r\n");
-        throw std::runtime_error("");
+        ipAddress = getAdapter(ETH_ADAPTER_ALIAS);
+        if (ipAddress.empty()) {
+            logger->log(Logger::LOG_LVL_ERROR, "Could not find IP for interface %s\r\n", ETH_ADAPTER_ALIAS);
+            throw std::runtime_error("");
+        }
     }
 
     // Set up the server address
