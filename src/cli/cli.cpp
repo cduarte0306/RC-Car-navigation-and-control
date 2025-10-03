@@ -15,7 +15,8 @@
 #include <cstdarg>
 #include <sys/reboot.h>
 
-#include "../../version.h"
+#include "version.h"
+#include "utils/logger.hpp"
 
 
 /* Definations for CLI configurations */
@@ -130,8 +131,9 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
     CLI->writeChar = [](EmbeddedCli *cli, char c ) {
         AppCLI* _cli = static_cast<AppCLI*>(cli->appContext);
         int ret = write(_cli->fd, &c, 1);
+        Logger* logger = Logger::getLoggerInst();
         if (ret < 0) {
-            std::cerr << "Error writing to TTY" << std::endl;
+            logger->log(Logger::LOG_LVL_ERROR, "%s, %s, Error writing to TTY\r\n", __func__, __LINE__);
         }
     };
 

@@ -13,6 +13,7 @@
 #include <cstring>
 #include <netdb.h>
 #include <iostream>
+#include "utils/logger.hpp"
 
 
 using namespace Network;
@@ -20,6 +21,7 @@ using namespace Network;
 
 UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
     sport_ = sPort;
+    Logger* logger = Logger::getLoggerInst();
 
     // Create a UDP socket
     socketFD_ = socket(AF_INET, SOCK_DGRAM, 0);
@@ -31,7 +33,8 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
     struct ifaddrs* ifaddr;
     if (getifaddrs(&ifaddr) == -1) {
         perror("getifaddrs");
-        throw std::runtime_error("Failed to get network interfaces");
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to get network interfaces\r\n");
+        throw std::runtime_error("");
     }
 
     std::string ipAddress;
@@ -52,7 +55,8 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
     freeifaddrs(ifaddr);
 
     if (ipAddress.empty()) {
-        throw std::runtime_error("Could not find IP for interface enP8p1s0");
+        logger->log(Logger::LOG_LVL_ERROR, "Could not find IP for interface wlP1p1s0\r\n");
+        throw std::runtime_error("");
     }
 
     // Set up the server address
@@ -65,10 +69,11 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
     // Bind the socket
     if (bind(socketFD_, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0) {
         perror("bind");
-        throw std::runtime_error("Failed to bind socket");
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to bind socket\r\n");
+        throw std::runtime_error("");
     }
 
-    std::cout << "UDP socket bound to " << ipAddress << ":" << sPort << "\n";
+    logger->log(Logger::LOG_LVL_INFO, "UDP socket bound to %s:%lu\r\n", ipAddress.c_str(), sPort);
 
     // Start the data transmission thread
     this->threadCanRun = true;
@@ -78,18 +83,21 @@ UDPSocket::UDPSocket(int sPort, int dPort):Sockets() {
 
 UDPSocket::UDPSocket(int sPort, char* adapter, bool startThread):Sockets()  {
     sport_ = sPort;
+    Logger* logger = Logger::getLoggerInst();
 
     // Create a UDP socket
     socketFD_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (socketFD_ < 0) {
-        throw std::runtime_error("Failed to create socket");
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to create socket\r\n");
+        throw std::runtime_error("");
     }
 
     // Look for enP8p1s0 interface to bind to
     struct ifaddrs* ifaddr;
     if (getifaddrs(&ifaddr) == -1) {
         perror("getifaddrs");
-        throw std::runtime_error("Failed to get network interfaces");
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to get network interfaces\r\n");
+        throw std::runtime_error("");
     }
 
     std::string ipAddress;
@@ -112,6 +120,7 @@ UDPSocket::UDPSocket(int sPort, char* adapter, bool startThread):Sockets()  {
     if (ipAddress.empty()) {
         std::stringstream errOut;
         errOut << "Could not find IP for interface" << adapter;
+        logger->log(Logger::LOG_LVL_ERROR, "Could not find IP for interface %s\r\n", adapter);
         throw std::runtime_error(errOut.str());
     }
 
@@ -128,7 +137,7 @@ UDPSocket::UDPSocket(int sPort, char* adapter, bool startThread):Sockets()  {
         throw std::runtime_error("Failed to bind socket");
     }
 
-    std::cout << "UDP socket bound to " << ipAddress << ":" << sPort << "\n";
+    logger->log(Logger::LOG_LVL_INFO, "UDP socket bound to %s:%lu\r\n", ipAddress.c_str(), sPort);
 
     // Start the data transmission thread
     if (!startThread) return;
@@ -213,6 +222,8 @@ void UDPSocket::transmissionThreadHandler(void) {
     timeout.tv_sec = 60;  // 5 seconds
     timeout.tv_usec = 0; // 0 microseconds
 
+    Logger* logger = Logger::getLoggerInst();
+
     while( this->threadCanRun ) {
         // Receive data from the socket
         socklen_t clientAddressLength = sizeof(clientAddress);
@@ -222,7 +233,7 @@ void UDPSocket::transmissionThreadHandler(void) {
         }
 
         if (!clientDetected) {
-            std::cout << "Client detected: " << inet_ntoa(clientAddress.sin_addr) << ":" << ntohs(clientAddress.sin_port) << "\n";
+            logger->log(Logger::LOG_LVL_INFO, "Client detected: %s:%lu\r\n", inet_ntoa(clientAddress.sin_addr), ntohs(clientAddress.sin_port));
             clientDetected = true;
         }
 
