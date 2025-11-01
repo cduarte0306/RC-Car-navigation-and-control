@@ -18,7 +18,7 @@
 
 
 PeripheralCtrl::PeripheralCtrl():
-speed(100000),
+speed(1000000),
 bitsPerWord(8) {
 
 }
@@ -277,7 +277,7 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg) {
     bool ret;
     PeripheralCtrl::spiTransactionStruct dataOut;
     dataOut.ack = 0x00;
-    dataOut.transactionType = 0xFF;
+    dataOut.transactionType = 0x01;
     dataOut.reg = reg;
     dataOut.data.u32 = data->u32;
 

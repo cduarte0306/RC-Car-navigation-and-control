@@ -22,7 +22,11 @@ RcCar::RcCar( void ) {
     Logger* logger = Logger::getLoggerInst();
     
     uint32_t psocVersion = 0;
-    this->isControllerConnected = this->peripherals->doDetectDevice(psocVersion);
+    while (true) {
+            this->isControllerConnected = this->peripherals->doDetectDevice(psocVersion);
+            sleep(1);
+
+    }
     if (this->isControllerConnected) {
         std::cout << "PSoC version detedcted: " << ((psocVersion >> 16 ) & 0xFF) << "." 
                                                 << ((psocVersion >> 16 ) & 0xFF) << "."
