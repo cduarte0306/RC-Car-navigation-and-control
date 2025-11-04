@@ -35,6 +35,7 @@ public:
     int setDriveMode(bool state);
     int setPIParams(float p, float i, float d);
     bool xferSPI(uint8_t* pbuf, size_t length);
+    bool xfer(val_type_t* data, uint8_t reg);
 
 private:
     typedef enum
@@ -68,7 +69,6 @@ private:
         uint8_t ack;
     } spiTransactionStruct;
 
-    bool xfer(val_type_t* data, uint8_t reg);
     bool configSPI(void);  
 private:
     bool isDeviceConnected_ = false;
