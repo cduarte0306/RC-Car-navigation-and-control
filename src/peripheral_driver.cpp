@@ -11,6 +11,8 @@
 #include <cstring>
 #include <stdexcept>
 
+#include "utils/logger.hpp"
+
 
 #define MAX_ATTEMPT_COUNT   5u
 
@@ -49,6 +51,7 @@ bool PeripheralCtrl::doDetectDevice(uint32_t& version) {
     bool ret;
     uint8_t errCount = 0;
     val_type_t data;
+    Logger* logger = Logger::getLoggerInst();
     
     for (int i = 0; i < MAX_ATTEMPT_COUNT; i ++) {
         ret = this->xfer(&data, REG_NOOP);
@@ -61,29 +64,27 @@ bool PeripheralCtrl::doDetectDevice(uint32_t& version) {
 
     ret = this->xfer(&data, REG_VER_MAJOR);
     if (!ret) {
-        std::cerr << "Failed to read version major register." << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read version major register.\r\n");
         return false;
     }
     this->psocData.version_major.u8 = data.u8;  // Fixed assignment
 
     ret = this->xfer(&data, REG_VER_MINOR);
     if (!ret) {
-        std::cerr << "Failed to read version minor register." << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read version minor register.\r\n");
         return false;
     }
     this->psocData.version_minor.u8 = data.u8;  // Fixed assignment
 
     ret = this->xfer(&data, REG_VER_BUILD);
     if (!ret) {
-        std::cerr << "Failed to read version build register." << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read version build register.\r\n");
         return false;
     }
     this->psocData.version_build.u8 = data.u8;  // Fixed assignment
-
-    std::cout << "Peripheral controller detected: "
-              << "Version " << static_cast<int>(this->psocData.version_major.u8) << "."  // Fixed static_cast
-              << static_cast<int>(this->psocData.version_minor.u8) << "."  // Fixed static_cast
-              << static_cast<int>(this->psocData.version_build.u8) << std::endl;  // Fixed static_cast
+    logger->log(Logger::LOG_LVL_INFO,  "Peripheral controller detected:\r\nVersion: %u.%u.%u\r\n",static_cast<int>(this->psocData.version_major.u8),
+                                                                                                  static_cast<int>(this->psocData.version_minor.u8),
+                                                                                                  static_cast<int>(this->psocData.version_build.u8));
 
     version = this->psocData.version_major.u8 << 16 | this->psocData.version_major.u8 << 8 | this->psocData.version_major.u8;
     return true;
@@ -171,32 +172,34 @@ int PeripheralCtrl::setPIParams(float p, float i, float d) {
  * @return int 0 on success, -1 on failure
  */
 int PeripheralCtrl::readData(psocDataStruct& data) {
+    Logger* logger = Logger::getLoggerInst();
+
     if (!this->isDeviceConnected_) {
-        std::cerr << "Peripheral controller not connected." << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Peripheral controller not connected.\r\n");
         return -1;
     }
     
     bool ret = this->xfer(&data.speed, REG_SPEED);
     if (!ret) {
-        std::cerr << "Failed to read speed register." << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read speed register.\r\n");
         return -1;
     }
 
     ret = this->xfer(&data.frontDistance, REG_FRONT_DISTANCE);
     if (!ret) {
-        std::cerr << "Failed to read front distance register." << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read front distance register.\r\n");
         return -1;
     }
 
     ret = this->xfer(&data.leftDistance, REG_LEFT_DISTANCE);
     if (!ret) {
-        std::cerr << "Failed to read left distance register." << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read left distance register.\r\n");
         return -1;
     }
 
     ret = this->xfer(&data.rightDistance, REG_RIGHT_DISTANCE);
     if (!ret) {
-        std::cerr << "Failed to read right distance register." << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read right distance register.\r\n");
         return -1;
     }
 
@@ -215,9 +218,10 @@ int PeripheralCtrl::readData(psocDataStruct& data) {
  */
 bool PeripheralCtrl::configSPI(void) {
     std::string spiDev("/dev/spidev0.0");  // <-- include .0 for CS0
+    Logger* logger = Logger::getLoggerInst();
     this->spiFd = open(spiDev.c_str(), O_RDWR);
     if (this->spiFd < 0) {
-        std::cerr << "Failed to open SPI device: " << strerror(errno) << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to open SPI device: %d\r\n", strerror(errno));
         return false;
     }
 
@@ -227,33 +231,33 @@ bool PeripheralCtrl::configSPI(void) {
     
     // Set SPI mode
     if (ioctl(this->spiFd, SPI_IOC_WR_MODE, &mode) < 0) {
-        std::cerr << "Failed to set SPI mode: " << strerror(errno) << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to set SPI mode: %d\r\n", strerror(errno));
         close(this->spiFd);
         return false;
     }
 
     // Set SPI speed
     if (ioctl(this->spiFd, SPI_IOC_WR_MAX_SPEED_HZ, &_speed) < 0) {
-        std::cerr << "Failed to set SPI speed: " << strerror(errno) << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to set SPI speed: %d\r\n", strerror(errno));
         close(this->spiFd);
         return false;
     }
 
     // Set bits per word
     if (ioctl(this->spiFd, SPI_IOC_WR_BITS_PER_WORD, &bitsPerWord) < 0) {
-        std::cerr << "Failed to set SPI bits per word: " << strerror(errno) << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to set SPI bits per word: %d\r\n", strerror(errno));
         close(this->spiFd);
         return false;
     }
 
     uint32_t actual_speed;
     if (ioctl(this->spiFd, SPI_IOC_RD_MAX_SPEED_HZ, &actual_speed) == 0) {
-        std::cout << "SPI actual speed set to: " << actual_speed << " Hz" << std::endl;
+        logger->log(Logger::LOG_LVL_INFO, "SPI actual speed set to: %luHz\r\n", actual_speed);
     } else {
-        std::cerr << "Failed to read back SPI speed." << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read back SPI speed\r\n");
     }
 
-    std::cout << "SPI device configured successfully." << std::endl;
+    logger->log(Logger::LOG_LVL_INFO, "SPI device configured successfully\r\n");
     return true;
 }
 
@@ -309,7 +313,8 @@ bool PeripheralCtrl::xferSPI(uint8_t* pbuf, size_t length) {
     }
 
     uint8_t rxbuf[sizeof(PeripheralCtrl::spiTransactionStruct)] = {0};  // receive buffer
-
+    Logger* logger = Logger::getLoggerInst();
+    
     struct spi_ioc_transfer tr = {};
     tr.tx_buf = reinterpret_cast<unsigned long>(pbuf);
     tr.rx_buf = reinterpret_cast<unsigned long>(rxbuf);
@@ -320,7 +325,7 @@ bool PeripheralCtrl::xferSPI(uint8_t* pbuf, size_t length) {
 
     int ret = ioctl(this->spiFd, SPI_IOC_MESSAGE(1), &tr);
     if (ret < 1) {
-        std::cerr << "Failed to perform SPI transfer: " << strerror(errno) << std::endl;
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to perform SPI transfer: %d\r\n", strerror(errno));
         return false;
     }
 

@@ -10,7 +10,7 @@
 
 #include <boost/signals2.hpp> // Added for boost signals
 #include <boost/bind/bind.hpp>
-
+#include <utils/logger.hpp>
 
 #define COMMAND_PORT 65000
 using namespace boost::placeholders;
@@ -19,6 +19,7 @@ using namespace boost::placeholders;
 RcCar::RcCar( void ) {
     this->peripherals = new PeripheralCtrl();
     this->peripherals->doConfigureDevice();
+    Logger* logger = Logger::getLoggerInst();
     
     uint32_t psocVersion = 0;
     this->isControllerConnected = this->peripherals->doDetectDevice(psocVersion);
@@ -26,6 +27,9 @@ RcCar::RcCar( void ) {
         std::cout << "PSoC version detedcted: " << ((psocVersion >> 16 ) & 0xFF) << "." 
                                                 << ((psocVersion >> 16 ) & 0xFF) << "."
                                                 << (psocVersion & 0xFF);
+        logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", ((psocVersion >> 16 ) & 0xFF), 
+                                                                                 ((psocVersion >> 16 ) & 0xFF),
+                                                                                 (psocVersion & 0xFF));
     }
 
     this->commandServer = new Network::UDPSocket(COMMAND_PORT);

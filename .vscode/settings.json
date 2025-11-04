@@ -87,7 +87,9 @@
         "typeindex": "cpp",
         "format": "cpp",
         "future": "cpp",
-        "shared_mutex": "cpp"
+        "shared_mutex": "cpp",
+        "cfenv": "cpp",
+        "stdfloat": "cpp"
     },
     "cmake.buildArgs": ["-j16"]
 }
