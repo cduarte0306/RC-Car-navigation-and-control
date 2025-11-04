@@ -49,8 +49,6 @@ bool PeripheralCtrl::doDetectDevice(uint32_t& version) {
     bool ret;
     uint8_t errCount = 0;
     val_type_t data;
-
-    return false; // Temporary disable detection
     
     for (int i = 0; i < MAX_ATTEMPT_COUNT; i ++) {
         ret = this->xfer(&data, REG_NOOP);
@@ -58,6 +56,7 @@ bool PeripheralCtrl::doDetectDevice(uint32_t& version) {
             continue;
         }
         this->isDeviceConnected_ = true;
+        break;
     }
 
     ret = this->xfer(&data, REG_VER_MAJOR);
@@ -274,7 +273,7 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg) {
     bool ret;
     PeripheralCtrl::spiTransactionStruct dataOut;
     dataOut.ack = 0x01;
-    dataOut.transactionType = 0x01;
+    dataOut.transactionType = 0x01;  // Write type transaction
     dataOut.reg = reg;
     dataOut.data.u32 = data->u32;
 
@@ -284,7 +283,7 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg) {
     }
 
     std::memset(&dataOut, 0x00, sizeof(PeripheralCtrl::spiTransactionStruct));
-    dataOut.transactionType = 2;
+    dataOut.transactionType = 0;
     // The next transaction is a read transaction
     ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
     if ( !ret || !dataOut.ack ) {
