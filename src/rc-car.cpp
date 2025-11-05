@@ -20,16 +20,13 @@ RcCar::RcCar( void ) {
     this->peripherals = new PeripheralCtrl();
     this->peripherals->doConfigureDevice();
     Logger* logger = Logger::getLoggerInst();
-    
+    int ret;
     uint32_t psocVersion = 0;
-    this->isControllerConnected = this->peripherals->doDetectDevice(psocVersion);
+    this->isControllerConnected = this->peripherals->doDetectDevice() == 0;
     if (this->isControllerConnected) {
-        std::cout << "PSoC version detedcted: " << ((psocVersion >> 16 ) & 0xFF) << "." 
-                                                << ((psocVersion >> 16 ) & 0xFF) << "."
-                                                << (psocVersion & 0xFF);
-        logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", ((psocVersion >> 16 ) & 0xFF), 
-                                                                                 ((psocVersion >> 16 ) & 0xFF),
-                                                                                 (psocVersion & 0xFF));
+        uint8_t major, minor, build;
+        this->peripherals->getVers(major, minor, build);
+        logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
     }
 
     this->commandServer = new Network::UDPSocket(COMMAND_PORT);
