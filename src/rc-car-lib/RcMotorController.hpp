@@ -1,14 +1,17 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
-
+#include "AdapterBase.hpp"
 #include "RcBase.hpp"
 #include "RcMessageLib.hpp"
 
 
-class MotorController : public Device::Base<Device::MotorCommand> {
+namespace Device {
+class MotorController : public Device::Base, public Adapter::MotorAdapter {
 public:
-    MotorController(std::string name) : Base(name) {}
+    MotorController(int moduleID_, std::string name);
     ~MotorController();
 protected:
+    
 };
+} // namespace Device

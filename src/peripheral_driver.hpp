@@ -29,13 +29,23 @@ public:
 
     bool isDeviceConnected(void) const { return this->isDeviceConnected_; }
     bool doConfigureDevice(void);
-    bool doDetectDevice(uint32_t& version);
+    int doDetectDevice(void);
+    int getVers(uint8_t& major, uint8_t& minor, uint8_t& build);
     int readData(psocDataStruct& data);
     int setMotorState(bool state);
     int setDriveMode(bool state);
     int setPIParams(float p, float i, float d);
+    bool xferSPI(uint8_t* pbuf, size_t length);
+    bool xfer(val_type_t* data, uint8_t reg);
 
 private:
+    enum
+    {
+        READ_TRANSACTION,          // Basic read transaction
+        STAGE_RD_WRT_TRANSACTION,  // Stages a byte from the register map in the read buffer
+        WRITE_REG_TRANSACTION      // Writes to selected register in register map
+    };
+
     typedef enum
     {
         REG_NOOP,
@@ -67,10 +77,7 @@ private:
         uint8_t ack;
     } spiTransactionStruct;
 
-    bool xfer(val_type_t* data, uint8_t reg);
     bool configSPI(void);  
-    bool xferSPI(uint8_t* pbuf, size_t length);
-
 private:
     bool isDeviceConnected_ = false;
     int spiFd = -1;

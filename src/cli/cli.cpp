@@ -14,9 +14,11 @@
 #include <termios.h>
 #include <cstdarg>
 #include <sys/reboot.h>
+#include <vector>
 
 #include "version.h"
 #include "utils/logger.hpp"
+#include "../types.h"
 
 
 /* Definations for CLI configurations */
@@ -67,6 +69,61 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
                 << "Left distance: " << psocData.leftDistance.f32 << "\r\n"
                 << psocData.rightDistance.f32;
                 _cli->writeIface("%s\r\n", out.str().c_str());
+            }
+        },
+        (CliCommandBinding){
+            "write-spi",
+            
+            "Writes SPI data\r\n"
+                "\twrite-spi \"<data>\"\r\n",
+            
+            false, this,
+            
+            [](EmbeddedCli *cli, char *args, void *context) {
+                (void)args;
+                (void)cli;
+                AppCLI* _cli = static_cast<AppCLI*>(context);
+                RcCar& rcCar = _cli->mainObj;
+                PeripheralCtrl* psoc = rcCar.getModule<PeripheralCtrl>();
+                PeripheralCtrl::psocDataStruct psocData;
+                std::vector<uint8_t> array;
+                
+                int index = 1;
+                const char *arg1 = nullptr;
+                while(embeddedCliGetToken(args, index)) {
+                    arg1 = embeddedCliGetToken(args, index++);
+                    array.push_back(std::stoi(std::string(arg1)));
+                }
+
+                if (!arg1)
+                    _cli->writeIface("ERROR: Failed to provide argument\r\n");
+
+                int ret = psoc->xferSPI(array.data(), array.size());
+            }
+        },
+        (CliCommandBinding){
+            "read-spi-reg",
+            
+            "Reads SPI register\r\n"
+                "\tread-spi-reg \"<reg>\"\r\n",
+            true, this,
+            
+            [](EmbeddedCli *cli, char *args, void *context) {
+                (void)cli;
+                const char *reg_ = embeddedCliGetToken(args, 1);
+                AppCLI* _cli = static_cast<AppCLI*>(context);
+                RcCar& rcCar = _cli->mainObj;
+                PeripheralCtrl* psoc = rcCar.getModule<PeripheralCtrl>();
+                val_type_t data;
+                data.u32 = 0;
+
+                int reg = std::stoi(std::string(reg_));
+                if (reg_ == nullptr) {
+                    _cli->writeIface("ERROR: Failed to provide argument\r\n");
+                    return;
+                }
+                psoc->xfer(&data, reg);
+                _cli->writeIface("Register %d: %u\r\n", reg, data.u32);
             }
         },
         (CliCommandBinding){

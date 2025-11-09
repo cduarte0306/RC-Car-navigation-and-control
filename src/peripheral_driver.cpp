@@ -46,48 +46,63 @@ bool PeripheralCtrl::doConfigureDevice(void) {
  * @return true Controller connected
  * @return false No peripheral controller detected
  */
-bool PeripheralCtrl::doDetectDevice(uint32_t& version) {
+int PeripheralCtrl::doDetectDevice(void) {
     // Attempt to read the dummy register
     bool ret;
     uint8_t errCount = 0;
     val_type_t data;
     Logger* logger = Logger::getLoggerInst();
-    
+    // return false;
     for (int i = 0; i < MAX_ATTEMPT_COUNT; i ++) {
         ret = this->xfer(&data, REG_NOOP);
         if (!ret) {
             continue;
         }
-        
         this->isDeviceConnected_ = true;
+        break;
     }
 
+    return 0;
+}
+
+
+/**
+ * @brief Get the version of the peripheral controller
+ * 
+ * @param major Reference to store major version
+ * @param minor Reference to store minor version
+ * @param build Reference to store build version
+ * @return int 0 on success, -1 on failure
+ */
+int PeripheralCtrl::getVers(uint8_t& major, uint8_t& minor, uint8_t& build) {
+    bool ret = false;
+    val_type_t data;
+    Logger* logger = Logger::getLoggerInst();
     ret = this->xfer(&data, REG_VER_MAJOR);
     if (!ret) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to read version major register.\r\n");
-        return false;
+        return -1;
     }
     this->psocData.version_major.u8 = data.u8;  // Fixed assignment
-
+    major = data.u8;
     ret = this->xfer(&data, REG_VER_MINOR);
     if (!ret) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to read version minor register.\r\n");
-        return false;
+        return -1;
     }
     this->psocData.version_minor.u8 = data.u8;  // Fixed assignment
-
+    minor = data.u8;
     ret = this->xfer(&data, REG_VER_BUILD);
     if (!ret) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to read version build register.\r\n");
         return false;
     }
     this->psocData.version_build.u8 = data.u8;  // Fixed assignment
+    build = data.u8;
     logger->log(Logger::LOG_LVL_INFO,  "Peripheral controller detected:\r\nVersion: %u.%u.%u\r\n",static_cast<int>(this->psocData.version_major.u8),
                                                                                                   static_cast<int>(this->psocData.version_minor.u8),
                                                                                                   static_cast<int>(this->psocData.version_build.u8));
-
-    version = this->psocData.version_major.u8 << 16 | this->psocData.version_major.u8 << 8 | this->psocData.version_major.u8;
-    return true;
+    return 0;
 }
 
 
@@ -276,13 +291,21 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg) {
 
     bool ret;
     PeripheralCtrl::spiTransactionStruct dataOut;
-    dataOut.ack = 0x00;
-    dataOut.transactionType = 0x01;
+    dataOut.ack = 0x01;
+    dataOut.transactionType = STAGE_RD_WRT_TRANSACTION;  // Write type transaction
     dataOut.reg = reg;
     dataOut.data.u32 = data->u32;
 
     ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
-    if ( !ret || !dataOut.ack ) {
+    if ( !ret ) {
+        return false;
+    }
+
+    std::memset(&dataOut, 0x00, sizeof(PeripheralCtrl::spiTransactionStruct));
+    dataOut.transactionType = READ_TRANSACTION;
+    // The next transaction is a read transaction
+    ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
+    if ( !ret || !dataOut.ack || (dataOut.reg != reg) ) {
         return false;
     }
 

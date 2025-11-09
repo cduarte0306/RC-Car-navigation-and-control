@@ -7,11 +7,8 @@
 namespace Device {
 class WirelessComms : public Base {
 public:
-    WirelessComms(std::string name) : Base(name) {
-        
-    }
-
-    ~WirelessComms();
+    WirelessComms(int moduleID, std::string name) : Base(moduleID, name) { }
+    ~WirelessComms() { }
 protected:
 };
 };
