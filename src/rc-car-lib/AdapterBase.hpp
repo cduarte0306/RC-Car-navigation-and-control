@@ -44,7 +44,7 @@ namespace Adapter {
 
         virtual int bind(AdapterBase* Adapter) override {
             // Implementation for binding motor adapter
-            
+            bindInterface(static_cast<MotorAdapter*>(Adapter));
             return 0;
         }
 

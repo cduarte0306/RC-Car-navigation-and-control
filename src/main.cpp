@@ -23,9 +23,12 @@ int main(int argc, char* argv[]) {
     std::unique_ptr<Device::MotorController> motorController = std::make_unique<Device::MotorController>(Device::MOTOR_CONTROLLER, "MainMotorController");
     std::unique_ptr<Device::WirelessComms>   commsController = std::make_unique<Device::WirelessComms>  (Device::WIRELESS_COMMS, "MainWirelessComms");
 
-    // Create the out adapters for each module
+    // Create adapters
     commsController->createAdapter<Adapter::MotorAdapter>();
 
+    // Bind modules
+    commsController->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
+    
     // Start each module
     motorController->init();
     commsController->init();
@@ -33,10 +36,9 @@ int main(int argc, char* argv[]) {
     // Connect modules to one another
     Device::Base::joinThreads();
 
-    RcCar rcCar;
-    AppCLI cli(rcCar);
+    // RcCar rcCar;
+    // AppCLI cli(rcCar);
 
-    rcCar.joinThread();
     Device::Base::joinThreads();
     return 0;
 }

@@ -11,6 +11,7 @@ set(SOURCE
     rc-car-lib/RcBase.cpp
     rc-car-lib/RcBase.hpp
     rc-car-lib/RcMotorController.cpp
+    rc-car-lib/RcMotorController.hpp
     rc-car-lib/RcMessageLib.hpp
     rc-car-lib/RcWirelessComms.hpp
 )

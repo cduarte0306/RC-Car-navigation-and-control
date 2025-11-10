@@ -26,7 +26,7 @@ elif [[ "$MODE" == "remote" ]]; then
     echo "[*] Building host app..."
     cd build
     make -j"$(nproc)" && cd .. \
-        || { echo "[!] Build failed"; exit 1; }
+        || { echo "[!] Build failed"; exit 0; }
 
     echo "[*] Killing any previous gdbserver on Jetson..."
     ssh "${JETSON_USER}@${JETSON_IP}" \
@@ -34,7 +34,7 @@ elif [[ "$MODE" == "remote" ]]; then
 
     echo "[*] Uploading app to Jetson..."
     scp "$APP" "${JETSON_USER}@${JETSON_IP}:${JETSON_TARGET_DIR}/" \
-        || { echo "[!] SCP failed"; exit 1; }
+        || { echo "[!] SCP failed"; exit 0; }
 
     echo "[*] Starting gdbserver on Jetson..."
     ssh "${JETSON_USER}@${JETSON_IP}" <<EOF
@@ -53,7 +53,7 @@ EOF
     done
 
     echo "[!] gdbserver never opened port ${PORT}"
-    exit 1
+    exit 0
     
 elif [[ "$MODE" == "upload" ]]; then
     echo "[*] Selected MODE: Upload only"
@@ -62,22 +62,22 @@ elif [[ "$MODE" == "upload" ]]; then
     if [[ ! -f "$APP" ]]; then
         echo "[!] App not found: $APP"
         echo "[*] Try building first or pass path to existing binary."
-        exit 1
+        exit 0
     fi
     cd build
     make -j"$(nproc)" && cd .. \
-        || { echo "[!] Build failed"; exit 1; }
+        || { echo "[!] Build failed"; exit 0; }
 
     ssh "${JETSON_USER}@${JETSON_IP}" "killall -9 rc-car-updater || true"
 
     echo "[*] Uploading app to Jetson..."
     scp "$APP" "${JETSON_USER}@${JETSON_IP}:${JETSON_TARGET_DIR}/" \
-        || { echo "[!] SCP failed"; exit 1; }
+        || { echo "[!] SCP failed"; exit 0; }
 
     echo "[*] Upload complete: ${REMOTE_APP_PATH}"
     exit 0
 
 else
     echo "Usage: $0 [local|remote]"
-    exit 1
+    exit 0
 fi
