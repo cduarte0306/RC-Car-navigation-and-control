@@ -11,15 +11,20 @@
 #include <string>
 #include <iostream>
 
+#include <boost/asio.hpp>
+#include <boost/thread.hpp>
+#include <boost/chrono.hpp>
+
 #include "RcMessageLib.hpp"
 #include "AdapterBase.hpp"
 
-namespace Device {
+namespace Modules {
 
 enum DeviceType {
     WIRELESS_COMMS,
     MOTOR_CONTROLLER,
-    CAMERA_CONTROLLER
+    CAMERA_CONTROLLER,
+    CLI_INTERFACE
 };
 
 struct MotorCommand {
@@ -53,6 +58,7 @@ public:
      * 
      */
     static void joinThreads() {
+        Base::io_context.run();
         for (auto& worker : workerThreads) {
             if (worker.joinable()) {
                 worker.join();
@@ -73,8 +79,6 @@ public:
      * @return int 
      */
     int init(void) {
-        // start the thread running this instance's mainProc and move it into the
-        // shared workerThreads vector so lifetime is managed centrally.
         this->thread = std::thread(&Base::mainProc, this);
         workerThreads.emplace_back(std::move(this->thread));
         return 0;
@@ -89,7 +93,7 @@ public:
         return m_name;
     }
 
-    // Bind a module and transfer ownership. Module U must derive from Device::Base.
+    // Bind a module and transfer ownership. Module U must derive from Modules::Base.
     template<typename U>
     int moduleBind(std::unique_ptr<U> module) {
         static_assert(std::is_base_of<Adapter::AdapterBase, U>::value, "moduleBind: U must derive from Adapter::AdapterBase");
@@ -105,15 +109,12 @@ public:
 
         // Now call bind on the appropriate owned adapter if present
         if (motorAdapter) {
-            std::cout << "Binding MotorAdapter to " << moduleName << "\n";
             motorAdapter->bind(m_boundAdapters[moduleName].get());
         }
         if (CameraAdapter) {
-            std::cout << "Binding CameraAdapter to " << moduleName << "\n";
             CameraAdapter->bind(m_boundAdapters[moduleName].get());
         }
         if (CommsAdapter) {
-            std::cout << "Binding CommsAdapter to " << moduleName << "\n";
             CommsAdapter->bind(m_boundAdapters[moduleName].get());
         }
 
@@ -124,15 +125,13 @@ public:
     void createAdapter() {
         static_assert(std::is_base_of<Adapter::AdapterBase, U>::value, "createAdapter: U must derive from AdapterBase");
         if constexpr (std::is_same<U, Adapter::MotorAdapter>::value) {
-            std::cout << "Creating MotorAdapter\n";
             motorAdapter = std::make_unique<Adapter::MotorAdapter>();
         } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
-            std::cout << "Creating CameraAdapter\n";
             CameraAdapter = std::make_unique<Adapter::CameraAdapter>();
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
-            std::cout << "Creating CommsAdapter\n";
             CommsAdapter = std::make_unique<Adapter::CommsAdapter>();
         } else {
+            throw(std::runtime_error("createAdapter: unsupported adapter type"));
             static_assert(!std::is_same<U, U>::value, "createAdapter: unsupported adapter type");
         }
     }
@@ -148,6 +147,7 @@ public:
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
             return std::move(CommsAdapter);
         } else {
+            throw(std::runtime_error("createAdapter: unsupported adapter type"));
             return nullptr;
         }
     }
@@ -155,7 +155,9 @@ public:
     // Return a non-owning pointer to this module's "in" adapter (ancestor interface).
     // Implementations must NOT transfer ownership; they should return a pointer
     // to an adapter object owned by the module (or nullptr if none).
-    virtual Adapter::AdapterBase* getInputAdapter() = 0;
+    virtual Adapter::AdapterBase* getInputAdapter() {
+        return nullptr;
+    }
 
     // moduleBind overload to accept non-owning adapter pointers (in-adapters).
     template<typename U>
@@ -192,17 +194,14 @@ public:
         if (!adapter) return -1;
         // try MotorAdapter
         if (auto p = dynamic_cast<Adapter::MotorAdapter*>(adapter.get())) {
-            std::cout << "Attaching MotorAdapter\n";
             motorAdapter.reset(static_cast<Adapter::MotorAdapter*>(adapter.release()));
             return 0;
         }
         if (auto p = dynamic_cast<Adapter::CameraAdapter*>(adapter.get())) {
-            std::cout << "Attaching CameraAdapter\n";
             CameraAdapter.reset(static_cast<Adapter::CameraAdapter*>(adapter.release()));
             return 0;
         }
         if (auto p = dynamic_cast<Adapter::CommsAdapter*>(adapter.get())) {
-            std::cout << "Attaching CommsAdapter\n";
             CommsAdapter.reset(static_cast<Adapter::CommsAdapter*>(adapter.release()));
             return 0;
         }
@@ -221,6 +220,7 @@ public:
 protected:
     int sendMailbox(char* pbuf, size_t len);
     int recvMailbox(char* pbuf, size_t len);
+
 
     virtual void mainProc() = 0;
 
@@ -243,15 +243,19 @@ protected:
     std::unordered_map<std::string, Adapter::AdapterBase*> m_boundAdaptersNonOwning;      // non-owning adapters (in-adapters)
     
     // Adapters for different device types
-    std::unique_ptr<Adapter::AdapterBase>  baseAdapter   = nullptr;
+    std::unique_ptr<Adapter::AdapterBase  > baseAdapter   = nullptr;
     std::unique_ptr<Adapter::MotorAdapter > motorAdapter  = nullptr;
     std::unique_ptr<Adapter::CameraAdapter> CameraAdapter = nullptr;
     std::unique_ptr<Adapter::CommsAdapter > CommsAdapter  = nullptr;
-private:
-    static std::vector<std::thread> workerThreads;
 
+    static boost::asio::io_context io_context;
     std::mutex mutex;
     std::thread thread;
+    // boost::thread boostThread;
+
+    std::atomic<bool> running{true};
+
+    static std::vector<std::thread> workerThreads;
 };
 
-} // namespace Device
+} // namespace Modules

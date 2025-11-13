@@ -13,11 +13,15 @@
 #include <optional>
 
 #include <boost/signals2.hpp> // Added for boost signals
+#include <boost/asio.hpp>
+#include <boost/bind/bind.hpp>
+#include <functional>
 
+using boost::asio::ip::udp;
 
 class Sockets {
 public:
-    Sockets() {
+    Sockets(boost::asio::io_context& io_context, unsigned short port) : socket_(io_context) {
 
     }
     
@@ -35,9 +39,7 @@ public:
 
     boost::signals2::signal<void(const uint8_t* data, size_t length)> onDataReceived;
 
-    virtual void transmissionThreadHandler(void) {
-        
-    }
+    virtual void startReceive(std::function<void(const uint8_t* data, size_t length)>)  = 0;
 
     std::optional<std::string> findInterface(const char* name) {
         if (!name) {
@@ -79,11 +81,16 @@ protected:
 
     int sport_ = -1;
     int dport_ = -1;
-    int socketFD_ = -1;
 
-    std::thread transmissionThread;
-    
-    // Signal to notify when data is received
+    /**
+     * @brief Callback function when data is received
+     * 
+     */
+    std::function<void(const uint8_t* data, size_t length)> dataReceivedCallback;
+
+    udp::socket socket_;
+    udp::endpoint remote_endpoint_;
+    std::array<char, 32768> recv_buffer_;
 };
 
 

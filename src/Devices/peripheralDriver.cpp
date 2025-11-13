@@ -1,4 +1,4 @@
-#include "peripheral_driver.hpp"
+#include "peripheralDriver.hpp"
 #include "types.h"
 #include <cerrno>
 #include <cstdint>
@@ -16,11 +16,13 @@
 
 #define MAX_ATTEMPT_COUNT   5u
 
-
+namespace Device {
 PeripheralCtrl::PeripheralCtrl():
 speed(1000000),
 bitsPerWord(8) {
-
+    if (!this->configSPI()) {
+        throw std::runtime_error("Failed to configure SPI interface");
+    }
 }
 
 
@@ -48,21 +50,20 @@ bool PeripheralCtrl::doConfigureDevice(void) {
  */
 int PeripheralCtrl::doDetectDevice(void) {
     // Attempt to read the dummy register
-    bool ret;
+    int ret = -1;
     uint8_t errCount = 0;
     val_type_t data;
-    Logger* logger = Logger::getLoggerInst();
     // return false;
     for (int i = 0; i < MAX_ATTEMPT_COUNT; i ++) {
-        ret = this->xfer(&data, REG_NOOP);
-        if (!ret) {
+        if (!this->xfer(&data, REG_NOOP)) {
             continue;
         }
+
+        ret = 0;
         this->isDeviceConnected_ = true;
         break;
     }
-
-    return 0;
+    return ret;
 }
 
 
@@ -99,9 +100,6 @@ int PeripheralCtrl::getVers(uint8_t& major, uint8_t& minor, uint8_t& build) {
     }
     this->psocData.version_build.u8 = data.u8;  // Fixed assignment
     build = data.u8;
-    logger->log(Logger::LOG_LVL_INFO,  "Peripheral controller detected:\r\nVersion: %u.%u.%u\r\n",static_cast<int>(this->psocData.version_major.u8),
-                                                                                                  static_cast<int>(this->psocData.version_minor.u8),
-                                                                                                  static_cast<int>(this->psocData.version_build.u8));
     return 0;
 }
 
@@ -190,7 +188,7 @@ int PeripheralCtrl::readData(psocDataStruct& data) {
     Logger* logger = Logger::getLoggerInst();
 
     if (!this->isDeviceConnected_) {
-        logger->log(Logger::LOG_LVL_ERROR, "Peripheral controller not connected.\r\n");
+        // logger->log(Logger::LOG_LVL_ERROR, "Peripheral controller not connected.\r\n");
         return -1;
     }
     
@@ -289,28 +287,34 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg) {
         return false;
     }
 
-    bool ret;
-    PeripheralCtrl::spiTransactionStruct dataOut;
-    dataOut.ack = 0x01;
-    dataOut.transactionType = STAGE_RD_WRT_TRANSACTION;  // Write type transaction
-    dataOut.reg = reg;
-    dataOut.data.u32 = data->u32;
+    for (int i = 0; i < MAX_ATTEMPT_COUNT; i ++) {
+        bool ret = false;
+        PeripheralCtrl::spiTransactionStruct dataOut;
+        dataOut.ack = 0x01;
+        dataOut.transactionType = STAGE_RD_WRT_TRANSACTION;  // Write type transaction
+        dataOut.reg = reg;
+        dataOut.data.u32 = data->u32;
 
-    ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
-    if ( !ret ) {
-        return false;
+        ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
+        if ( !ret ) {
+            return false;
+        }
+
+        std::memset(&dataOut, 0x00, sizeof(PeripheralCtrl::spiTransactionStruct));
+        dataOut.transactionType = READ_TRANSACTION;
+        // The next transaction is a read transaction
+        ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
+        if ( !ret  ) {
+            return false;
+        }
+
+        if (!dataOut.ack || (dataOut.reg != reg))
+            continue;
+
+        data->u32 = dataOut.data.u32;
+        return true;
     }
-
-    std::memset(&dataOut, 0x00, sizeof(PeripheralCtrl::spiTransactionStruct));
-    dataOut.transactionType = READ_TRANSACTION;
-    // The next transaction is a read transaction
-    ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
-    if ( !ret || !dataOut.ack || (dataOut.reg != reg) ) {
-        return false;
-    }
-
-    data->u32 = dataOut.data.u32;
-    return true;
+    return false;
 }
 
 
@@ -346,4 +350,5 @@ bool PeripheralCtrl::xferSPI(uint8_t* pbuf, size_t length) {
 
     memcpy(pbuf, rxbuf, length);
     return true;
+}
 }
