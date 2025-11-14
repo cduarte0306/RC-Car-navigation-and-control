@@ -89,7 +89,8 @@
         "future": "cpp",
         "shared_mutex": "cpp",
         "cfenv": "cpp",
-        "stdfloat": "cpp"
+        "stdfloat": "cpp",
+        "coroutine": "cpp"
     },
     "cmake.buildArgs": ["-j16"]
 }

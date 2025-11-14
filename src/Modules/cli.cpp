@@ -4,7 +4,7 @@
 #include <thread>
 
 #include "cli.hpp"
-#include "../peripheral_driver.hpp"
+// #include "../peripheral_driver.hpp"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +20,8 @@
 #include "utils/logger.hpp"
 #include "../types.h"
 
+#include "RcMotorController.hpp"
+
 
 /* Definations for CLI configurations */
 #define CLI_BUFFER_SIZE     (256u)
@@ -29,8 +31,9 @@
 
 #define CLI_PORT            (65000)
 
-
-AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
+namespace Modules
+{
+AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
     if (this->openInterface() < 0) {
         throw("Failed to open TTY interface");
     }
@@ -50,24 +53,38 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
             false, this,
             
             [](EmbeddedCli *cli, char *args, void *context) {
+                typedef struct {
+                    val_type_t version_major;   // Major version
+                    val_type_t version_minor;   // Minor version
+                    val_type_t version_build;   // Build version
+                    val_type_t speed;          // Speed in Hz
+                    val_type_t frontDistance;  // Distance in mm
+                    val_type_t leftDistance;   // Distance in mm
+                    val_type_t rightDistance;  // Distance in mm
+                } psocDataStruct;
+
                 (void)args;
                 (void)cli;
-
-                AppCLI* _cli = static_cast<AppCLI*>(context);
-                RcCar& rcCar = _cli->mainObj;
-                PeripheralCtrl* psoc = rcCar.getModule<PeripheralCtrl>();
-                PeripheralCtrl::psocDataStruct psocData;
-                int ret = psoc->readData(psocData);
+                char buff[1024];
+                Modules::MotorController::MotorCommand_t* cmd = reinterpret_cast<Modules::MotorController::MotorCommand_t*>(buff);
+                cmd->command = Modules::MotorController::MOTOR_CMD_READ_DATA;
                 
+                AppCLI* _cli = static_cast<AppCLI*>(context);
+                int ret = _cli->motorAdapter->moduleCommand(buff, sizeof(buff));
+                if (ret < 0) {
+                    _cli->writeIface("Failed to read register: %d\r\n", cmd->data_1.u8);
+                }
+
+                psocDataStruct* psocData = reinterpret_cast<psocDataStruct*>(buff + sizeof(Modules::MotorController::MotorCommand_t));
                 std::stringstream out;
                 out << "Version: "
-                << static_cast<int>(psocData.version_major.u8) << "."
-                << static_cast<int>(psocData.version_minor.u8) << "."
-                << static_cast<int>(psocData.version_build.u8) << "\r\n"
-                << "Speed: " << psocData.speed.f32 << "\r\n"
-                << "Front distance: " << psocData.frontDistance.f32 << "\r\n"
-                << "Left distance: " << psocData.leftDistance.f32 << "\r\n"
-                << psocData.rightDistance.f32;
+                << static_cast<int>(psocData->version_major.u8) << "."
+                << static_cast<int>(psocData->version_minor.u8) << "."
+                << static_cast<int>(psocData->version_build.u8) << "\r\n"
+                << "Speed: " << psocData->speed.f32 << "\r\n"
+                << "Front distance: " << psocData->frontDistance.f32 << "\r\n"
+                << "Left distance: " << psocData->leftDistance.f32 << "\r\n"
+                << psocData->rightDistance.f32;
                 _cli->writeIface("%s\r\n", out.str().c_str());
             }
         },
@@ -83,9 +100,6 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
                 (void)args;
                 (void)cli;
                 AppCLI* _cli = static_cast<AppCLI*>(context);
-                RcCar& rcCar = _cli->mainObj;
-                PeripheralCtrl* psoc = rcCar.getModule<PeripheralCtrl>();
-                PeripheralCtrl::psocDataStruct psocData;
                 std::vector<uint8_t> array;
                 
                 int index = 1;
@@ -94,11 +108,15 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
                     arg1 = embeddedCliGetToken(args, index++);
                     array.push_back(std::stoi(std::string(arg1)));
                 }
-
-                if (!arg1)
+                char buff[1024];
+                Modules::MotorController::MotorCommand_t* cmd = reinterpret_cast<Modules::MotorController::MotorCommand_t*>(buff);
+                cmd->command = Modules::MotorController::MOTOR_CMD_SPI_WRITE;
+                if (!arg1) {
                     _cli->writeIface("ERROR: Failed to provide argument\r\n");
+                    return;
+                }
 
-                int ret = psoc->xferSPI(array.data(), array.size());
+                int ret = _cli->motorAdapter->moduleCommand(buff, sizeof(buff));
             }
         },
         (CliCommandBinding){
@@ -112,18 +130,21 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
                 (void)cli;
                 const char *reg_ = embeddedCliGetToken(args, 1);
                 AppCLI* _cli = static_cast<AppCLI*>(context);
-                RcCar& rcCar = _cli->mainObj;
-                PeripheralCtrl* psoc = rcCar.getModule<PeripheralCtrl>();
-                val_type_t data;
-                data.u32 = 0;
 
                 int reg = std::stoi(std::string(reg_));
                 if (reg_ == nullptr) {
                     _cli->writeIface("ERROR: Failed to provide argument\r\n");
                     return;
                 }
-                psoc->xfer(&data, reg);
-                _cli->writeIface("Register %d: %u\r\n", reg, data.u32);
+                
+                char buff[1024];
+                Modules::MotorController::MotorCommand_t* cmd = reinterpret_cast<Modules::MotorController::MotorCommand_t*>(buff);
+                cmd->command = Modules::MotorController::MOTOR_CMD_SPI_READ;
+                int ret = _cli->motorAdapter->moduleCommand(buff, sizeof(buff));
+                if (ret < 0) {
+                    _cli->writeIface("Failed to read register: %d\r\n", cmd->data_1.u8);
+                }
+                _cli->writeIface("Register %d: %u\r\n", reg, cmd->data_1.u8);
             }
         },
         (CliCommandBinding){
@@ -194,35 +215,52 @@ AppCLI::AppCLI(RcCar& mainObj) : mainObj(mainObj) {
         }
     };
 
-    std::thread cliThread([this]() {
-        uint8_t buffer[128];
-        
-        // Simulate the enter key press to show the invitation prompt
-        embeddedCliReceiveChar(this->CLI, '\n');
-        embeddedCliProcess(this->CLI);
-
-        while (true) {
-            int ret = read(this->fd, buffer, sizeof(buffer));
-            if (ret < 0) {
-                std::cerr << "Error reading from TTY" << std::endl;
-                continue;
-            }
-            for (int i = 0; i < ret; ++i) {
-                embeddedCliReceiveChar(this->CLI, buffer[i]);
-            }
-            embeddedCliProcess(this->CLI);
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-    });
-    cliThread.detach();
+    Logger* logger = Logger::getLoggerInst();
+    logger->log(Logger::LOG_LVL_INFO, "CLI Initialized...\r\n");
 }
 
 
 AppCLI::~AppCLI() {
+}
 
+int AppCLI::stop(void) {
+    // Stop main loop and close TTY
+    running = false;
+    if (fd >= 0) {
+        close(fd);
+        fd = -1;
+    }
+    return 0;
 }
 
 
+void AppCLI::mainProc() {
+    uint8_t buffer[128];
+        
+    // Simulate the enter key press to show the invitation prompt
+    embeddedCliReceiveChar(this->CLI, '\n');
+    embeddedCliProcess(this->CLI);
+
+    while (true) {
+        int ret = read(this->fd, buffer, sizeof(buffer));
+        if (ret < 0) {
+            std::cerr << "Error reading from TTY" << std::endl;
+            continue;
+        }
+        for (int i = 0; i < ret; ++i) {
+            embeddedCliReceiveChar(this->CLI, buffer[i]);
+        }
+        embeddedCliProcess(this->CLI);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+
+/**
+ * @brief Opens the TTY interface
+ * 
+ * @return int File descriptor of opened TTY, or -1 on error
+ */
 int AppCLI::openInterface() {
     this->fd = open(this->tty, O_RDWR | O_NOCTTY | O_NDELAY);
     if (fd == -1) {
@@ -281,4 +319,5 @@ int AppCLI::writeIface(const char* format, ...) {
         return -1;
     }
     return ret;
+}
 }

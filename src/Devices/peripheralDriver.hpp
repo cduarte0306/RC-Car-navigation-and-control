@@ -5,8 +5,11 @@
 #include <cstddef>
 #include <stdint.h>
 
+#include "DeviceBase.hpp"
 
-class PeripheralCtrl {
+
+namespace Device {
+class PeripheralCtrl : public Device::DeviceBase {
 public:
     typedef struct {
         val_type_t version_major;   // Major version
@@ -86,5 +89,6 @@ private:
 
     psocDataStruct psocData = {0};
 };
+}
 
 #endif
