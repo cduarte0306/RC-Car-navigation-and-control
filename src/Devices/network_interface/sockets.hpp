@@ -39,7 +39,7 @@ public:
 
     boost::signals2::signal<void(const uint8_t* data, size_t length)> onDataReceived;
 
-    virtual void startReceive(std::function<void(const uint8_t* data, size_t length)>)  = 0;
+    virtual void startReceive(std::function<void(const uint8_t* data, size_t& length)>)  = 0;
 
     std::optional<std::string> findInterface(const char* name) {
         if (!name) {
@@ -86,7 +86,7 @@ protected:
      * @brief Callback function when data is received
      * 
      */
-    std::function<void(const uint8_t* data, size_t length)> dataReceivedCallback;
+    std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback;
 
     udp::socket socket_;
     udp::endpoint remote_endpoint_;

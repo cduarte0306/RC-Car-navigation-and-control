@@ -14,13 +14,13 @@ namespace Network {
 
 class UdpServer : public Sockets {
 public:
-    UdpServer(boost::asio::io_context& io_context, std::string adapter, unsigned short port);
+    UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port);
     UdpServer(boost::asio::io_context& io_context, int port, char* adapter, bool startThread=true);
     ~UdpServer();
 
     bool transmit(uint8_t* pBuf, size_t length) override;
 
-    virtual void startReceive(std::function<void(const uint8_t* data, size_t length)> dataReceivedCallback_) override;
+    virtual void startReceive(std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback_) override;
 private:
     void startReceive_(void);
 

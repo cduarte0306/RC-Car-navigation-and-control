@@ -60,7 +60,7 @@ protected:
         }
     }
 
-    void processIncomingData(const uint8_t* data, size_t length);
+    void processIncomingData(const uint8_t* data, size_t& length);
 
     std::unique_ptr<Network::UdpServer> m_UdpSocket;
 };

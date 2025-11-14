@@ -96,6 +96,30 @@ int MotorController::moduleCommand_(char* pbuf, size_t len) {
 }
 
 
+int MotorController::setMotorSpeed_(int speed) {
+    if (!m_isControllerConnected) {
+        return -1;
+    }
+
+    Logger* logger = Logger::getLoggerInst();
+    logger->log(Logger::LOG_LVL_INFO, "Setting motor speed: %d\r\n", speed);
+
+    return 0;
+}
+
+
+int MotorController::steer_(int angle) {
+    if (!m_isControllerConnected) {
+        return -1;
+    }
+
+    Logger* logger = Logger::getLoggerInst();
+    logger->log(Logger::LOG_LVL_INFO, "Setting steering angle: %d\r\n", angle);
+
+    return 0;
+}
+
+
 void MotorController::pollTlmData(void) {
     if (!m_isControllerConnected) {
         return;

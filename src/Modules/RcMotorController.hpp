@@ -66,13 +66,15 @@ protected:
      * @param speed Motor speed
      * @return int Return status
      */
-    virtual int setMotorSpeed_(int speed) override {
-        if (!m_isControllerConnected) {
-            return -1;
-        }
-        // return this->peripheralDriver->setMotorState(speed != 0);
-        return 0;
-    }
+    virtual int setMotorSpeed_(int speed) override;
+
+    /**
+     * @brief Sets the servo's steering angle
+     * 
+     * @param angle Steering angle
+     * @return int Return status
+     */
+    virtual int steer_(int angle) override;
 
     /**
      * @brief Peripheral driver instance

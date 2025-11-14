@@ -14,7 +14,7 @@
 using namespace Network;
 
 
-UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, unsigned short port):
+UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port):
     Sockets(io_context, port) {
 
     sport_ = port;
@@ -51,7 +51,7 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, u
 
     std::string ipAddress = getAdapter(adapter);
     if (ipAddress.empty()) {
-        ipAddress = getAdapter(adapter);
+        ipAddress = getAdapter(fallbackAdapter);
         if (ipAddress.empty()) {
             logger->log(Logger::LOG_LVL_ERROR, "Could not find IP for interface %s\r\n", adapter.c_str());
             throw std::runtime_error("");
@@ -70,7 +70,7 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, u
  * 
  * @param dataReceivedCallback_ Callback function to handle received data
  */
-void UdpServer::startReceive(std::function<void(const uint8_t* data, size_t length)> dataReceivedCallback_) {
+void UdpServer::startReceive(std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback_) {
     dataReceivedCallback = dataReceivedCallback_;
 
     this->startReceive_();
@@ -89,6 +89,17 @@ void UdpServer::startReceive_(void) {
                 // Call the data received callback
                 if (dataReceivedCallback) {
                     dataReceivedCallback(reinterpret_cast<const uint8_t*>(recv_buffer_.data()), bytes_recvd);
+
+                    // Reply with the receive buffer
+                    socket_.async_send_to(
+                    boost::asio::buffer(recv_buffer_.data(), bytes_recvd), remote_endpoint_,
+                    [](const boost::system::error_code& ec, std::size_t bytes_sent) {
+                        if (ec) {
+                            Logger* logger = Logger::getLoggerInst();
+                            logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s\r\n", ec.message().c_str());
+                        }
+                    });
+
                 }
             }
             // Continue receiving

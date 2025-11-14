@@ -1,5 +1,5 @@
 set(CMAKE_BUILD_TYPE Debug)
-set(CMAKE_CXX_FLAGS_DEBUG "-g")
+set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 
 set(SOURCE
     main.cpp
