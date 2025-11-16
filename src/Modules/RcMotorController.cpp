@@ -20,9 +20,20 @@ MotorController::MotorController(int moduleID_, std::string name) : Base(moduleI
             logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
             m_isControllerConnected = true;
         }
+
+        this->m_PwmFwd = std::make_unique<Device::Pwm>("/dev/pwm0", 1000);
+        ret = this->m_PwmFwd->writeEnable(true);
+        if (ret < 0) {
+            logger->log(Logger::LOG_LVL_ERROR, "Failed to enable Motor control PWM\r\n");
+        }
+
+        this->m_PwmSteer = std::make_unique<Device::Pwm>("/dev/pwm2", 50);
+        ret = this->m_PwmSteer->writeEnable(true);
+        if (ret < 0) {
+            logger->log(Logger::LOG_LVL_ERROR, "Failed to enable Servo control PWM\r\n");
+        }
     } catch (const std::exception& e) {
-        Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize PeripheralCtrl: %s\r\n", e.what());
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize PeripheralCtrl and motor control: %s\r\n", e.what());
     }
 }
 
@@ -96,30 +107,68 @@ int MotorController::moduleCommand_(char* pbuf, size_t len) {
 }
 
 
+/**
+ * @brief Set the motor speed
+ * 
+ * @param speed Speed in PWM duty cycle
+ * @return int 
+ */
 int MotorController::setMotorSpeed_(int speed) {
     if (!m_isControllerConnected) {
         return -1;
     }
 
-    Logger* logger = Logger::getLoggerInst();
-    logger->log(Logger::LOG_LVL_INFO, "Setting motor speed: %d\r\n", speed);
+    if (speed < 0) {
+        speed *= -2;
+    }
 
-    return 0;
+    if (speed < 3) {
+        speed = 0;
+    }
+    Logger* logger = Logger::getLoggerInst();
+    int ret = this->m_PwmFwd->writeDutyCycle(speed);
+    if (ret < 0) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to set PWM duty cycle\r\n");
+    }
+    return ret;
 }
 
 
-int MotorController::steer_(int angle) {
-    if (!m_isControllerConnected) {
+/**
+ * @brief Steers the motor 
+ * 
+ * @param angle Accetps steer in counts
+ * @return int 
+ */
+int MotorController::steer_(int counts)
+{
+    if (!m_isControllerConnected)
+        return -1;
+
+    // Clamp
+    counts = std::max(-127, std::min(127, counts));
+
+    // Map -127..127 -> 5%..10%
+    float duty_percent = 7.5f + (counts / 127.0f) * 2.5f;
+
+    // Convert to integer for ioctl
+    uint32_t duty_int = static_cast<uint32_t>(duty_percent);
+
+    int ret = this->m_PwmSteer->writeDutyCycle(duty_int);
+    if (ret < 0) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+            "Failed to set PWM duty cycle\r\n");
         return -1;
     }
 
-    Logger* logger = Logger::getLoggerInst();
-    logger->log(Logger::LOG_LVL_INFO, "Setting steering angle: %d\r\n", angle);
-
     return 0;
 }
 
 
+/**
+ * @brief Polls telemetry data
+ * 
+ */
 void MotorController::pollTlmData(void) {
     if (!m_isControllerConnected) {
         return;

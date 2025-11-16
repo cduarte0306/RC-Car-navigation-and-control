@@ -5,7 +5,9 @@
 #include "RcBase.hpp"
 #include "RcMessageLib.hpp"
 #include "Devices/peripheralDriver.hpp"
+#include "Devices/Pwm.hpp"
 #include "Devices/DeviceBase.hpp"
+
 
 namespace Modules {
 class MotorController : public Modules::Base, public Adapter::MotorAdapter {
@@ -52,6 +54,13 @@ protected:
 
     virtual void mainProc() override;
 
+    /**
+     * @brief Raw serial interface with the motor cotroller
+     * 
+     * @param pbuf Data pointer
+     * @param len Length of data
+     * @return int 
+     */
     virtual int moduleCommand_(char* pbuf, size_t len) override;
 
     /**
@@ -74,13 +83,25 @@ protected:
      * @param angle Steering angle
      * @return int Return status
      */
-    virtual int steer_(int angle) override;
+    virtual int steer_(int counts) override;
 
     /**
      * @brief Peripheral driver instance
      * 
      */
     std::unique_ptr<Device::PeripheralCtrl> peripheralDriver = nullptr;
+
+    /**
+     * @brief Direction control PWM
+     * 
+     */
+    std::unique_ptr<Device::Pwm> m_PwmFwd   = nullptr;
+
+    /**
+     * @brief Servo control PWM
+     * 
+     */
+    std::unique_ptr<Device::Pwm> m_PwmSteer = nullptr;
 
     /**
      * @brief Is the motor controller connected
