@@ -15,6 +15,8 @@ set(SOURCE
     Modules/RcWirelessComms.cpp
     Devices/peripheralDriver.hpp
     Devices/peripheralDriver.cpp
+    Devices/Pwm.cpp
+    Devices/Pwm.hpp
     Devices/network_interface/UdpServer.cpp
     Devices/network_interface/UdpServer.hpp
 )

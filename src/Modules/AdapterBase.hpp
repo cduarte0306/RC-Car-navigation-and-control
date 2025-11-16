@@ -142,7 +142,7 @@ namespace Adapter {
             return 0;
         }
 
-        virtual int steer_(int angle) {
+        virtual int steer_(int counts) {
             // Implementation for steering
             return 0;
         }
