@@ -50,6 +50,9 @@ Pwm::~Pwm() {
  * @return int 
  */
 int Pwm::writeEnable(bool status) {
+    if (this->fd < 0) {
+        return -1;
+    }
     return doIoctl(this->fd, (status) ? (TEGRA_PWM_IOC_ENABLE) : (TEGRA_PWM_IOC_DISABLE), NULL);
 }
 
@@ -61,7 +64,10 @@ int Pwm::writeEnable(bool status) {
  * @return int 
  */
 int Pwm::writeDutyCycle(int period) {
-    return doIoctl(fd, TEGRA_PWM_IOC_SET_DUTY, &period);
+    if (this->fd < 0) {
+        return -1;
+    }
+    return doIoctl(this->fd, TEGRA_PWM_IOC_SET_DUTY, &period);
 }
 
 int Pwm::doIoctl(int fd, unsigned long cmd, void *arg) {

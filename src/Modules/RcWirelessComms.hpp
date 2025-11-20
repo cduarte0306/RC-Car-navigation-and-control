@@ -52,13 +52,7 @@ protected:
         return 0;
     }
 
-    virtual void mainProc() override {
-        // Main processing loop for the motor controller
-        while (true) {
-            // Process motor commands
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    }
+    virtual void mainProc() override;
 
     void processIncomingData(const uint8_t* data, size_t& length);
 

@@ -21,12 +21,16 @@ using boost::asio::ip::udp;
 
 class Sockets {
 public:
-    Sockets(boost::asio::io_context& io_context, unsigned short port) : socket_(io_context) {
+    Sockets(boost::asio::io_context& io_context, unsigned short port) : m_Socket_(io_context) {
 
     }
     
     virtual ~Sockets() {
 
+    }
+
+    std::string& getAdapterName() {
+        return m_AdapterName;
     }
 
     virtual bool transmit(uint8_t* pBuf, size_t length) {
@@ -86,11 +90,13 @@ protected:
      * @brief Callback function when data is received
      * 
      */
-    std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback;
+    std::function<void(const uint8_t* data, size_t& length)> m_DataReceivedCallback;
 
-    udp::socket socket_;
+    udp::socket m_Socket_;
     udp::endpoint remote_endpoint_;
     std::array<char, 32768> recv_buffer_;
+
+    std::string m_AdapterName;
 };
 
 

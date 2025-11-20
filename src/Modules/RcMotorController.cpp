@@ -10,30 +10,35 @@
 namespace Modules {
 MotorController::MotorController(int moduleID_, std::string name) : Base(moduleID, name), Adapter::MotorAdapter(name) {
     Logger* logger = Logger::getLoggerInst();
+    int ret = 0;
+    this->peripheralDriver = std::make_unique<Device::PeripheralCtrl>();
+    ret = this->peripheralDriver->doDetectDevice();
+    if (ret == 0) {
+        uint8_t major, minor, build;
+        this->peripheralDriver->getVers(major, minor, build);
+        logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
+        m_isControllerConnected = true;
+    }
 
     try {
-        this->peripheralDriver = std::make_unique<Device::PeripheralCtrl>();
-        int ret = this->peripheralDriver->doDetectDevice();
-        if (ret == 0) {
-            uint8_t major, minor, build;
-            this->peripheralDriver->getVers(major, minor, build);
-            logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
-            m_isControllerConnected = true;
-        }
 
         this->m_PwmFwd = std::make_unique<Device::Pwm>("/dev/pwm0", 1000);
         ret = this->m_PwmFwd->writeEnable(true);
         if (ret < 0) {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to enable Motor control PWM\r\n");
         }
+    } catch (const std::exception& e) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize PeripheralCtrl and motor control: %s\r\n", e.what());
+    }
 
+    try {
         this->m_PwmSteer = std::make_unique<Device::Pwm>("/dev/pwm2", 50);
         ret = this->m_PwmSteer->writeEnable(true);
         if (ret < 0) {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to enable Servo control PWM\r\n");
         }
     } catch (const std::exception& e) {
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize PeripheralCtrl and motor control: %s\r\n", e.what());
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize Servo PWM: %s\r\n", e.what());
     }
 }
 
@@ -114,7 +119,7 @@ int MotorController::moduleCommand_(char* pbuf, size_t len) {
  * @return int 
  */
 int MotorController::setMotorSpeed_(int speed) {
-    if (!m_isControllerConnected) {
+    if (!m_isControllerConnected || (this->m_PwmFwd == nullptr)) {
         return -1;
     }
 
@@ -142,7 +147,7 @@ int MotorController::setMotorSpeed_(int speed) {
  */
 int MotorController::steer_(int counts)
 {
-    if (!m_isControllerConnected)
+    if (!m_isControllerConnected || (this->m_PwmSteer == nullptr))
         return -1;
 
     // Clamp

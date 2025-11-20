@@ -18,9 +18,9 @@ public:
     UdpServer(boost::asio::io_context& io_context, int port, char* adapter, bool startThread=true);
     ~UdpServer();
 
-    bool transmit(uint8_t* pBuf, size_t length) override;
-
     virtual void startReceive(std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback_) override;
+
+    int connectAdapter(std::string& ipAddress, int port);
 private:
     void startReceive_(void);
 
@@ -30,6 +30,8 @@ private:
 
     bool threadCanRun = true;
     struct sockaddr_in lastClientAddress;
+
+    boost::asio::io_context& io_context_;
 };
 
 }

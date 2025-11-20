@@ -302,7 +302,7 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg) {
 
         std::memset(&dataOut, 0x00, sizeof(PeripheralCtrl::spiTransactionStruct));
         dataOut.transactionType = READ_TRANSACTION;
-        // The next transaction is a read transaction
+        // The next ction is a read transaction
         ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
         if ( !ret  ) {
             return false;
