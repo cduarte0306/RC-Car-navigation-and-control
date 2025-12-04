@@ -11,8 +11,12 @@ set(SOURCE
     Modules/RcMotorController.cpp
     Modules/RcMotorController.hpp
     Modules/RcMessageLib.hpp
-    Modules/RcWirelessComms.hpp
-    Modules/RcWirelessComms.cpp
+    Modules/RcCommandAndControl.hpp
+    Modules/RcCommandAndControl.cpp
+    Modules/RcCommsController.hpp
+    Modules/RcCommsController.cpp
+    Modules/RcVisionControl.cpp
+    Modules/RcVisionControl.hpp
     Devices/peripheralDriver.hpp
     Devices/peripheralDriver.cpp
     Devices/Pwm.cpp
@@ -20,6 +24,11 @@ set(SOURCE
     Devices/network_interface/UdpServer.cpp
     Devices/network_interface/UdpServer.hpp
 )
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GST REQUIRED gstreamer-1.0)
+pkg_check_modules(GSTAPP REQUIRED gstreamer-app-1.0)
+pkg_check_modules(GSTVIDEO REQUIRED gstreamer-video-1.0)
 
 add_executable(${PROJECT_NAME} ${SOURCE})
 
@@ -30,6 +39,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/Modules
+    ${OPENCV_INCLUDE_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -37,4 +47,17 @@ target_link_libraries(${PROJECT_NAME}
         ${Boost_LIBRARIES}
         embedded_cli_lib
         systemd
+        ${OPENCV_LIBRARIES}
+)
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${GST_INCLUDE_DIRS}
+    ${GSTAPP_INCLUDE_DIRS}
+    ${GSTVIDEO_INCLUDE_DIRS}
+)
+
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    ${GST_LIBRARIES}
+    ${GSTAPP_LIBRARIES}
+    ${GSTVIDEO_LIBRARIES}
 )

@@ -7,6 +7,7 @@
 #include "Devices/peripheralDriver.hpp"
 #include "Devices/Pwm.hpp"
 #include "Devices/DeviceBase.hpp"
+#include "Devices/network_interface/UdpServer.hpp"
 
 
 namespace Modules {
@@ -116,5 +117,8 @@ protected:
     Device::PeripheralCtrl::psocDataStruct psocData;
 
     std::mutex mtrControllerMutex;
+
+    //  Telemetry transmission socket
+    std::unique_ptr<Network::UdpServer> m_UdpTlm;
 };
 } // namespace Modules

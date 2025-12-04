@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <type_traits>
 #include <string>
+#include <chrono>
 #include <iostream>
 
 #include <boost/asio.hpp>
@@ -18,12 +19,14 @@
 #include "RcMessageLib.hpp"
 #include "AdapterBase.hpp"
 
+
 namespace Modules {
 
 enum DeviceType {
     WIRELESS_COMMS,
     MOTOR_CONTROLLER,
     CAMERA_CONTROLLER,
+    VIDEO_STREAMER,
     CLI_INTERFACE
 };
 
@@ -39,6 +42,55 @@ struct CameraCommand {
     int panAngle;
     int tiltAngle;
     bool captureImage;
+};
+
+class RcThread {
+public:
+    // Variadic template constructor that accepts any arguments 
+    // that the std::thread constructor would accept.
+    template<typename F, typename... Args>
+    explicit RcThread(F&& f, Args&&... args) {
+        internal_thread = std::thread(std::forward<F>(f), std::forward<Args>(args)...);
+    }
+
+    // The destructor automatically joins the thread.
+    // This simplifies cleanup and prevents std::terminate being called 
+    // if the thread is left joinable when the object is destroyed.
+    ~RcThread() {
+        if (internal_thread.joinable()) {
+            internal_thread.join();
+        }
+    }
+
+    // Prevent copy construction and assignment for safety, as threads cannot be copied.
+    RcThread(const RcThread&) = delete;
+    RcThread& operator=(const RcThread&) = delete;
+
+    // Allow moving the wrapper object.
+    RcThread(RcThread&& other) noexcept 
+        : internal_thread(std::move(other.internal_thread)) {}
+    
+    RcThread& operator=(RcThread&& other) noexcept {
+        if (this != &other) {
+            if (internal_thread.joinable()) {
+                internal_thread.join(); // Ensure existing thread is handled
+            }
+            internal_thread = std::move(other.internal_thread);
+        }
+        return *this;
+    }
+
+    // Optional: provide access to the underlying native handle if needed
+    std::thread::native_handle_type native_handle() {
+        return internal_thread.native_handle();
+    }
+
+    bool joinable() const {
+        return internal_thread.joinable();
+    }
+
+private:
+    std::thread internal_thread; // Composition
 };
 
 class Base {
@@ -78,8 +130,9 @@ public:
      * 
      * @return int 
      */
-    int init(void) {
+    int trigger(void) {
         this->thread = std::thread(&Base::mainProc, this);
+        this->m_TimerThread = std::thread(&Base::timerThread, this);
         workerThreads.emplace_back(std::move(this->thread));
         return 0;
     }
@@ -166,7 +219,7 @@ public:
         if (!adapter) return -1;
         const std::string moduleName = adapter->getParentName();
         std::lock_guard<std::mutex> lock(mutex);
-        if (m_boundAdapters.find(moduleName) != m_boundAdapters.end() || m_boundAdaptersNonOwning.find(moduleName) != m_boundAdaptersNonOwning.end()) {
+        if (m_boundAdaptersNonOwning.find(moduleName) != m_boundAdaptersNonOwning.end()) {
             return -1; // already bound
         }
         // store non-owning pointer
@@ -210,19 +263,49 @@ public:
         return 0;
     }
 
-    // /**
-    //  * @brief Get the adapter of this module
-    //  */
-    // std::unique_ptr<Adapter::AdapterBase> getAdapter() {
-    //     return std::move(baseAdapter);
-    // }
-
 protected:
     int sendMailbox(char* pbuf, size_t len);
     int recvMailbox(char* pbuf, size_t len);
 
-
     virtual void mainProc() = 0;
+
+    virtual void OnTimer(void) {
+        m_TimerCanRun = false; // If this method isn't overwritten, then exit thread
+    }
+
+    /**
+     * @brief Set the sleep period for the timer
+     * 
+     * @param period Period in milliseconds
+     */
+    void setPeriod(int period) {
+        m_SleepPeriod.store(period);
+    }
+
+    void timerThread(void) {
+        while(m_ThreadCanRun && m_TimerCanRun) {
+            OnTimer();
+            std::this_thread::sleep_for(std::chrono::milliseconds(m_SleepPeriod.load()));
+        }
+    }
+
+    /**
+     * @brief Global thread can run flag
+     * 
+     */
+    bool m_ThreadCanRun = true;
+
+    /**
+     * @brief Timer thread keep-alive flag
+     * 
+     */
+    bool m_TimerCanRun{true};
+
+    /**
+     * @brief Timer thread sleep period
+     * 
+     */
+    std::atomic<int> m_SleepPeriod{1}; // Default to 1ms
 
     /**
      * @brief Get the module ID
@@ -243,14 +326,16 @@ protected:
     std::unordered_map<std::string, Adapter::AdapterBase*> m_boundAdaptersNonOwning;      // non-owning adapters (in-adapters)
     
     // Adapters for different device types
-    std::unique_ptr<Adapter::AdapterBase  > baseAdapter   = nullptr;
-    std::unique_ptr<Adapter::MotorAdapter > motorAdapter  = nullptr;
-    std::unique_ptr<Adapter::CameraAdapter> CameraAdapter = nullptr;
-    std::unique_ptr<Adapter::CommsAdapter > CommsAdapter  = nullptr;
+    std::unique_ptr<Adapter::AdapterBase    > baseAdapter    = nullptr;
+    std::unique_ptr<Adapter::MotorAdapter   > motorAdapter   = nullptr;
+    std::unique_ptr<Adapter::CameraAdapter  > CameraAdapter  = nullptr;
+    std::unique_ptr<Adapter::CommandAdapter > CommandAdapter = nullptr;
+    std::unique_ptr<Adapter::CommsAdapter   > CommsAdapter   = nullptr;
 
     static boost::asio::io_context io_context;
     std::mutex mutex;
     std::thread thread;
+    std::thread m_TimerThread;  // This thread handles time-based events per object
     // boost::thread boostThread;
 
     std::atomic<bool> running{true};
