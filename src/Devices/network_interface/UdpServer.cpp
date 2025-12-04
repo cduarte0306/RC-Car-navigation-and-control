@@ -14,11 +14,13 @@
 using namespace Network;
 
 
-UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port):
+UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port, size_t bufferSize):
     Sockets(io_context, port) {
 
     sport_ = port;
     Logger* logger = Logger::getLoggerInst();
+
+    m_RecvBuffer.resize(bufferSize);
 
     auto getAdapter = [&logger](std::string& adapterName) -> std::string {
         std::string ipAddress;
@@ -70,9 +72,9 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, s
  * 
  * @param dataReceivedCallback_ Callback function to handle received data
  */
-void UdpServer::startReceive(std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback_) {
+void UdpServer::startReceive(std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback_, bool asyncTx) {
     dataReceivedCallback = dataReceivedCallback_;
-
+    m_AsyncTx = asyncTx;
     this->startReceive_();
 }
 
@@ -83,23 +85,28 @@ void UdpServer::startReceive(std::function<void(const uint8_t* data, size_t& len
  */
 void UdpServer::startReceive_(void) {
     socket_.async_receive_from(
-        boost::asio::buffer(recv_buffer_), remote_endpoint_,
+        boost::asio::buffer(m_RecvBuffer), remoteEndpoint,
         [this](boost::system::error_code ec, std::size_t bytes_recvd) {
             if (!ec && bytes_recvd > 0) {
                 // Call the data received callback
                 if (dataReceivedCallback) {
-                    dataReceivedCallback(reinterpret_cast<const uint8_t*>(recv_buffer_.data()), bytes_recvd);
-
+                    Logger* logger = Logger::getLoggerInst();
+                    dataReceivedCallback(reinterpret_cast<const uint8_t*>(m_RecvBuffer.data()), bytes_recvd);
+                    m_HostIP = remoteEndpoint.address().to_string();
+                    if (!m_HostFound) {
+                        logger->log(Logger::LOG_LVL_INFO, "Host found: %s:%d\n", m_HostIP.c_str(), remoteEndpoint.port());
+                        m_HostFound = true;
+                    }
                     // Reply with the receive buffer
-                    socket_.async_send_to(
-                    boost::asio::buffer(recv_buffer_.data(), bytes_recvd), remote_endpoint_,
-                    [](const boost::system::error_code& ec, std::size_t bytes_sent) {
-                        if (ec) {
-                            Logger* logger = Logger::getLoggerInst();
-                            logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s\r\n", ec.message().c_str());
-                        }
-                    });
-
+                    if (m_AsyncTx) {
+                        socket_.async_send_to(
+                            boost::asio::buffer(m_RecvBuffer.data(), bytes_recvd), remoteEndpoint,
+                            [&](const boost::system::error_code& ec, std::size_t bytes_sent) {
+                                if (ec) {
+                                    logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s\r\n", ec.message().c_str());
+                                }
+                        });
+                    }
                 }
             }
             // Continue receiving
@@ -122,11 +129,25 @@ UdpServer::~UdpServer() {
  * @return true Transmission successful
  * @return false Transmission failed
  */
-bool UdpServer::transmit(uint8_t* pBuf, size_t length) {
-    if (pBuf == nullptr || length == 0 || lastClientAddress.sin_family != AF_INET) {
+bool UdpServer::transmit(uint8_t* pBuf, size_t length, std::string& ip) {
+    if (pBuf == nullptr || length == 0) {
         return false;
     }
-    
+
+    udp::endpoint remoteEndpoint(
+        boost::asio::ip::address::from_string(ip),
+        sport_
+    );
+
+    bool ret = false;
+    socket_.async_send_to(
+        boost::asio::buffer(pBuf, length), remoteEndpoint,
+        [&](const boost::system::error_code& ec, std::size_t bytes_sent) {
+            if (ec) {
+                Logger* logger = Logger::getLoggerInst();
+                logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s, message length: %lu\r\n", ec.message().c_str(), length);
+            }
+        });
     return true;
 }
 

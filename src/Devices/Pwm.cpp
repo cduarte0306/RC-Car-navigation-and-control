@@ -64,6 +64,7 @@ int Pwm::writeDutyCycle(int period) {
     return doIoctl(fd, TEGRA_PWM_IOC_SET_DUTY, &period);
 }
 
+
 int Pwm::doIoctl(int fd, unsigned long cmd, void *arg) {
     int ret = ioctl(fd, cmd, arg);
     if (ret < 0)

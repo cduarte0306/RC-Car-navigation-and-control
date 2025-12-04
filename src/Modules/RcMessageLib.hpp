@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <vector>
 #include <stdexcept> // For std::out_of_range
 
@@ -9,6 +10,18 @@ namespace Msg {
     public:
         MessageCapsule() {}
         ~MessageCapsule() {}
+        
+        // Getter for data
+        T& getData() { return data; }
+        const T& getData() const { return data; }
+        
+        // Setter for data
+        void setData(const T& d) { data = d; }
+        
+        // Getter for source
+        int getSource() const { return source; }
+        void setSource(int src) { source = src; }
+        
     private:
         int source = -1;
         T data;
@@ -31,7 +44,8 @@ namespace Msg {
 
         // Adds an element to the buffer (overwrites oldest if full)
         void push(const T& item) {
-            buffer_[head_] = item;
+            std::lock_guard<std::mutex> lock(bufferMutex);
+            buffer_[head_].setData(item);
             head_ = (head_ + 1) % capacity_;
             if (size_ < capacity_) {
                 size_++;
@@ -42,14 +56,13 @@ namespace Msg {
         }
 
         // Removes and returns the oldest element from the buffer
-        T pop() {
+        void pop() {
+            std::lock_guard<std::mutex> lock(bufferMutex);
             if (isEmpty()) {
                 throw std::out_of_range("Buffer is empty.");
             }
-            T item = buffer_[tail_];
             tail_ = (tail_ + 1) % capacity_;
             size_--;
-            return item;
         }
 
         // Returns a reference to the element at a specific index relative to the head
@@ -58,7 +71,7 @@ namespace Msg {
             if (index >= size_) {
                 throw std::out_of_range("Index out of bounds.");
             }
-            return buffer_[(tail_ + index) % capacity_];
+            return buffer_[(tail_ + index) % capacity_].getData();
         }
 
         // Const version of operator[]
@@ -66,7 +79,24 @@ namespace Msg {
             if (index >= size_) {
                 throw std::out_of_range("Index out of bounds.");
             }
-            return buffer_[(tail_ + index) % capacity_];
+            return buffer_[(tail_ + index) % capacity_].getData();
+        }
+
+        // Returns item at head
+        T& getHead() {
+            std::lock_guard<std::mutex> lock(bufferMutex);
+            if (isEmpty()) {
+                throw std::out_of_range("Buffer is empty.");
+            }
+            size_t idx = (head_ + capacity_ - 1) % capacity_;
+            return buffer_[idx].getData();
+        }
+
+        // Const version of getHead
+        const T& getHead() const {
+            if (size_ == 0) throw std::out_of_range("empty");
+            size_t idx = (tail_ + size_ - 1) % capacity_;  
+            return buffer_[idx].getData();
         }
 
         // Checks if the buffer is empty
@@ -91,9 +121,12 @@ namespace Msg {
 
     private:
         std::vector<MessageCapsule<T>> buffer_; // Underlying storage for the buffer
-        size_t head_;          // Index of the next available slot for writing
-        size_t tail_;          // Index of the oldest element (next to be read)
-        size_t size_;          // Current number of elements in the buffer
-        size_t capacity_;      // Maximum capacity of the buffer
+        size_t head_ = 0;          // Index of the next available slot for writing
+        size_t tail_ = 0;          // Index of the oldest element (next to be read)
+        size_t size_ = 0;          // Current number of elements in the buffer
+        size_t count = 0;          // Number of items in buffer
+        size_t capacity_ = 0;      // Maximum capacity of the buffer
+
+        std::mutex bufferMutex;    // Circular buffer mutex
     };
 };

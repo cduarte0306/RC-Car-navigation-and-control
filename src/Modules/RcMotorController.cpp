@@ -35,6 +35,9 @@ MotorController::MotorController(int moduleID_, std::string name) : Base(moduleI
     } catch (const std::exception& e) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize PeripheralCtrl and motor control: %s\r\n", e.what());
     }
+
+    // Opening UDP tlm socket
+    this->m_UdpTlm = std::make_unique<Network::UdpServer>(io_context, "wlP1p1s0", "enP8p1s0", 5001, 65507);
 }
 
 MotorController::~MotorController() {
@@ -187,8 +190,6 @@ void MotorController::pollTlmData(void) {
     telemetryJson["frontDistance"] = psocData.frontDistance.u32;
     telemetryJson["leftDistance" ] = psocData.leftDistance.u32;
     telemetryJson["rightDistance"] = psocData.rightDistance.u32;
-
-    // Transmit over UDP
 }
 
 

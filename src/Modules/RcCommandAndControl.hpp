@@ -8,10 +8,10 @@
 
 
 namespace Modules {
-class WirelessComms : public Base, public Adapter::CommsAdapter {
+class CommandController : public Base, public Adapter::CommandAdapter {
 public:
-    WirelessComms(int moduleID, std::string name);
-    ~WirelessComms();
+    CommandController(int moduleID, std::string name);
+    ~CommandController();
 
     virtual int stop(void) override {
         // Implementation to stop the motor controller
@@ -19,7 +19,7 @@ public:
     }
 
     Adapter::AdapterBase* getInputAdapter() override {
-        // WirelessComms may not implement a Motor in-adapter itself. If
+        // CommandController may not implement a Motor in-adapter itself. If
         // it has an owned baseAdapter, return that; otherwise return nullptr.
         if (baseAdapter) return baseAdapter.get();
         return nullptr;
@@ -52,15 +52,14 @@ protected:
         return 0;
     }
 
-    virtual void mainProc() override {
-        // Main processing loop for the motor controller
-        while (true) {
-            // Process motor commands
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    }
+    // Main Process
+    virtual void mainProc() override;
 
+    // Processes reply from client
     void processIncomingData(const uint8_t* data, size_t& length);
+
+    // Opens network adapters
+    virtual int openAdapter(int port, std::string adapter) override;
 
     std::unique_ptr<Network::UdpServer> m_UdpSocket;
 };
