@@ -7,6 +7,8 @@
 #include "Devices/network_interface/UdpServer.hpp"
 
 
+using namespace Adapter;
+
 namespace Modules {
 class CommandController : public Base, public Adapter::CommandAdapter {
 public:
@@ -17,6 +19,8 @@ public:
         // Implementation to stop the motor controller
         return 0;
     }
+
+    virtual int init(void) override;
 
     Adapter::AdapterBase* getInputAdapter() override {
         // CommandController may not implement a Motor in-adapter itself. If
@@ -58,9 +62,12 @@ protected:
     // Processes reply from client
     void processIncomingData(const uint8_t* data, size_t& length);
 
-    // Opens network adapters
-    virtual int openAdapter(int port, std::string adapter) override;
+    // Map of UDP sockets by adapter ID
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_CommandNetAdapter{nullptr};
 
     std::unique_ptr<Network::UdpServer> m_UdpSocket;
+
+    // UDP socket
+    std::unique_ptr<CommsAdapter::NetworkAdapter> m_CommandAdapter{nullptr};    
 };
 };

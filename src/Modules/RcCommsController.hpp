@@ -6,12 +6,19 @@
 
 #include "Devices/network_interface/UdpServer.hpp"
 
+using namespace std;
+using namespace Adapter;
 
 namespace Modules {
 class NetworkComms : public Base, public Adapter::CommsAdapter {
 public:
-    NetworkComms(int moduleID, std::string name);
+    NetworkComms(int moduleID, string name);
     ~NetworkComms();
+
+    virtual int init(void) override {
+        // Implementation to initialize the motor controller
+        return 0;
+    }
 
     virtual int stop(void) override {
         // Implementation to stop the motor controller
@@ -19,8 +26,7 @@ public:
     }
 
     Adapter::AdapterBase* getInputAdapter() override {
-        if (baseAdapter) return baseAdapter.get();
-        return nullptr;
+        return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CommsAdapter*>(this));
     }
 protected:
     enum {
@@ -46,6 +52,10 @@ protected:
         uint8_t state;    
     } reply_t;
 
+    // Map of UDP sockets by adapter ID
+    unordered_map<int, unique_ptr<Network::UdpServer>> m_UdpSockets;
+
+    // Override moduleCommand to handle incoming commands
     virtual int moduleCommand(char* pbuf, size_t len) override {
         return 0;
     }
@@ -53,12 +63,22 @@ protected:
     // Main Process
     virtual void mainProc() override;
 
-    // Processes reply from client
-    void processIncomingData(const uint8_t* data, size_t& length);
-
     // Opens network adapters
-    virtual int configureAdapter(int port, std::string& adapter) override;
+    virtual int configureAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
 
-    std::unique_ptr<Network::UdpServer> m_UdpSocket;
+    // Override startReceive_ to route incoming data via UDP
+    virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(const uint8_t* data, size_t& length)> dataReceivedCommand_, bool asyncTx=true) override;
+
+    // Override transmitData_ to route data via UDP
+    virtual int transmitData_(const uint8_t* data, size_t length) override;
+
+    // Provide host IP lookup for bound adapters
+    virtual std::string getHostIP_(NetworkAdapter& adapter) override;
+
+    // Map caller module name -> configured port for fast routing
+    unordered_map<string, int> m_CallerPortMap;
+
+    // Non-owning pointer to the primary socket (first configured adapter)
+    Network::UdpServer* m_UdpSocket{nullptr};
 };
 };

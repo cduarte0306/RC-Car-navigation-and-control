@@ -13,6 +13,9 @@ public:
     // Helper to forward a command buffer to the motor adapter
     int sendMotorCommand(char* pbuf, size_t len);
     
+    virtual int init(void) override {
+        return 0;
+    }
     virtual int stop(void) override;
 
 protected:

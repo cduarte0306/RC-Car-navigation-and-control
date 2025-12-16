@@ -23,6 +23,8 @@ set(SOURCE
     Devices/Pwm.hpp
     Devices/network_interface/UdpServer.cpp
     Devices/network_interface/UdpServer.hpp
+    Devices/RegisterMap.hpp
+    Devices/RegisterMap.cpp
 )
 
 find_package(PkgConfig REQUIRED)

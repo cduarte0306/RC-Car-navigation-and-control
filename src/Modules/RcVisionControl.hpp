@@ -17,6 +17,8 @@ public:
     VisionControls(int moduleID, std::string name);
     ~VisionControls() {}
 
+    virtual int init(void) override;
+
     virtual int stop(void) override {
         return 0;
     }
@@ -29,7 +31,7 @@ public:
         return 0;
     }
 
-virtual int configurePipeline_(const std::string& host) override;
+    virtual int configurePipeline_(const std::string& host) override;
     
 protected:
 #pragma pack(push, 1)
@@ -114,6 +116,12 @@ protected:
 
     // Received segment map
     FramePackets m_SegmentMap;
+
+    // Transmission port
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TxAdapter{nullptr};
+
+    // Reception port
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_RxAdapter{nullptr};
 
     // Frame ID
     uint32_t m_FrameID = 0;

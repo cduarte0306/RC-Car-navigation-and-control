@@ -67,7 +67,7 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 (void)cli;
                 char buff[1024];
                 Modules::MotorController::MotorCommand_t* cmd = reinterpret_cast<Modules::MotorController::MotorCommand_t*>(buff);
-                cmd->command = Modules::MotorController::MOTOR_CMD_READ_DATA;
+                cmd->command = Modules::MotorController::MotorCmdReadData;
                 
                 AppCLI* _cli = static_cast<AppCLI*>(context);
                 int ret = _cli->motorAdapter->moduleCommand(buff, sizeof(buff));
@@ -110,7 +110,7 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 }
                 char buff[1024];
                 Modules::MotorController::MotorCommand_t* cmd = reinterpret_cast<Modules::MotorController::MotorCommand_t*>(buff);
-                cmd->command = Modules::MotorController::MOTOR_CMD_SPI_WRITE;
+                cmd->command = Modules::MotorController::MotorCmdSpiWrite;
                 if (!arg1) {
                     _cli->writeIface("ERROR: Failed to provide argument\r\n");
                     return;
@@ -139,7 +139,7 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 
                 char buff[1024];
                 Modules::MotorController::MotorCommand_t* cmd = reinterpret_cast<Modules::MotorController::MotorCommand_t*>(buff);
-                cmd->command = Modules::MotorController::MOTOR_CMD_SPI_READ;
+                cmd->command = Modules::MotorController::MotorCmdSpiRead;
                 int ret = _cli->motorAdapter->moduleCommand(buff, sizeof(buff));
                 if (ret < 0) {
                     _cli->writeIface("Failed to read register: %d\r\n", cmd->data_1.u8);

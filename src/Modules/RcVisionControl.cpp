@@ -9,17 +9,39 @@
 #include <chrono>
 #include <algorithm>
 
+#define STREAM_PORT 5000
+
 
 namespace Modules {
 VisionControls::VisionControls(int moduleID, std::string name) : 
     Base(moduleID, name), Adapter::CameraAdapter(name), m_FrameRecvBuff(100) {
     Logger* logger = Logger::getLoggerInst();
-    this->m_UdpSocket    = std::make_unique<Network::UdpServer>(io_context, "wlP1p1s0", "enP8p1s0", 5000, 65507);
-    this->m_UdpSimSocket = std::make_unique<Network::UdpServer>(io_context, "enP8p1s0", "enP8p1s0", 5000, 65507);
     logger->log(Logger::LOG_LVL_INFO, "Vision object initialized\r\n");
-
     setPeriod(1000);  // Set the timer thread to service ever second
-    this->m_UdpSimSocket->startReceive(std::bind(&VisionControls::recvFrame, this, std::placeholders::_1, std::placeholders::_2), false);
+}
+
+
+/**
+ * @brief Initialize the vision control module
+ * 
+ * @return int Error code
+ */
+int VisionControls::init(void) {
+    Logger* logger = Logger::getLoggerInst();
+    // Initialize the network adapters
+    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_RxAdapter = this->CommsAdapter->createNetworkAdapter(STREAM_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    if (!m_TxAdapter || !m_RxAdapter) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to create vision network adapters\r\n");
+        return -1;
+    }
+
+    // Start receiving frames
+    this->CommsAdapter->startReceive(
+        *m_RxAdapter,
+        std::bind(&VisionControls::recvFrame, this, std::placeholders::_1, std::placeholders::_2),
+        false);
+    return 0;
 }
 
 
@@ -96,6 +118,12 @@ void VisionControls::recvFrame(const uint8_t* pbuf, size_t length) {
 }
 
 
+/**
+ * @brief Decode a JPEG frame from the received segments
+ * 
+ * @param frame Output frame
+ * @param frameEntry FramePackets entry containing segments
+ */
 void VisionControls::decodeJPEG(cv::Mat& frame, FramePackets& frameEntry) {
     auto& frameMap = frameEntry.segmentMap;
     const uint8_t numSegments = frameEntry.numSegments;
@@ -194,7 +222,9 @@ int VisionControls::transmitFrames(cv::Mat& frame) {
 
         uint8_t* raw = reinterpret_cast<uint8_t*>(&packet);
 
-        this->m_UdpSocket->transmit(raw, packetSize, m_HostIP);
+        if (m_TxAdapter) {
+            m_TxAdapter->send(m_HostIP, raw, packetSize);
+        }
     }
 
     m_FrameID++;
@@ -215,8 +245,8 @@ void VisionControls::OnTimer(void) {
        doOnce = false; 
     }
     
-    // If we've not received frames in over 2 seconds, switchback to reading fromthe camera
-    if (m_StreamStats.streamInCounter > 2) {
+    // If we've not received frames in over 1 second, switchback to reading fromthe camera
+    if (m_StreamStats.streamInCounter > 1) {
         if (!doOnce) {
             logger->log(Logger::LOG_LVL_INFO, "Timeout detected. Stream in is OFF\n");
             doOnce = true;
@@ -256,7 +286,7 @@ void VisionControls::mainProc() {
                     m_ReceivingFrame = false;
                     lastTime = std::chrono::steady_clock::now();
                 }
-                
+
                 if (!circBuff.isEmpty()) {
                     frame = circBuff.getHead();
                     if (frame.empty()) {
@@ -317,9 +347,6 @@ void VisionControls::mainProc() {
         if (m_StreamerCanRun.load()) {
             circBuff.push(frame);
         }
-        
-        // streamAdapter->moduleCommand(data, size);
-        // this->streamAdapter->(frame.data(), frame.size());
     }
 }
 }

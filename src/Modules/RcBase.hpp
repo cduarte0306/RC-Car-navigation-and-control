@@ -24,6 +24,7 @@ namespace Modules {
 
 enum DeviceType {
     WIRELESS_COMMS,
+    COMMAND_CONTROLLER,
     MOTOR_CONTROLLER,
     CAMERA_CONTROLLER,
     VIDEO_STREAMER,
@@ -119,6 +120,13 @@ public:
     }
 
     /**
+     * @brief Initialize the device and start its main processing loop
+     * 
+     * @return int 
+     */
+    virtual int init(void) = 0;
+
+    /**
      * @brief Stop the device's main processing loop
      * 
      * @return int 
@@ -167,6 +175,9 @@ public:
         if (CameraAdapter) {
             CameraAdapter->bind(m_boundAdapters[moduleName].get());
         }
+        if (CommandAdapter) {
+            CommandAdapter->bind(m_boundAdapters[moduleName].get());
+        }
         if (CommsAdapter) {
             CommsAdapter->bind(m_boundAdapters[moduleName].get());
         }
@@ -183,6 +194,8 @@ public:
             CameraAdapter = std::make_unique<Adapter::CameraAdapter>();
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
             CommsAdapter = std::make_unique<Adapter::CommsAdapter>();
+        } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
+            CommandAdapter = std::make_unique<Adapter::CommandAdapter>();
         } else {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
             static_assert(!std::is_same<U, U>::value, "createAdapter: unsupported adapter type");
@@ -198,6 +211,8 @@ public:
         } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
             return std::move(CameraAdapter);
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
+            return std::move(CommsAdapter);
+        } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
             return std::move(CommsAdapter);
         } else {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
@@ -231,6 +246,8 @@ public:
             CameraAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
             CommsAdapter->bind(adapter);
+        } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
+            CommandAdapter->bind(adapter);
         } else {
             return -1;
         }

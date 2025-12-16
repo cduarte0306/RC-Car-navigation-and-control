@@ -1,16 +1,38 @@
 #include "RcCommandAndControl.hpp"
 #include <functional>
 #include "utils/logger.hpp"
+#include "Devices/RegisterMap.hpp"
+
 
 namespace Modules {
 CommandController::CommandController(int moduleID, std::string name) : Base(moduleID, name), Adapter::CommandAdapter(name) {
-    this->m_UdpSocket = std::make_unique<Network::UdpServer>(io_context, "wlP1p1s0", "enP8p1s0", 65000);
-    this->m_UdpSocket->startReceive(std::bind(&CommandController::processIncomingData, this, std::placeholders::_1, std::placeholders::_2));
+    // this->m_UdpSocket = std::make_unique<Network::UdpServer>(io_context, "wlP1p1s0", "enP8p1s0", 65000);
+    // this->m_UdpSocket->startReceive(std::bind(&CommandController::processIncomingData, this, std::placeholders::_1, std::placeholders::_2));
+    
 }
 
 
 CommandController::~CommandController() {
     this->m_UdpSocket.reset();
+}
+
+
+/**
+ * @brief Initialize the command controller module
+ * 
+ * @return int Error code
+ */
+int CommandController::init(void) {
+    Logger* logger = Logger::getLoggerInst();
+    // Initialize the UDP server
+    m_CommandNetAdapter = this->CommsAdapter->createNetworkAdapter(65000, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    if (!m_CommandNetAdapter) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to create command network adapter\r\n");
+        return -1;
+    }
+
+    this->CommsAdapter->startReceive(*m_CommandNetAdapter, std::bind(&CommandController::processIncomingData, this, std::placeholders::_1, std::placeholders::_2));
+    return 0;
 }
 
 
@@ -57,21 +79,22 @@ void CommandController::processIncomingData(const uint8_t* pData, size_t& length
 }
 
 
-int CommandController::openAdapter(int port, std::string adapter) {
-   return 0;
-}
-
-
+/**
+ * @brief Main processing loop for the motor controller
+ * 
+ */
 void CommandController::mainProc() {
         // Main processing loop for the motor controller
         std::string hostIP("");
         std::string lastHost("");
+        RegisterMap* regMap = RegisterMap::getInstance();
 
         while (true) {
             // Process motor commands
-            hostIP = this->m_UdpSocket->getHostIP();
+            hostIP = this->CommsAdapter->getHostIP(*m_CommandNetAdapter);
             if (hostIP.length() && (hostIP != lastHost)) {
                 this->CameraAdapter->configurePipeline(hostIP);
+                regMap->set("HostIP", hostIP);
                 lastHost = hostIP;
             }
 
