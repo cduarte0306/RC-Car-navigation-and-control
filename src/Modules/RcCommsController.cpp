@@ -33,7 +33,7 @@ int NetworkComms::configureAdapter(
 
     // Dynamically create the UDP object and connect the members from the NeworkComms
     std::unique_ptr<Network::UdpServer> udpSocket = make_unique<Network::UdpServer>(
-        io_context, adapter, "enP8p1s0", netAdapter.port);  // Default bakeup interface is enP8p1s0
+        io_context, adapter, "enP8p1s0", netAdapter.port, netAdapter.bufferSize);  // Default bakeup interface is enP8p1s0
 
     // Set up the transmit callback
     netAdapter.sendCallback = [this, udpSocket=udpSocket.get()](std::string destIp, const uint8_t* data, size_t length) {

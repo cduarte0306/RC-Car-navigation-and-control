@@ -17,6 +17,8 @@ set(SOURCE
     Modules/RcCommsController.cpp
     Modules/RcVisionControl.cpp
     Modules/RcVisionControl.hpp
+    lib/VideoStreamer.cpp
+    lib/VideoStreamer.hpp
     Devices/peripheralDriver.hpp
     Devices/peripheralDriver.cpp
     Devices/Pwm.cpp

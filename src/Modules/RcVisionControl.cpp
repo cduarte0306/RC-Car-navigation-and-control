@@ -1,5 +1,6 @@
 #include "RcVisionControl.hpp"
 #include "RcMessageLib.hpp"
+#include "lib/VideoStreamer.hpp"
 
 #include "utils/logger.hpp"
 #include <opencv2/opencv.hpp>
@@ -99,6 +100,22 @@ void VisionControls::recvFrame(const uint8_t* pbuf, size_t length) {
     m_SegmentMap.segmentMap[frameSegment->metadata.segmentID] = std::move(segmentData);
 
     if (m_SegmentMap.segmentMap.size() == numSegments) {
+        // Validate that the assembled size matches the advertised total length
+        size_t totalReceived = 0;
+        for (const auto& kv : m_SegmentMap.segmentMap) {
+            totalReceived += kv.second.size();
+        }
+
+        if (totalReceived != frameSegment->metadata.totalLength) {
+            logger->log(Logger::LOG_LVL_WARN,
+                        "Frame %llu size mismatch (expected %u, got %zu)\n",
+                        static_cast<unsigned long long>(m_SegmentMap.frameID),
+                        frameSegment->metadata.totalLength,
+                        totalReceived);
+            m_SegmentMap.segmentMap.clear();
+            return;  // drop corrupt frame
+        }
+
         // Push the segment map
         m_FrameRecvBuff.push(m_SegmentMap);
         m_SegmentMap.segmentMap.clear();
@@ -154,6 +171,10 @@ void VisionControls::decodeJPEG(cv::Mat& frame, FramePackets& frameEntry) {
     }
 
     frame = cv::imdecode(jpegFrame, cv::IMREAD_COLOR);
+    if (frame.empty()) {
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_WARN, "Failed to decode JPEG (bytes=%zu, segments=%u)\n", jpegFrame.size(), numSegments);
+    }
 }
 
 
@@ -259,52 +280,13 @@ void VisionControls::OnTimer(void) {
 
 
 void VisionControls::mainProc() {
-    // Main processing loop for the motor controller
     Logger* logger = Logger::getLoggerInst();
-    Msg::CircularBuffer<cv::Mat> circBuff(100);
 
-    Modules::RcThread consumer(
-        [&]() {
-            cv::Mat frame;
-
-            while (!m_StreamerCanRun.load()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-
-            logger->log(Logger::LOG_LVL_INFO, "Starting video streaming\n");
-            long long FrameLength = 0;
-            std::vector<uchar> encoded;
-            auto lastTime = std::chrono::steady_clock::now();
-            auto now = std::chrono::steady_clock::now();
-
-            while(m_ThreadCanRun) {
-                // Reset the receiving frame flag after 5 second
-                now = std::chrono::steady_clock::now();
-
-                auto elapsedMs = std::chrono::duration_cast<std::chrono::seconds>(now - lastTime);
-                if (elapsedMs.count() > 5) {
-                    m_ReceivingFrame = false;
-                    lastTime = std::chrono::steady_clock::now();
-                }
-
-                if (!circBuff.isEmpty()) {
-                    frame = circBuff.getHead();
-                    if (frame.empty()) {
-                        logger->log(Logger::LOG_LVL_WARN, "Received frame is empty\n");
-                        std::this_thread::sleep_for(std::chrono::microseconds(100));
-                        continue;
-                    }
-                    FrameLength = frame.total() * frame.elemSize();
-
-                    // Feed to the socket
-                    transmitFrames(frame);
-
-                    // Advance the circular buffer
-                    circBuff.pop();
-                }
-            }
-        }
-    );
+    // Handles jitter smoothing and transmission in its own thread
+    VideoStreamer streamer(
+        [this](cv::Mat& f) { return this->transmitFrames(f); },
+        m_StreamerCanRun);
+    streamer.start();
 
     cv::VideoCapture cap(
         "nvarguscamerasrc sensor-id=0 ! "
@@ -345,7 +327,7 @@ void VisionControls::mainProc() {
         }
 
         if (m_StreamerCanRun.load()) {
-            circBuff.push(frame);
+            streamer.pushFrame(frame);
         }
     }
 }

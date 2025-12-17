@@ -223,13 +223,14 @@ namespace Adapter {
         };
 
         struct NetworkAdapter {
-            NetworkAdapter(std::string& adapter_, int port_) : adapter(adapter_), port(port_) {}
+            NetworkAdapter(std::string& adapter_, int port_, size_t bufferSize_=2048) : adapter(adapter_), port(port_), bufferSize(bufferSize_) {}
             ~NetworkAdapter() {}
             std::function<int(std::string, const uint8_t*, size_t)> sendCallback = nullptr;
             std::function<std::string()> hostResolver = nullptr;
             int id = -1;
             std::string adapter;
             const int port = -1;
+            const size_t bufferSize = 0;
 
             int send(std::string destIp, const uint8_t* data, size_t length) {
                 if (sendCallback) {
@@ -411,7 +412,7 @@ namespace Adapter {
                 m_CallerAdapterMap[parent] = it->second;
             }
 
-            std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapter, port);
+            std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapter, port, bufferSize);
             adapterCounter++;
             netAdapter->id = adapterCounter;  // assign unique ID
 

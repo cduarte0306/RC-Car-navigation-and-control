@@ -17,7 +17,7 @@ MODE="$1"
 if [[ "$MODE" == "local" ]]; then
     echo "[*] Selected MODE: QEMU (local)"
     # ... (your unchanged local branch) ...
-    # [keep your existing QEMU + wait-for-port logic here]
+    # [keep your existing QEMU + wait-fbor-port logic here]
     exit 0
 
 elif [[ "$MODE" == "remote" ]]; then
@@ -25,7 +25,7 @@ elif [[ "$MODE" == "remote" ]]; then
 
     echo "[*] Building host app..."
     cd build
-    make -j"$(nproc)" && cd .. \
+    make -j16 && cd .. \
         || { echo "[!] Build failed"; exit 0; }
 
     echo "[*] Killing any previous gdbserver on Jetson..."
@@ -68,7 +68,7 @@ elif [[ "$MODE" == "upload" ]]; then
         exit 0
     fi
     cd build
-    make -j"$(nproc)" && cd .. \
+    make -j16 && cd .. \
         || { echo "[!] Build failed"; exit 0; }
 
     ssh "${JETSON_USER}@${JETSON_IP}" "killall -9 rc-car-updater || true"
