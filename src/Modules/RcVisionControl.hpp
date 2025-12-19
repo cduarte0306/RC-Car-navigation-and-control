@@ -7,6 +7,7 @@
 #include <optional>
 #include <unordered_map>
 #include <opencv2/opencv.hpp>
+#include <opencv2/dnn.hpp>
 #include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
 
@@ -27,9 +28,7 @@ public:
         return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CameraAdapter*>(this));
     }
 
-    virtual int moduleCommand(char* pbuf, size_t len) override {
-        return 0;
-    }
+    virtual int moduleCommand_(char* pbuf, size_t len) override;
 
     virtual int configurePipeline_(const std::string& host) override;
     
@@ -62,6 +61,31 @@ protected:
         StreamInOn,
     };
 
+    // Camera module commands
+    enum {
+        CmdSetFrameRate,
+        CmdStartStream,
+        CmdStopStream,
+        CmdSelMode
+    };
+
+    // Setting enums
+    enum {
+        CamModeNormal,
+        CamModeDepth,
+        CamModeTraining
+    };
+
+    struct CameraCommand {
+        uint8_t command;
+        val_type_t data;
+    } __attribute__((__packed__));
+
+    struct CameraSettings {
+        int frameRate = 30;
+        int mode      = CamModeNormal;
+    } m_CamSettings;
+
     typedef std::unordered_map<int, FramePackets> FrameEntry;
 
     // Parent main proc override
@@ -71,13 +95,14 @@ protected:
     virtual void OnTimer(void) override;
 
     // Frame transmission handler
-    int transmitFrames(cv::Mat& frame);
-
     // Handles the decoding of JPEGs
     void decodeJPEG(cv::Mat& frame, FramePackets& frameEntry);
 
     // Receive frame handler
     void recvFrame(const uint8_t* pbuf, size_t length);
+
+    // Frame processing handler
+    void processFrame(cv::Mat& frame);
 
     struct StreamStatus {
         std::atomic<uint8_t> streamInStatus{StreamInOff};
@@ -125,6 +150,9 @@ protected:
 
     // Frame ID
     uint32_t m_FrameID = 0;
+
+    // DNN model
+    cv::dnn::Net m_DnnNet;
 };
 }
 

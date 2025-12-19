@@ -30,9 +30,10 @@ public:
     }
 protected:
     enum {
-        CMD_NOOP,
-        CMD_FWD_DIR,
-        CMD_STEER,
+        CmdNoop,         // No operation command
+        CmdFwdDir,       // Forward direction command
+        CmdSteer,        // Steering command
+        CmdCameraSetMode // Camera mode setting command
     };
 
     typedef struct __attribute__((__packed__))
@@ -44,12 +45,13 @@ protected:
         {
             uint8_t    command;
             val_type_t data;
+            uint32_t   payloadLen;
         } payload;
     } ClientReq_t;
 
     typedef struct __attribute__((__packed__)) {
         val_type_t data;
-        uint8_t state;    
+        uint8_t state;  
     } reply_t;
 
     virtual int moduleCommand(char* pbuf, size_t len) override {

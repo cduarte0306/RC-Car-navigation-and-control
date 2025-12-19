@@ -53,21 +53,30 @@ void CommandController::processIncomingData(const uint8_t* pData, size_t& length
     length = sizeof(reply);
 
     switch(clientData->payload.command) {
-        case CMD_NOOP:
+        case CmdNoop:
             // No operation command, do nothing
             reply.state = true; // Success
             break;
 
-        case CMD_FWD_DIR:
+        case CmdFwdDir:
             reply.data = clientData->payload.data; // Echo back the data
             reply.state = true; // Example state for success
             this->motorAdapter->setMotorSpeed(reply.data.i16); // Example: set speed with 0 direction
             break;
 
-        case CMD_STEER:
+        case CmdSteer:
             // Handle steering command
             reply.state = true; // Example state for success
             this->motorAdapter->steer(clientData->payload.data.i16); // Example: set steering angle
+            break;
+
+        case CmdCameraSetMode:
+            {
+                logger->log(Logger::LOG_LVL_INFO, "Setting camera mode via command\r\n");
+                const char* payload = reinterpret_cast<const char*>(pData + sizeof(ClientReq_t));
+                reply.state = true; // Example state for success
+                CameraAdapter->moduleCommand(const_cast<char*>(payload), clientData->payload.payloadLen);
+            }
             break;
 
         default:

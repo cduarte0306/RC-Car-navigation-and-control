@@ -2,8 +2,20 @@
 
 #include <thread>
 
-VideoStreamer::VideoStreamer(TxFn txFn, std::atomic<bool>& canRunFlag, std::size_t bufferCapacity)
-    : m_TxFn(std::move(txFn)), m_CanRun(canRunFlag), m_Buffer(bufferCapacity) {}
+#ifdef HAVE_OPENCV_CUDAIMGPROC
+#include <opencv2/cudaimgproc.hpp>
+#endif
+
+VideoStreamer::VideoStreamer(std::atomic<bool>& canRunFlag,
+                                                         Adapter::CommsAdapter::NetworkAdapter& txAdapter,
+                                                         std::function<std::string()> destIpProvider,
+                                                         int jpegQuality,
+                                                         std::size_t bufferCapacity)
+        : encodeQuality(jpegQuality),
+            m_TxAdapter(txAdapter),
+            m_DestIpProvider(std::move(destIpProvider)),
+            m_CanRun(canRunFlag),
+            m_Buffer(bufferCapacity) {}
 
 
 VideoStreamer::~VideoStreamer() {
@@ -69,8 +81,75 @@ void VideoStreamer::run() {
             continue;
         }
 
-        if (m_TxFn) {
-            m_TxFn(frame);
-        }
+        transmitFrame(frame);
     }
+}
+
+
+int VideoStreamer::transmitFrame(cv::Mat& frame) {
+    if (frame.empty()) {
+        return -1;
+    }
+
+#ifdef HAVE_OPENCV_CUDAIMGPROC
+    // Optional GPU pass-through; extend with filters if needed
+    cv::cuda::GpuMat gsrc;
+    gsrc.upload(frame);
+    gsrc.download(frame);
+#endif
+
+    // Encode JPEG
+    std::vector<uint8_t> encoded;
+    std::vector<int> params = { cv::IMWRITE_JPEG_QUALITY, encodeQuality };
+    cv::imencode(".jpg", frame, encoded, params);
+
+    size_t totalSize      = encoded.size();
+    size_t bytesRemaining = totalSize;
+    size_t offset         = 0;
+    uint32_t segmentIndex = 0;
+
+    // Number of segments
+    uint8_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
+
+    FragmentPayload packet;
+    Metadata meta;
+
+    std::string destIp = m_DestIpProvider ? m_DestIpProvider() : std::string();
+    if (destIp.empty()) {
+        return -1;
+    }
+
+    while (bytesRemaining > 0) {
+        // Fill metadata
+        meta.sequenceID  = m_FrameID;
+        meta.totalLength = static_cast<uint32_t>(totalSize);
+        meta.segmentID   = segmentIndex;
+        meta.numSegments = numSegments;
+
+        size_t bytesToSend = std::min<std::size_t>(bytesRemaining, MaxPayloadSize);
+        meta.length = static_cast<uint16_t>(bytesToSend);
+
+        // Write metadata
+        packet.metadata = meta;
+
+        // Copy payload bytes
+        std::memcpy(packet.payload, encoded.data() + offset, bytesToSend);
+
+        // Zero-fill remainder (keeps packet size fixed)
+        if (bytesToSend < MaxPayloadSize) {
+            std::memset(packet.payload + bytesToSend, 0, MaxPayloadSize - bytesToSend);
+        }
+
+        offset         += bytesToSend;
+        bytesRemaining -= bytesToSend;
+        segmentIndex++;
+
+        size_t packetSize = sizeof(Metadata) + MaxPayloadSize;
+        uint8_t* raw      = reinterpret_cast<uint8_t*>(&packet);
+
+        m_TxAdapter.send(destIp, raw, packetSize);
+    }
+
+    m_FrameID++;
+    return 0;
 }

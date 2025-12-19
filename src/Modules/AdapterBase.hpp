@@ -202,6 +202,10 @@ namespace Adapter {
             this->configurePipelineCommand = [adapter](const std::string& host) -> int {
                 return adapter->configurePipeline_(host);
             };
+
+            this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
+                return adapter->moduleCommand_(pbuf, len);
+            };
         }
 
         virtual int setCameraState_(int direction) {
