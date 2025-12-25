@@ -24,7 +24,7 @@ void VideoRecording::stop() {
 void VideoRecording::clear() {
 	std::lock_guard<std::mutex> lock(mutex_);
 	for (VideoFrame& frame : m_Video) {
-		frame.reset(0);
+		frame.reset();
 	}
 	m_Video.clear();
 	m_currentFrame = 0;

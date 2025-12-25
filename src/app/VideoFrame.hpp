@@ -89,10 +89,19 @@ public:
      */
     const std::vector<uint8_t> bytes() const noexcept;
 
+    /**
+     * @brief Number of segments currently stored.
+     */
     std::size_t numSegments() const noexcept { return m_FrameSegMap.size(); }
 
+    /**
+     * @brief Expected number of segments.
+     */
     std::size_t expectedSegments() const noexcept { return expectedSegments_; }
 
+    /**
+     * @brief Expected total length in bytes.
+     */
     std::size_t expectedTotalLength() const noexcept { return expectedTotalLength_; }
 
     /**
@@ -102,9 +111,8 @@ public:
 
     /**
      * @brief Reset payload and optionally set a new identifier.
-     * @param newId Identifier to assign after reset.
      */
-    void reset(std::size_t newId);
+    void reset();
 
 private:
     std::size_t frameID_{0};

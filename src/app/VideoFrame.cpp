@@ -47,8 +47,7 @@ const std::vector<uint8_t> VideoFrame::bytes() const noexcept {
         return data;  // incomplete
     }
 
-    for (const auto& [segID, segData] : m_FrameSegMap) {
-        (void)segID;
+    for (const auto& [_, segData] : m_FrameSegMap) {
         data.insert(data.end(), segData.begin(), segData.end());
     }
     return data;
@@ -64,8 +63,8 @@ std::size_t VideoFrame::size() const noexcept {
 }
 
 
-void VideoFrame::reset(std::size_t newId) {
-    frameID_ = newId;
+void VideoFrame::reset() {
+    frameID_ = 0;
     expectedSegments_ = 0;
     expectedTotalLength_ = 0;
     m_FrameSegMap.clear();

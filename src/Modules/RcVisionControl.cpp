@@ -124,38 +124,82 @@ int VisionControls::configurePipeline_(const std::string& host) {
 /**
  * @brief Received frame callback
  * 
- * @param pbuf Pointer to UDP recive  buffer
+ * @param pbuf Pointer to UDP receive buffer
  * @param length Length of data received
  */
 void VisionControls::recvFrame(std::vector<char>& data) {
     if (data.empty()) return;
-    char* pbuf = reinterpret_cast<char*>(data.data());
-
     Logger* logger = Logger::getLoggerInst();
+    const std::size_t packetSize = data.size();
+    if (packetSize < sizeof(Metadata)) {
+        logger->log(Logger::LOG_LVL_WARN, "Frame fragment too small (%zu, need %zu)\n", packetSize, sizeof(Metadata));
+        m_StreamInFrame.reset();
+        return;
+    }
+
+    char* pbuf = reinterpret_cast<char*>(data.data());
     std::vector<uint8_t> segmentData;
     static uint64_t frameID = 0;
 
     // Decode the image
     struct FragmentPayload* frameSegment = reinterpret_cast<struct FragmentPayload*>(const_cast<char*>(pbuf));
-    uint8_t numSegments = frameSegment->metadata.numSegments;
+    const uint8_t numSegments = frameSegment->metadata.numSegments;
+    const uint8_t segmentID = frameSegment->metadata.segmentID;
+    const uint32_t totalLength = frameSegment->metadata.totalLength;
+    const uint16_t payloadLen = frameSegment->metadata.length;
+
+    // Basic header sanity
+    if (numSegments == 0) {
+        logger->log(Logger::LOG_LVL_WARN, "Frame %u has zero segments\n", frameSegment->metadata.sequenceID);
+        m_StreamInFrame.reset();
+        return;
+    }
+
+    if (segmentID >= numSegments) {
+        logger->log(Logger::LOG_LVL_WARN, "Frame %u invalid segment id %u / %u\n", frameSegment->metadata.sequenceID, segmentID, numSegments);
+        m_StreamInFrame.reset();
+        return;
+    }
+
+    if (payloadLen == 0 || payloadLen > MaxPayloadSize) {
+        logger->log(Logger::LOG_LVL_WARN, "Frame %u invalid payload length %u (max %lld)\n", frameSegment->metadata.sequenceID, payloadLen, static_cast<long long>(MaxPayloadSize));
+        m_StreamInFrame.reset();
+        return;
+    }
+
+    if (sizeof(Metadata) + payloadLen > packetSize) {
+        logger->log(Logger::LOG_LVL_WARN,
+                    "Frame %u packet truncated (have %zu, need %zu)\n",
+                    frameSegment->metadata.sequenceID,
+                    packetSize,
+                    sizeof(Metadata) + static_cast<std::size_t>(payloadLen));
+        m_StreamInFrame.reset();
+        return;
+    }
 
     if (m_StreamInFrame.numSegments() > 0 && (m_StreamInFrame.frameID() != frameSegment->metadata.sequenceID)) {
         // Clear the map
-        m_StreamInFrame.reset(frameSegment->metadata.sequenceID);
+        m_StreamInFrame.reset();
     }
 
     m_StreamInFrame.setFrameID(frameSegment->metadata.sequenceID);
 
-    // Append frame as long as the index is the same
-    segmentData.resize(frameSegment->metadata.length);
-
-    // Copy the data into the buffer
-    std::memcpy(segmentData.data(), frameSegment->payload, frameSegment->metadata.length);
-    if (m_StreamInFrame.expectedSegments() == 0) {
-        m_StreamInFrame.setExpected(frameSegment->metadata.numSegments, frameSegment->metadata.totalLength);
+    // Drop duplicates to avoid over-assembly
+    if (m_StreamInFrame.getSegmentMap().count(segmentID) > 0) {
+        logger->log(Logger::LOG_LVL_WARN,
+                    "Frame %u duplicate segment %u/%u\n",
+                    frameSegment->metadata.sequenceID,
+                    segmentID,
+                    numSegments);
+        return;
     }
 
-    m_StreamInFrame.append(static_cast<int>(frameSegment->metadata.segmentID), segmentData);
+    segmentData.resize(payloadLen);
+
+    // Copy the data into the buffer
+    std::memcpy(segmentData.data(), frameSegment->payload, payloadLen);
+
+    m_StreamInFrame.append(static_cast<int>(segmentID), segmentData);
 
     // Store the frame ID
     frameID = frameSegment->metadata.sequenceID;
@@ -164,13 +208,13 @@ void VisionControls::recvFrame(std::vector<char>& data) {
     if (m_StreamInFrame.numSegments() == numSegments) {
         const std::vector<uint8_t> assembled = m_StreamInFrame.bytes();
 
-        if (assembled.size() != frameSegment->metadata.totalLength) {
+        if (assembled.size() != totalLength) {
             logger->log(Logger::LOG_LVL_WARN,
                         "Frame %llu size mismatch (expected %u, got %zu)\n",
                         static_cast<unsigned long long>(m_StreamInFrame.frameID()),
-                        frameSegment->metadata.totalLength,
+                        totalLength,
                         assembled.size());
-            m_StreamInFrame.reset(frameSegment->metadata.sequenceID + 1);
+            m_StreamInFrame.reset();
             return;  // drop corrupt frame
         }
 
@@ -178,7 +222,7 @@ void VisionControls::recvFrame(std::vector<char>& data) {
             m_VideoRecorder.pushFrame(m_StreamInFrame);
         }
         
-        m_StreamInFrame.reset(frameSegment->metadata.sequenceID + 1);
+        m_StreamInFrame.reset();
     }
 }
 
@@ -402,6 +446,7 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
 
         case CmdClrVideoRec:
             logger->log(Logger::LOG_LVL_INFO, "Clearing video recording buffer\n");
+            m_StreamInFrame.reset();
             m_VideoRecorder.clear();
             break;
 
@@ -451,7 +496,6 @@ void VisionControls::mainProc() {
 
     logger->log(Logger::LOG_LVL_INFO, "Opened camera at node: /dev/video0\n");
     cv::Mat frame;
-    int size;
     while (m_Running.load()) {
         switch(m_StreamStats.streamInStatus) {
             case StreamCamera:

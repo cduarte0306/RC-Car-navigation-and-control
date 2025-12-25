@@ -1,5 +1,4 @@
 #include "Modules/RcCarTelemetry.hpp"
-#include "Modules/RcCarTelemetry.hpp"
 #include "Devices/RegisterMap.hpp"
 
 #include "utils/logger.hpp"
