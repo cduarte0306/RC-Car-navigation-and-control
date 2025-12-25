@@ -60,6 +60,10 @@ int NetworkComms::configureAdapter(
     if (!m_UdpSocket) {
         m_UdpSocket = socketPtr;
     }
+
+    if (m_AdapterMap.find(adapter) == m_AdapterMap.end()) {
+        m_AdapterMap[adapter] = move(udpSocket);
+    }
     return 0;
 }
 
@@ -70,7 +74,7 @@ int NetworkComms::configureAdapter(
  * @param adapter Reference to network adapter struct
  * @param dataReceivedCommand_ Function to process received data
  */
-void NetworkComms::configureReceiveCallback(NetworkAdapter& adapter, std::function<void(const uint8_t* data, size_t& length)> dataReceivedCommand_, bool asyncTx) {
+void NetworkComms::configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx) {
     auto it = m_UdpSockets.find(adapter.id);
     if (it == m_UdpSockets.end() || !it->second) {
         Logger* logger = Logger::getLoggerInst();
@@ -84,6 +88,44 @@ void NetworkComms::configureReceiveCallback(NetworkAdapter& adapter, std::functi
 
 
 /**
+ * @brief Write data via WLAN adapter
+ * 
+ * @param data Pointer to data buffer
+ * @param length Size of data
+ * @return int Status code
+ */
+int NetworkComms::wlanWrite(const uint8_t* data, size_t length) {
+    if (!data || length == 0) return -1;
+
+    if (m_WlanHostIP.empty()) return -1;
+
+    // UdpServer::transmit expects a non-const buffer pointer
+    uint8_t* buf = const_cast<uint8_t*>(data);
+    bool ok = this->m_UdpSocket->transmit(buf, length, m_WlanHostIP);
+    return ok ? 0 : -1;
+}
+
+
+/**
+ * @brief Write data via Ethernet adapter
+ * 
+ * @param data Pointer to data buffer
+ * @param length Size of data
+ * @return int Status code
+ */
+int NetworkComms::ethWrite(const uint8_t* data, size_t length) {
+    if (!data || length == 0) return -1;
+
+    if (m_EthHostIP.empty()) return -1;
+
+    // UdpServer::transmit expects a non-const buffer pointer
+    uint8_t* buf = const_cast<uint8_t*>(data);
+    bool ok = this->m_UdpSocket->transmit(buf, length, m_EthHostIP);
+    return ok ? 0 : -1;
+}
+
+
+/**
  * @brief Main processing loop for network communications
  * 
  */
@@ -93,12 +135,18 @@ void NetworkComms::mainProc() {
 
     while (true) {
         // Process motor commands
-        hostIP = this->m_UdpSocket->getHostIP();
-        if (hostIP.length() && (hostIP != lastHost)) {
-            if (this->CameraAdapter) {
-                this->CameraAdapter->configurePipeline(hostIP);
+        for (auto& [adapterName, udpSocketPtr] : m_AdapterMap) {
+            if (!udpSocketPtr) {
+                continue;
             }
-            lastHost = hostIP;
+
+            if (adapterName.find("wl") != string::npos) {
+                // WLAN adapter
+                m_WlanHostIP = udpSocketPtr->getHostIP();
+            } else if (adapterName.find("en") != string::npos) {
+                // Ethernet adapter
+                m_EthHostIP = udpSocketPtr->getHostIP();
+            }
         }
 
         this_thread::sleep_for(chrono::milliseconds(100));

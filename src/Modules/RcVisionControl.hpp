@@ -11,6 +11,8 @@
 #include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
 
+#include "app/VideoRecording.hpp"
+
 
 namespace Modules {
 class VisionControls : public Base, public Adapter::CameraAdapter {
@@ -28,7 +30,9 @@ public:
         return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CameraAdapter*>(this));
     }
 
-    virtual int moduleCommand_(char* pbuf, size_t len) override;
+    // virtual int moduleCommand_(char* pbuf, size_t len) override;
+
+    virtual int moduleCommand_(std::vector<char>& buffer) override;
 
     virtual int configurePipeline_(const std::string& host) override;
     
@@ -57,16 +61,18 @@ protected:
     };
 #pragma pack(pop)
     enum {
-        StreamInOff,
-        StreamInOn,
+        StreamCamera,
+        StreamSim
     };
 
     // Camera module commands
     enum {
-        CmdSetFrameRate,
-        CmdStartStream,
-        CmdStopStream,
-        CmdSelMode
+        CmdSetFrameRate,  // set camera frame rate
+        CmdStartStream,   // start video stream
+        CmdStopStream,    // stop video stream
+        CmdStreamMode,    // start simulation video stream
+        CmdSelCameraMode, // select camera mode
+        CmdClrVideoRec    // clear video recording buffer
     };
 
     // Setting enums
@@ -98,14 +104,20 @@ protected:
     // Handles the decoding of JPEGs
     void decodeJPEG(cv::Mat& frame, FramePackets& frameEntry);
 
+    // Frame transmission handler
+    void decodeJPEG(cv::Mat& frame, const VideoFrame& frameEntry);
+
     // Receive frame handler
-    void recvFrame(const uint8_t* pbuf, size_t length);
+    void recvFrame(std::vector<char>& data);
 
     // Frame processing handler
     void processFrame(cv::Mat& frame);
 
+    // Depth processing handler
+    void processDepth(cv::Mat& frame);
+
     struct StreamStatus {
-        std::atomic<uint8_t> streamInStatus{StreamInOff};
+        std::atomic<uint8_t> streamInStatus{StreamCamera};
         int streamInCounter = 0;  // Stream IN watchdog counter
     } m_StreamStats;
 
@@ -148,11 +160,18 @@ protected:
     // Reception port
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_RxAdapter{nullptr};
 
+    // Video recorder
+    VideoRecording m_VideoRecorder;
+
+    // Incoming frame assembler
+    VideoFrame m_StreamInFrame;
+
     // Frame ID
     uint32_t m_FrameID = 0;
 
     // DNN model
-    cv::dnn::Net m_DnnNet;
+    cv::dnn::Net m_DnnNetDepth;
+    cv::dnn::Net m_DnnNetLaneDetect;
 };
 }
 

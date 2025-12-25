@@ -1,6 +1,7 @@
 #include "RcVisionControl.hpp"
 #include "RcMessageLib.hpp"
-#include "lib/VideoStreamer.hpp"
+#include "app/VideoStreamer.hpp"
+#include "app/VideoFrame.hpp"
 
 #include "utils/logger.hpp"
 #include <opencv2/opencv.hpp>
@@ -18,6 +19,10 @@
 #include <functional>
 #include <chrono>
 #include <algorithm>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 
 #define STREAM_PORT 5000
 
@@ -64,26 +69,32 @@ int VisionControls::init(void) {
 #else
     logger->log(Logger::LOG_LVL_WARN, "OpenCV built without CUDA support\n");
 #endif
-
-    m_DnnNet = cv::dnn::readNet(MODEL_PATH);
-    if (m_DnnNet.empty()) {
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to load DNN model at %s\n", MODEL_PATH);
-    } else {
-        if (useCuda) {
-            m_DnnNet.setPreferableBackend(DNN_BACKEND_CUDA);
-            m_DnnNet.setPreferableTarget(DNN_TARGET_CUDA);
-            logger->log(Logger::LOG_LVL_INFO, "DNN model loaded with CUDA backend\n");
+    // Check if the file exists
+    if (std::filesystem::exists(MODEL_PATH)) {
+        m_DnnNetDepth = cv::dnn::readNet(MODEL_PATH);
+        if (m_DnnNetDepth.empty()) {
+            logger->log(Logger::LOG_LVL_ERROR, "Failed to load DNN model at %s\n", MODEL_PATH);
         } else {
-            m_DnnNet.setPreferableBackend(DNN_BACKEND_OPENCV);
-            m_DnnNet.setPreferableTarget(DNN_TARGET_CPU);
-            logger->log(Logger::LOG_LVL_INFO, "DNN model loaded with CPU backend\n");
+            if (useCuda) {
+                m_DnnNetDepth.setPreferableBackend(DNN_BACKEND_CUDA);
+                m_DnnNetDepth.setPreferableTarget(DNN_TARGET_CUDA);
+                logger->log(Logger::LOG_LVL_INFO, "DNN model loaded with CUDA backend\n");
+            } else {
+                m_DnnNetDepth.setPreferableBackend(DNN_BACKEND_OPENCV);
+                m_DnnNetDepth.setPreferableTarget(DNN_TARGET_CPU);
+                logger->log(Logger::LOG_LVL_INFO, "DNN model loaded with CPU backend\n");
+            }
         }
+    } else {
+        logger->log(Logger::LOG_LVL_WARN, "DNN model file not found at %s\n", MODEL_PATH);
+        m_DnnNetDepth.setPreferableBackend(DNN_BACKEND_OPENCV);
+        m_DnnNetDepth.setPreferableTarget(DNN_TARGET_CPU);
     }
 
     // Start receiving frames
     this->CommsAdapter->startReceive(
         *m_RxAdapter,
-        std::bind(&VisionControls::recvFrame, this, std::placeholders::_1, std::placeholders::_2),
+        std::bind(&VisionControls::recvFrame, this, std::placeholders::_1),
         false);
     return 0;
 }
@@ -116,10 +127,9 @@ int VisionControls::configurePipeline_(const std::string& host) {
  * @param pbuf Pointer to UDP recive  buffer
  * @param length Length of data received
  */
-void VisionControls::recvFrame(const uint8_t* pbuf, size_t length) {
-    if (!pbuf) return;
-
-    static bool doOnce = false;
+void VisionControls::recvFrame(std::vector<char>& data) {
+    if (data.empty()) return;
+    char* pbuf = reinterpret_cast<char*>(data.data());
 
     Logger* logger = Logger::getLoggerInst();
     FramePackets frameFragment;
@@ -127,15 +137,16 @@ void VisionControls::recvFrame(const uint8_t* pbuf, size_t length) {
     static uint64_t frameID = 0;
 
     // Decode the image
-    struct FragmentPayload* frameSegment = reinterpret_cast<struct FragmentPayload*>(const_cast<uint8_t*>(pbuf));
+    struct FragmentPayload* frameSegment = reinterpret_cast<struct FragmentPayload*>(const_cast<char*>(pbuf));
     uint8_t numSegments = frameSegment->metadata.numSegments;
 
     if (m_SegmentMap.segmentMap.size() > 0 && (m_SegmentMap.frameID != frameSegment->metadata.sequenceID)) {
         // Clear the map
         m_SegmentMap.segmentMap.clear();
+        m_StreamInFrame.reset(frameSegment->metadata.sequenceID);
     }
 
-    m_SegmentMap.frameID = frameSegment->metadata.sequenceID;
+    m_SegmentMap.frameID     = frameSegment->metadata.sequenceID;
     m_SegmentMap.numSegments = frameSegment->metadata.numSegments;
 
     // Append frame as long as the index is the same
@@ -143,43 +154,39 @@ void VisionControls::recvFrame(const uint8_t* pbuf, size_t length) {
 
     // Copy the data into the buffer
     std::memcpy(segmentData.data(), frameSegment->payload, frameSegment->metadata.length);
+    if (m_StreamInFrame.expectedSegments() == 0) {
+        m_StreamInFrame.setExpected(frameSegment->metadata.numSegments, frameSegment->metadata.totalLength);
+    }
+
+    m_StreamInFrame.append(static_cast<int>(frameSegment->metadata.segmentID), segmentData);
 
     // Store the frame ID
     frameID = frameSegment->metadata.sequenceID;
     m_SegmentMap.segmentMap[frameSegment->metadata.segmentID] = std::move(segmentData);
 
+    // Once we have all segments, assemble the frame via VideoFrame helper
     if (m_SegmentMap.segmentMap.size() == numSegments) {
-        // Validate that the assembled size matches the advertised total length
-        size_t totalReceived = 0;
-        for (const auto& kv : m_SegmentMap.segmentMap) {
-            totalReceived += kv.second.size();
-        }
+        const std::vector<uint8_t> assembled = m_StreamInFrame.bytes();
 
-        if (totalReceived != frameSegment->metadata.totalLength) {
+        if (assembled.size() != frameSegment->metadata.totalLength) {
             logger->log(Logger::LOG_LVL_WARN,
                         "Frame %llu size mismatch (expected %u, got %zu)\n",
                         static_cast<unsigned long long>(m_SegmentMap.frameID),
                         frameSegment->metadata.totalLength,
-                        totalReceived);
+                        assembled.size());
             m_SegmentMap.segmentMap.clear();
+            m_StreamInFrame.reset(frameSegment->metadata.sequenceID + 1);
             return;  // drop corrupt frame
         }
 
-        // Push the segment map
+        if (!assembled.empty()) {
+            m_VideoRecorder.pushFrame(m_StreamInFrame);
+        }
+
+        // Push the segment map for decode path
         m_FrameRecvBuff.push(m_SegmentMap);
         m_SegmentMap.segmentMap.clear();
-
-        if (m_StreamStats.streamInStatus == VisionControls::StreamInOff) {
-            doOnce = false;
-        }
-
-        m_StreamStats.streamInStatus = VisionControls::StreamInOn;
-        m_StreamStats.streamInCounter = 0;  // Reset the counter
-
-        if (!doOnce) {
-            logger->log(Logger::LOG_LVL_INFO, "Stream in started...\n");
-            doOnce = true;
-        }
+        m_StreamInFrame.reset(frameSegment->metadata.sequenceID + 1);
     }
 }
 
@@ -237,16 +244,59 @@ void VisionControls::decodeJPEG(cv::Mat& frame, FramePackets& frameEntry) {
 }
 
 
+void VisionControls::decodeJPEG(cv::Mat& frame, const VideoFrame& frameEntry) {
+    const auto& frameMap = frameEntry.getSegmentMap();
+    const uint8_t numSegments = static_cast<uint8_t>(frameEntry.numSegments());
+
+    if (frameMap.empty()) {
+        frame.release();
+        return;
+    }
+
+    // Validate all segments exist
+    uint32_t totalSize = 0;
+    for (uint8_t segID = 0; segID < numSegments; ++segID) {
+        auto it = frameMap.find(segID);
+        if (it == frameMap.end()) {
+            frame.release();
+            return;
+        }
+        totalSize += it->second.size();
+    }
+
+    // Reassemble
+    std::vector<uint8_t> jpegFrame;
+    jpegFrame.reserve(totalSize);
+
+    for (uint8_t segID = 0; segID < numSegments; ++segID) {
+        const auto& seg = frameMap.at(segID);
+        jpegFrame.insert(jpegFrame.end(), seg.begin(), seg.end());
+    }
+
+    #if RCVC_HAVE_CUDAIMGCODECS
+    cv::cuda::GpuMat gpu = cv::cuda::imdecode(jpegFrame, cv::IMREAD_COLOR);
+    if (!gpu.empty()) {
+        gpu.download(frame);
+    } else {
+        frame.release();
+    }
+    #else
+    frame = cv::imdecode(jpegFrame, cv::IMREAD_COLOR);
+    #endif
+
+    if (frame.empty()) {
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_WARN, "Failed to decode JPEG (bytes=%zu, segments=%u)\n", jpegFrame.size(), numSegments);
+    }
+}
+
+
 /**
- * @brief Process a frame (placeholder for future processing)
+ * @brief Process depth frame using DNN
  * 
  * @param frame Input/output frame
  */
-void VisionControls::processFrame(cv::Mat& frame) {
-    using namespace std;
-    using namespace cv;
-    using namespace dnn;
-
+void VisionControls::processDepth(cv::Mat& frame) {
     auto getOutputsNames = [](const cv::dnn::Net& net) {
         std::vector<std::string> names;
         std::vector<int32_t> out_layers = net.getUnconnectedOutLayers();
@@ -258,100 +308,113 @@ void VisionControls::processFrame(cv::Mat& frame) {
         return names;
     };
 
-    switch (m_CamSettings.mode)
-    {
-    case CamModeNormal:
-        /* code */
-        break;
-    
-    case CamModeDepth: {
-        static bool logMissingModel = false;
-        if (m_DnnNet.empty()) {
-            if (!logMissingModel) {
-                Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "CamModeDepth selected but DNN model is not loaded\n");
-                logMissingModel = true;
-            }
-            break;
+    static bool logMissingModel = false;
+    if (m_DnnNetDepth.empty()) {
+        if (!logMissingModel) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "CamModeDepth selected but DNN model is not loaded\n");
+            logMissingModel = true;
         }
-
-        if (frame.empty()) {
-            break;
-        }
-
-        // Pick input size based on model name hint: small => 256, otherwise 384
-        constexpr int kDepthInputLarge = 384;
-        constexpr int kDepthInputSmall = 256;
-        const bool isSmall = std::string(MODEL_PATH).find("small") != std::string::npos;
-        const int kDepthInput = isSmall ? kDepthInputSmall : kDepthInputLarge;
-
-        cv::Mat resized;
-        cv::resize(frame, resized, cv::Size(kDepthInput, kDepthInput));
-
-        // MiDaS-style preprocessing: scale 1/255, RGB order, mean subtraction
-        const cv::Scalar mean(123.675, 116.28, 103.53);
-        cv::Mat blob = cv::dnn::blobFromImage(resized, 1.0f / 255.0f, cv::Size(kDepthInput, kDepthInput), mean, true, false);
-
-        m_DnnNet.setInput(blob);
-
-        cv::Mat output;
-        try {
-            output = m_DnnNet.forward(getOutputsNames(m_DnnNet)[0]);
-        } catch (const cv::Exception& e) {
-            Logger::getLoggerInst()->log(
-                Logger::LOG_LVL_ERROR,
-                "DNN forward failed: %s (blob shape: NCHW=%d,%d,%d,%d)\n",
-                e.what(),
-                blob.size[0], blob.size[1], blob.size[2], blob.size[3]);
-            break;
-        }
-
-        if (output.empty()) {
-            Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "DNN forward returned empty output\n");
-            break;
-        }
-
-        cv::Mat depth;
-        if (output.dims == 4 && output.size[1] == 1) {
-            const int outH = output.size[2];
-            const int outW = output.size[3];
-            depth = cv::Mat(outH, outW, CV_32F, output.ptr<float>());
-        } else if (output.dims == 3) {
-            const int outH = output.size[1];
-            const int outW = output.size[2];
-            const std::vector<int32_t> sz = { outH, outW };
-            depth = cv::Mat(static_cast<int32_t>(sz.size()), sz.data(), CV_32F, output.ptr<float>());
-        } else {
-            static bool loggedUnexpected = false;
-            if (!loggedUnexpected) {
-                Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Unexpected DNN output dims=%d\n", output.dims);
-                loggedUnexpected = true;
-            }
-            break;
-        }
-
-        cv::Mat depthResized;
-        cv::resize(depth, depthResized, frame.size());
-
-        double minVal = 0.0, maxVal = 0.0;
-        cv::minMaxLoc(depthResized, &minVal, &maxVal);
-        const double range = maxVal - minVal;
-
-        cv::Mat depthNorm;
-        if (std::abs(range) < 1e-6) {
-            depthNorm = cv::Mat::zeros(depthResized.size(), CV_8U);
-        } else {
-            depthResized.convertTo(depthNorm, CV_8U, 255.0 / range, -minVal * 255.0 / range);
-        }
-
-        cv::Mat depthColor;
-        cv::applyColorMap(depthNorm, depthColor, cv::COLORMAP_MAGMA);
-
-        cv::addWeighted(depthColor, 0.6, frame, 0.4, 0.0, frame);
-        break;
+        return;
     }
 
-    default:
-        break;
+    if (frame.empty()) {
+        return;
+    }
+
+    // Pick input size based on model name hint: small => 256, otherwise 384
+    constexpr int kDepthInputLarge = 384;
+    constexpr int kDepthInputSmall = 256;
+    const bool isSmall = std::string(MODEL_PATH).find("small") != std::string::npos;
+    const int kDepthInput = isSmall ? kDepthInputSmall : kDepthInputLarge;
+
+    cv::Mat resized;
+    cv::resize(frame, resized, cv::Size(kDepthInput, kDepthInput));
+
+    // MiDaS-style preprocessing: scale 1/255, RGB order, mean subtraction
+    const cv::Scalar mean(123.675, 116.28, 103.53);
+    cv::Mat blob = cv::dnn::blobFromImage(resized, 1.0f / 255.0f, cv::Size(kDepthInput, kDepthInput), mean, true, false);
+
+    m_DnnNetDepth.setInput(blob);
+
+    cv::Mat output;
+    try {
+        output = m_DnnNetDepth.forward(getOutputsNames(m_DnnNetDepth)[0]);
+    } catch (const cv::Exception& e) {
+        Logger::getLoggerInst()->log(
+            Logger::LOG_LVL_ERROR,
+            "DNN forward failed: %s (blob shape: NCHW=%d,%d,%d,%d)\n",
+            e.what(),
+            blob.size[0], blob.size[1], blob.size[2], blob.size[3]);
+        return;
+    }
+
+    if (output.empty()) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "DNN forward returned empty output\n");
+        return;
+    }
+
+    cv::Mat depth;
+    if (output.dims == 4 && output.size[1] == 1) {
+        const int outH = output.size[2];
+        const int outW = output.size[3];
+        depth = cv::Mat(outH, outW, CV_32F, output.ptr<float>());
+    } else if (output.dims == 3) {
+        const int outH = output.size[1];
+        const int outW = output.size[2];
+        const std::vector<int32_t> sz = { outH, outW };
+        depth = cv::Mat(static_cast<int32_t>(sz.size()), sz.data(), CV_32F, output.ptr<float>());
+    } else {
+        static bool loggedUnexpected = false;
+        if (!loggedUnexpected) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Unexpected DNN output dims=%d\n", output.dims);
+            loggedUnexpected = true;
+        }
+        return;
+    }
+
+    cv::Mat depthResized;
+    cv::resize(depth, depthResized, frame.size());
+
+    double minVal = 0.0, maxVal = 0.0;
+    cv::minMaxLoc(depthResized, &minVal, &maxVal);
+    const double range = maxVal - minVal;
+
+    cv::Mat depthNorm;
+    if (std::abs(range) < 1e-6) {
+        depthNorm = cv::Mat::zeros(depthResized.size(), CV_8U);
+    } else {
+        depthResized.convertTo(depthNorm, CV_8U, 255.0 / range, -minVal * 255.0 / range);
+    }
+
+    cv::Mat depthColor;
+    cv::applyColorMap(depthNorm, depthColor, cv::COLORMAP_MAGMA);
+
+    cv::addWeighted(depthColor, 0.6, frame, 0.4, 0.0, frame);
+}
+
+
+/**
+ * @brief Process a frame (placeholder for future processing)
+ * 
+ * @param frame Input/output frame
+ */
+void VisionControls::processFrame(cv::Mat& frame) {
+    using namespace std;
+    using namespace cv;
+    using namespace dnn;
+
+    switch (m_CamSettings.mode) {
+        case CamModeNormal:
+            /* code */
+            break;
+        
+        case CamModeDepth: {
+            processDepth(frame);
+            break;
+        }
+
+        default:
+            break;
     }
 }
 
@@ -363,9 +426,9 @@ void VisionControls::processFrame(cv::Mat& frame) {
  * @param len Length of command buffer
  * @return int Error code
  */
-int VisionControls::moduleCommand_(char* pbuf, size_t len) {
+int VisionControls::moduleCommand_(std::vector<char>& buffer) {
     // Currently no commands implemented
-    CameraCommand* cmd = reinterpret_cast<CameraCommand*>(pbuf);
+    CameraCommand* cmd = reinterpret_cast<CameraCommand*>(buffer.data());
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "VisionControls received command: %d\n", cmd->command);
 
@@ -383,11 +446,26 @@ int VisionControls::moduleCommand_(char* pbuf, size_t len) {
             /* code */
             break;
 
-        case CmdSelMode:
+        case CmdStreamMode: {
+            const char* modeStr = (cmd->data.u8 == StreamSim) ? "Simulation" : 
+                                  (cmd->data.u8 == StreamCamera) ? "Camera" : "Unknown";
+            logger->log(Logger::LOG_LVL_INFO, "Configuring stream mode to %s, cmd: %d\n", modeStr, cmd->data.u8);
+            m_StreamStats.streamInStatus = cmd->data.u8;
+            if (cmd->data.u8 == StreamCamera) {
+                m_VideoRecorder.resetPlayback();
+            }
+            break;
+        }
+        case CmdSelCameraMode:
             logger->log(Logger::LOG_LVL_INFO, "Setting camera mode to %d\n", cmd->data.u8);
             m_CamSettings.mode = cmd->data.u8;
             break;
-        
+
+        case CmdClrVideoRec:
+            logger->log(Logger::LOG_LVL_INFO, "Clearing video recording buffer\n");
+            m_VideoRecorder.clear();
+            break;
+
         default:
             break;
     }
@@ -400,23 +478,23 @@ int VisionControls::moduleCommand_(char* pbuf, size_t len) {
  * 
  */
 void VisionControls::OnTimer(void) {
-    static bool doOnce = false;
-    Logger* logger = Logger::getLoggerInst();
+    // static bool doOnce = false;
+    // Logger* logger = Logger::getLoggerInst();
 
-    if (m_StreamStats.streamInStatus == VisionControls::StreamInOn) {
-       doOnce = false; 
-    }
+    // if (m_StreamStats.streamInStatus == VisionControls::StreamInOn) {
+    //    doOnce = false; 
+    // }
     
     // If we've not received frames in over 1 second, switchback to reading fromthe camera
-    if (m_StreamStats.streamInCounter > 1) {
-        if (!doOnce) {
-            logger->log(Logger::LOG_LVL_INFO, "Timeout detected. Stream in is OFF\n");
-            doOnce = true;
-        }
-        m_StreamStats.streamInStatus = VisionControls::StreamInOff;
-    } else {
-        m_StreamStats.streamInCounter ++;
-    }
+    // if (m_StreamStats.streamInCounter > 1) {
+    //     if (!doOnce) {
+    //         logger->log(Logger::LOG_LVL_INFO, "Timeout detected. Stream in is OFF\n");
+    //         doOnce = true;
+    //     }
+    //     m_StreamStats.streamInStatus = VisionControls::StreamInOff;
+    // } else {
+    //     m_StreamStats.streamInCounter ++;
+    // }
 }
 
 
@@ -434,6 +512,7 @@ void VisionControls::mainProc() {
         35,
         100);
     streamer.start();
+    m_VideoRecorder.setFrameRate(VideoRecording::FrameRate::_30Fps);
 
     cv::VideoCapture cap(
         "nvarguscamerasrc sensor-id=0 ! "
@@ -445,32 +524,36 @@ void VisionControls::mainProc() {
 
     if (!cap.isOpened()) {
         logger->log(Logger::LOG_LVL_ERROR, "ERROR: Could not open /dev/video0\n");
-        return;
+        throw std::runtime_error("Could not open camera device");
     }
 
     logger->log(Logger::LOG_LVL_INFO, "Opened camera at node: /dev/video0\n");
     cv::Mat frame;
     int size;
-    while (true) {
+    while (m_Running.load()) {
         switch(m_StreamStats.streamInStatus) {
-            case StreamInOff:
-            cap.read(frame);
-            break;
+            case StreamCamera:
+                cap.read(frame);
+                break;  
 
-            case StreamInOn: {
-                if (m_FrameRecvBuff.isEmpty())
-                    continue;
-                FramePackets frameEntry = m_FrameRecvBuff.getHead();
-                decodeJPEG(frame, frameEntry);
-                if (frame.empty()) {
-                    logger->log(Logger::LOG_LVL_WARN, "Could not decode JPEG\n");
-                    m_FrameRecvBuff.pop();
+            case StreamSim: {
+                // We draw a frame from the recording object
+                VideoFrame simFrame = m_VideoRecorder.getNextFrame();
+                if (simFrame.numSegments() == 0) {
+                    // No frames available, wait a bit
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     continue;
                 }
-
-                m_FrameRecvBuff.pop();
+                decodeJPEG(frame, simFrame);
+                if (frame.empty()) {
+                    logger->log(Logger::LOG_LVL_WARN, "Could not decode JPEG from simulation frame\n");
+                    continue;
+                }
                 break;
             }
+
+            default:
+                break;
         }
 
         if (frame.empty()) {

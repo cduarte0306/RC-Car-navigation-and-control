@@ -1,4 +1,5 @@
-#include "lib/VideoStreamer.hpp"
+#include "app/VideoStreamer.hpp"
+#include <cstring>
 
 #include <thread>
 

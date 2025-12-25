@@ -14,16 +14,9 @@ MotorController::MotorController(int moduleID_, std::string name) : Base(moduleI
 
     try {
         this->peripheralDriver = std::make_unique<Device::PeripheralCtrl>();
-        int ret = this->peripheralDriver->doDetectDevice();
-        if (ret == 0) {
-            uint8_t major, minor, build;
-            this->peripheralDriver->getVers(major, minor, build);
-            logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
-            m_isControllerConnected = true;
-        }
 
         this->m_PwmFwd = std::make_unique<Device::Pwm>("/dev/pwm0", 1000);
-        ret = this->m_PwmFwd->writeEnable(true);
+        int ret = this->m_PwmFwd->writeEnable(true);
         if (ret < 0) {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to enable Motor control PWM\r\n");
         }
@@ -53,11 +46,14 @@ MotorController::~MotorController() {
 int MotorController::init(void) {
     // Open a network adapter for telemetry
     Logger* logger = Logger::getLoggerInst();
-    m_TlmNetAdapter = this->CommsAdapter->createNetworkAdapter(65001, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
-    if (!m_TlmNetAdapter) {
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to create motor telemetry network adapter\r\n");
+
+    // Register as telemetry source
+    int ret = this->TlmAdapter->registerTelemetrySource(this->getName());
+    if (ret < 0) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to register motor controller as telemetry source\r\n");
         return -1;
     }
+
     logger->log(Logger::LOG_LVL_INFO, "Opened motor telemetry network adapter at port 65001\r\n");
     return 0;
 }
@@ -201,7 +197,7 @@ void MotorController::pollTlmData(void) {
         this->peripheralDriver->readData(psocData);
     }
     RegisterMap* regMap = RegisterMap::getInstance();
-    auto retVal = regMap->get<std::string>("HostIP");
+    auto retVal = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP);
 
     nlohmann::json telemetryJson;
     telemetryJson["version_major"] = psocData.version_major.u8;
@@ -212,20 +208,33 @@ void MotorController::pollTlmData(void) {
     telemetryJson["leftDistance" ] = psocData.leftDistance.u32;
     telemetryJson["rightDistance"] = psocData.rightDistance.u32;
 
-    std::string jsonString = telemetryJson.dump();
-
     if (retVal.has_value()) {
-        std::string hostIP = retVal.value();
-        m_TlmNetAdapter->send(hostIP, reinterpret_cast<const uint8_t*>(jsonString.c_str()), jsonString.length());
+        this->TlmAdapter->publishTelemetry(this->getName(),
+            reinterpret_cast<const uint8_t*>(telemetryJson.dump().c_str()),
+            telemetryJson.dump().length());
     }
 }
 
 
 void MotorController::mainProc() {
+    Logger* logger = Logger::getLoggerInst();
+    m_isControllerConnected = false;
+
     // Main processing loop for the motor controller
-    while (true) {
-        this->pollTlmData();
-        
+    while (m_Running.load()) {
+        if (!m_isControllerConnected) {
+            this->peripheralDriver->doDetectDevice();
+            int ret = this->peripheralDriver->doDetectDevice();
+            if (ret == 0) {
+                uint8_t major, minor, build;
+                this->peripheralDriver->getVers(major, minor, build);
+                logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
+                m_isControllerConnected = true;
+            }
+        } else {
+            pollTlmData();
+        }
+
         // Process motor commands
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }

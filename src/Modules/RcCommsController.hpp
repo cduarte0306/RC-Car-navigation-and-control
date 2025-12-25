@@ -52,9 +52,6 @@ protected:
         uint8_t state;    
     } reply_t;
 
-    // Map of UDP sockets by adapter ID
-    unordered_map<int, unique_ptr<Network::UdpServer>> m_UdpSockets;
-
     // Override moduleCommand to handle incoming commands
     virtual int moduleCommand(char* pbuf, size_t len) override {
         return 0;
@@ -67,7 +64,7 @@ protected:
     virtual int configureAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
 
     // Override startReceive_ to route incoming data via UDP
-    virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(const uint8_t* data, size_t& length)> dataReceivedCommand_, bool asyncTx=true) override;
+    virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true) override;
 
     // Override transmitData_ to route data via UDP
     virtual int transmitData_(const uint8_t* data, size_t length) override;
@@ -75,8 +72,23 @@ protected:
     // Provide host IP lookup for bound adapters
     virtual std::string getHostIP_(NetworkAdapter& adapter) override;
 
-    // Map caller module name -> configured port for fast routing
-    unordered_map<string, int> m_CallerPortMap;
+    // WLAN write function
+    int wlanWrite(const uint8_t* data, size_t length);
+
+    // Ethernet write function
+    int ethWrite(const uint8_t* data, size_t length);
+    
+    // Map of UDP sockets by adapter ID
+    unordered_map<int, unique_ptr<Network::UdpServer>> m_UdpSockets;
+
+    // Map of adapter name to adapter index
+    unordered_map<string, unique_ptr<Network::UdpServer>> m_AdapterMap;
+
+    // Ethernet adapter known hosto
+    string m_EthHostIP;  // Ethernet known host
+
+    // WLAN known host
+    string m_WlanHostIP; // WLAN known host
 
     // Non-owning pointer to the primary socket (first configured adapter)
     Network::UdpServer* m_UdpSocket{nullptr};

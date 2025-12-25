@@ -72,7 +72,7 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, s
  * 
  * @param dataReceivedCallback_ Callback function to handle received data
  */
-void UdpServer::startReceive(std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback_, bool asyncTx) {
+void UdpServer::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_, bool asyncTx) {
     dataReceivedCallback = dataReceivedCallback_;
     m_AsyncTx = asyncTx;
     this->startReceive_();
@@ -91,7 +91,8 @@ void UdpServer::startReceive_(void) {
                 // Call the data received callback
                 if (dataReceivedCallback) {
                     Logger* logger = Logger::getLoggerInst();
-                    dataReceivedCallback(reinterpret_cast<const uint8_t*>(m_RecvBuffer.data()), bytes_recvd);
+                    std::vector<char> dataReceived(m_RecvBuffer.begin(), m_RecvBuffer.begin() + bytes_recvd);
+                    dataReceivedCallback(dataReceived);
                     m_HostIP = remoteEndpoint.address().to_string();
                     if (!m_HostFound) {
                         logger->log(Logger::LOG_LVL_INFO, "Host found: %s:%d\n", m_HostIP.c_str(), remoteEndpoint.port());

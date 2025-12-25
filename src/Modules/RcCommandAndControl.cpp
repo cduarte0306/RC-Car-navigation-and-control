@@ -1,5 +1,8 @@
 #include "RcCommandAndControl.hpp"
+
 #include <functional>
+#include <cstring>
+
 #include "utils/logger.hpp"
 #include "Devices/RegisterMap.hpp"
 
@@ -31,7 +34,7 @@ int CommandController::init(void) {
         return -1;
     }
 
-    this->CommsAdapter->startReceive(*m_CommandNetAdapter, std::bind(&CommandController::processIncomingData, this, std::placeholders::_1, std::placeholders::_2));
+    this->CommsAdapter->startReceive(*m_CommandNetAdapter, std::bind(&CommandController::processIncomingData, this, std::placeholders::_1));
     return 0;
 }
 
@@ -42,15 +45,45 @@ int CommandController::init(void) {
  * @param data Pointer to the data buffer
  * @param length Length of the data buffer
  */
-void CommandController::processIncomingData(const uint8_t* pData, size_t& length) {
-    if (!pData) {
+void CommandController::processIncomingData(std::vector<char>& buffer) {
+    if (buffer.empty()) {
         return;
     }
 
     Logger* logger = Logger::getLoggerInst();
-    ClientReq_t* clientData = reinterpret_cast<ClientReq_t*>(const_cast<uint8_t*>(pData));
+    if (buffer.size() < sizeof(ClientReq_t)) {
+        logger->log(Logger::LOG_LVL_WARN, "Command packet too small (%zu, need %zu)\r\n", buffer.size(), sizeof(ClientReq_t));
+        return;
+    }
+
+    ClientReq_t* clientData = reinterpret_cast<ClientReq_t*>(buffer.data());
+
+    // Validate declared lengths before accessing payload
+    const size_t declaredMsgLen = clientData->msg_length;
+    const size_t baseHeader = sizeof(clientData->sequence_id) + sizeof(clientData->msg_length);
+    const size_t basePayload = sizeof(clientData->payload);
+    const size_t minimumFrame = baseHeader + basePayload;
+
+    if (declaredMsgLen < basePayload) {
+        logger->log(Logger::LOG_LVL_WARN, "Command msg_length too small (declared=%zu, base=%zu)\r\n", declaredMsgLen, basePayload);
+        return;
+    }
+
+    const size_t packetExpected = baseHeader + declaredMsgLen;
+    if (buffer.size() < packetExpected) {
+        logger->log(Logger::LOG_LVL_WARN, "Command packet truncated (have=%zu, expect=%zu)\r\n", buffer.size(), packetExpected);
+        return;
+    }
+
+    const size_t extraLen = clientData->payload.payloadLen;
+    const size_t extraOffset = sizeof(ClientReq_t);
+    if (extraLen > 0 && (extraOffset + extraLen) > buffer.size()) {
+        logger->log(Logger::LOG_LVL_WARN, "Command payload length mismatch (field=%zu, remaining=%zu)\r\n", extraLen, buffer.size() - extraOffset);
+        return;
+    }
+
     CommandController::reply_t reply;
-    length = sizeof(reply);
+    size_t length = sizeof(reply);
 
     switch(clientData->payload.command) {
         case CmdNoop:
@@ -70,14 +103,15 @@ void CommandController::processIncomingData(const uint8_t* pData, size_t& length
             this->motorAdapter->steer(clientData->payload.data.i16); // Example: set steering angle
             break;
 
-        case CmdCameraSetMode:
-            {
-                logger->log(Logger::LOG_LVL_INFO, "Setting camera mode via command\r\n");
-                const char* payload = reinterpret_cast<const char*>(pData + sizeof(ClientReq_t));
-                reply.state = true; // Example state for success
-                CameraAdapter->moduleCommand(const_cast<char*>(payload), clientData->payload.payloadLen);
+        case CmdCameraSetMode: {
+            reply.state = true;
+            std::vector<char> payloadBuffer;
+            if (extraLen > 0) {
+                payloadBuffer.insert(payloadBuffer.end(), buffer.begin() + extraOffset, buffer.begin() + extraOffset + extraLen);
             }
-            break;
+            int ret = this->CameraAdapter->moduleCommand(payloadBuffer);
+            reply.state = (ret >= 0);
+        } break;
 
         default:
             // Unknown command, set error state
@@ -85,6 +119,11 @@ void CommandController::processIncomingData(const uint8_t* pData, size_t& length
             reply.state = true; // Error state
             break;
     }
+
+    // Build reply
+    buffer.clear();
+    buffer.resize(sizeof(reply));
+    std::memcpy(buffer.data(), &reply, sizeof(reply));
 }
 
 
@@ -103,7 +142,7 @@ void CommandController::mainProc() {
             hostIP = this->CommsAdapter->getHostIP(*m_CommandNetAdapter);
             if (hostIP.length() && (hostIP != lastHost)) {
                 this->CameraAdapter->configurePipeline(hostIP);
-                regMap->set("HostIP", hostIP);
+                regMap->set(RegisterMap::RegisterKeys::HostIP, hostIP);
                 lastHost = hostIP;
             }
 

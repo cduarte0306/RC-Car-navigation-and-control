@@ -26,6 +26,7 @@ enum DeviceType {
     WIRELESS_COMMS,
     COMMAND_CONTROLLER,
     MOTOR_CONTROLLER,
+    TELEMETRY_MODULE,
     CAMERA_CONTROLLER,
     VIDEO_STREAMER,
     CLI_INTERFACE
@@ -181,6 +182,9 @@ public:
         if (CommsAdapter) {
             CommsAdapter->bind(m_boundAdapters[moduleName].get());
         }
+        if (TlmAdapter) {
+            TlmAdapter->bind(m_boundAdapters[moduleName].get());
+        }
 
         return 0;
     }
@@ -196,6 +200,8 @@ public:
             CommsAdapter = std::make_unique<Adapter::CommsAdapter>();
         } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
             CommandAdapter = std::make_unique<Adapter::CommandAdapter>();
+        } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
+            TlmAdapter = std::make_unique<Adapter::TlmAdapter>();
         } else {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
             static_assert(!std::is_same<U, U>::value, "createAdapter: unsupported adapter type");
@@ -248,6 +254,8 @@ public:
             CommsAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
             CommandAdapter->bind(adapter);
+        } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
+            TlmAdapter->bind(adapter);
         } else {
             return -1;
         }
@@ -273,6 +281,14 @@ public:
         }
         if (auto p = dynamic_cast<Adapter::CommsAdapter*>(adapter.get())) {
             CommsAdapter.reset(static_cast<Adapter::CommsAdapter*>(adapter.release()));
+            return 0;
+        }
+        if (auto p = dynamic_cast<Adapter::CommandAdapter*>(adapter.get())) {
+            CommandAdapter.reset(static_cast<Adapter::CommandAdapter*>(adapter.release()));
+            return 0;
+        }
+        if (auto p = dynamic_cast<Adapter::TlmAdapter*>(adapter.get())) {
+            TlmAdapter.reset(static_cast<Adapter::TlmAdapter*>(adapter.release()));
             return 0;
         }
         // unknown concrete adapter: keep as baseAdapter
@@ -348,6 +364,7 @@ protected:
     std::unique_ptr<Adapter::CameraAdapter  > CameraAdapter  = nullptr;
     std::unique_ptr<Adapter::CommandAdapter > CommandAdapter = nullptr;
     std::unique_ptr<Adapter::CommsAdapter   > CommsAdapter   = nullptr;
+    std::unique_ptr<Adapter::TlmAdapter     > TlmAdapter     = nullptr;
 
     static boost::asio::io_context io_context;
     std::mutex mutex;
@@ -355,7 +372,7 @@ protected:
     std::thread m_TimerThread;  // This thread handles time-based events per object
     // boost::thread boostThread;
 
-    std::atomic<bool> running{true};
+    std::atomic<bool> m_Running{true};
 
     static std::vector<std::thread> workerThreads;
 };

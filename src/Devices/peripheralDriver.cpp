@@ -18,7 +18,7 @@
 
 namespace Device {
 PeripheralCtrl::PeripheralCtrl():
-speed(200000),
+speed(1000000),
 bitsPerWord(8) {
     if (!this->configSPI()) {
         throw std::runtime_error("Failed to configure SPI interface");

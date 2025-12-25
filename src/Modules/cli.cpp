@@ -225,7 +225,6 @@ AppCLI::~AppCLI() {
 
 int AppCLI::stop(void) {
     // Stop main loop and close TTY
-    running = false;
     if (fd >= 0) {
         close(fd);
         fd = -1;

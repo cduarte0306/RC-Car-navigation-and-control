@@ -14,18 +14,29 @@
 
 class RegisterMap {
 public:
-    using Value = std::variant<int64_t, double, bool, std::string>;
-
-    enum { 
-        HostIP  // Host IP address key
+    enum class RegisterKeys{ 
+        HostIP, // Host IP address key
+        MaxKeys
     };
+
+    struct RegisterKeyHash {
+        std::size_t operator()(const RegisterKeys& key) const noexcept {
+            return static_cast<std::size_t>(key);
+        }
+    };
+
+    using Value = std::variant<double, bool, std::string>;
 
     // Singleton access
     static RegisterMap* getInstance();
 
 
     // Store or overwrite a value
-    void set(const std::string& key, Value value) {
+    void set(RegisterKeys key, Value value) {
+        if (key == RegisterKeys::MaxKeys) {
+            return;
+        }
+
         std::lock_guard<std::mutex> lock(mutex_);
         map_[key] = std::move(value);
     }
@@ -33,7 +44,11 @@ public:
 
     // Retrieve a typed value; returns std::nullopt if missing or wrong type
     template <typename T>
-    std::optional<T> get(const std::string& key) {
+    std::optional<T> get(RegisterKeys key) {
+        if (key == RegisterKeys::MaxKeys) {
+            return std::nullopt;
+        }
+
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = map_.find(key);
         if (it == map_.end()) {
@@ -45,8 +60,9 @@ public:
         return std::nullopt;
     }
 
+    
     // Remove a key if present
-    void erase(const std::string& key) {
+    void erase(RegisterKeys key) {
         std::lock_guard<std::mutex> lock(mutex_);
         map_.erase(key);
     }
@@ -55,7 +71,7 @@ private:
     RegisterMap()  = default;
     ~RegisterMap() = default;
 
-    std::unordered_map<std::string, Value> map_;
+    std::unordered_map<RegisterKeys, Value, RegisterKeyHash> map_;
     std::mutex mutex_;
 };
 

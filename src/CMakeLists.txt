@@ -17,8 +17,14 @@ set(SOURCE
     Modules/RcCommsController.cpp
     Modules/RcVisionControl.cpp
     Modules/RcVisionControl.hpp
-    lib/VideoStreamer.cpp
-    lib/VideoStreamer.hpp
+    Modules/RcCarTelemetry.cpp
+    Modules/RcCarTelemetry.hpp
+    app/VideoFrame.cpp
+    app/VideoFrame.hpp
+    app/VideoStreamer.cpp
+    app/VideoStreamer.hpp
+    app/VideoRecording.cpp
+    app/VideoRecording.hpp
     Devices/peripheralDriver.hpp
     Devices/peripheralDriver.cpp
     Devices/Pwm.cpp

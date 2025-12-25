@@ -9,6 +9,7 @@
 #include <netdb.h>
 
 #include <functional>
+#include <vector>
 #include <thread>
 #include <optional>
 
@@ -39,7 +40,8 @@ public:
 
     boost::signals2::signal<void(const uint8_t* data, size_t length)> onDataReceived;
 
-    virtual void startReceive(std::function<void(const uint8_t* data, size_t& length)>, bool asyncTx=true)  = 0;
+    // Receive callback uses a mutable vector buffer to avoid raw pointer/length pairs.
+    virtual void startReceive(std::function<void(std::vector<char>&)> callback, bool asyncTx=true) = 0;
 
     /**
      * @brief Read the host IP
@@ -98,8 +100,8 @@ protected:
      * @brief Callback function when data is received
      * 
      */
-    std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback;
-
+    std::function<void(std::vector<char>&)> dataReceivedCallback;
+    
     std::string m_HostIP;
     udp::socket socket_;
     udp::endpoint remoteEndpoint;

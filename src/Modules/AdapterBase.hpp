@@ -15,7 +15,8 @@ namespace Adapter {
         CommsAdapterID = 1,
         CommandAdapterID,
         MotorAdapterID, 
-        CameraAdapterID
+        CameraAdapterID,
+        TlmAdapterID
     };
 
     class AdapterBase {
@@ -47,6 +48,16 @@ namespace Adapter {
             return 0;
         }
 
+        virtual int moduleCommand(std::vector<char>& buffer) {
+            if (!moduleWriteCmd) {
+                std::cout << "Module command error\r\n";
+                return -1;
+            }
+
+            moduleWriteCmdVector(buffer);
+            return 0;
+        }
+
         /**
          * @brief Add a module name to the bound modules list
          * 
@@ -69,12 +80,18 @@ namespace Adapter {
         std::list<std::string> boundModules;
         std::unordered_map<std::string, AdapterBase*> adapterMap;
         std::function< int(char* pbuf, size_t len) > moduleWriteCmd = nullptr;
+        std::function< int(std::vector<char>&)     > moduleWriteCmdVector = nullptr;
         std::function< int(char* pbuf, size_t len) > moduleWriteAsyncCmd = nullptr;
 
         const int adapterId;
 
         virtual int moduleCommand_(char* pbuf, size_t len) {
             (void)pbuf; (void)len;
+            return -1;
+        }
+
+        virtual int moduleCommand_(std::vector<char>& buffer) {
+            (void)buffer;
             return -1;
         }
 
@@ -206,6 +223,10 @@ namespace Adapter {
             this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
                 return adapter->moduleCommand_(pbuf, len);
             };
+
+            this->moduleWriteCmdVector = [adapter](std::vector<char>& buffer) {
+                return adapter->moduleCommand_(buffer);
+            };
         }
 
         virtual int setCameraState_(int direction) {
@@ -275,7 +296,7 @@ namespace Adapter {
          * 
          * @param callback Callback function to handle received data
          */
-        virtual int startReceive(NetworkAdapter& adapter, std::function<void(const uint8_t* data, size_t& length)> callback, bool asyncTx=true) {
+        virtual int startReceive(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> callback, bool asyncTx=true) {
             if (!callback) {
                 return -1;
             }
@@ -310,7 +331,7 @@ namespace Adapter {
         std::function<int(const uint8_t*, size_t)                                                       > transmitDataCommand   = nullptr;
         std::function<std::unique_ptr<NetworkAdapter>(std::string&, int, std::string&, size_t)          > openAdapterCommand    = nullptr;
         std::function<int (const char* pbuf, size_t len)                                                > recvDataCallback      = nullptr;
-        std::function<int(NetworkAdapter& adapter, std::function<void(const uint8_t* data, size_t& length)>, bool)> dataReceivedCommand = nullptr;
+        std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)> dataReceivedCommand = nullptr;
         std::function<std::string(NetworkAdapter& adapter)> hostIPQueryCommand = nullptr;
         int adapterCounter = -1;
 
@@ -346,7 +367,7 @@ namespace Adapter {
                 return adapter->openAdapter_(parent, port, adpName, bufferSize);
             };
             
-            this->dataReceivedCommand = [adapter](NetworkAdapter& netAdp, std::function<void(const uint8_t* data, size_t& length)> callback, bool asyncTx) -> int {
+            this->dataReceivedCommand = [adapter](NetworkAdapter& netAdp, std::function<void(std::vector<char>&)> callback, bool asyncTx) -> int {
                 adapter->configureReceiveCallback(netAdp, callback, asyncTx);
                 return 0;
             };
@@ -362,14 +383,14 @@ namespace Adapter {
          * 
          * @param dataReceivedCommand_ Callback function to handle received data
          */
-        virtual void startReceive_(NetworkAdapter& adapter, std::function<void(const uint8_t* data, size_t& length)> dataReceivedCommand_, bool asyncTx=true) {
+        virtual void startReceive_(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true) {
             // Default implementation doesn't know how to route - subclasses
             // (e.g. a network comms controller) should override this method
             // and use `caller` to pick the fastest receive path.
         }
 
 
-        virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(const uint8_t* data, size_t& length)> callback, bool asyncTx=true) {
+        virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> callback, bool asyncTx=true) {
             
         }
 
@@ -443,7 +464,6 @@ namespace Adapter {
         }
     };
 
-
     class CommandAdapter : public AdapterBase {
     public:
         CommandAdapter(std::string parentName_="") : AdapterBase(CommandAdapterID, parentName_) {}
@@ -458,6 +478,72 @@ namespace Adapter {
 
         void bindInterface(CommandAdapter* adapter) {
             if (!adapter) return;
+        }
+    };
+
+    class TlmAdapter : public AdapterBase {
+    public:
+        TlmAdapter(std::string parentName_="") : AdapterBase(TlmAdapterID, parentName_) {}
+
+        int registerTelemetrySource(const std::string& sourceName) {
+            if (!registerSourceCommand) {
+                return -1;
+            }
+
+            return registerSourceCommand(sourceName);
+        }
+
+        int publishTelemetry(const std::string& sourceName, const uint8_t* data, size_t length) {
+            if (!publishTelemetryCommand || !data || length == 0) {
+                return -1;
+            }
+
+            return publishTelemetryCommand(sourceName, data, length);
+        }
+
+        int publishTelemetry(const std::string& sourceName, const std::string& payload) {
+            return publishTelemetry(sourceName, reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
+        }
+        
+    protected:
+        std::function<int(const std::string&)> registerSourceCommand = nullptr;
+        std::function<int(const std::string&, const uint8_t*, size_t)> publishTelemetryCommand = nullptr;
+
+        virtual int bind_(AdapterBase* Adapter) final {
+            bindInterface(static_cast<TlmAdapter*>(Adapter));
+            return 0;
+        }
+
+        void bindInterface(TlmAdapter* adapter) {
+            if (!adapter) return;
+
+            registerSourceCommand = [adapter](const std::string& sourceName) -> int {
+                return adapter->registerTelemetrySource_(sourceName);
+            };
+
+            publishTelemetryCommand = [adapter](const std::string& sourceName, const uint8_t* data, size_t length) -> int {
+                return adapter->publishTelemetry_(sourceName, data, length);
+            };
+
+            this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
+                return adapter->moduleCommand_(pbuf, len);
+            };
+
+            this->moduleWriteAsyncCmd = [adapter](char* pbuf, size_t len) {
+                return adapter->moduleCommandAsync_(pbuf, len);
+            };
+        }
+
+        virtual int registerTelemetrySource_(const std::string& sourceName) {
+            (void)sourceName;
+            return 0;
+        }
+
+        virtual int publishTelemetry_(const std::string& sourceName, const uint8_t* data, size_t length) {
+            (void)sourceName;
+            (void)data;
+            (void)length;
+            return -1;
         }
     };
 }

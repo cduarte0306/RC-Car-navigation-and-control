@@ -19,7 +19,7 @@ public:
 
     bool transmit(uint8_t* pBuf, size_t length, std::string& ip) override;
 
-    virtual void startReceive(std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback_, bool asyncTx=true) override;
+    virtual void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_, bool asyncTx=true) override;
 private:
     void startReceive_(void);
 

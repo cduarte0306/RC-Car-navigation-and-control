@@ -62,7 +62,7 @@ protected:
     virtual void mainProc() override;
 
     // Processes reply from client
-    void processIncomingData(const uint8_t* data, size_t& length);
+    void processIncomingData(std::vector<char>& buffer);
 
     // Map of UDP sockets by adapter ID
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_CommandNetAdapter{nullptr};
