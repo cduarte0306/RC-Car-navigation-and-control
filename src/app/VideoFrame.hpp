@@ -80,6 +80,11 @@ public:
     std::size_t frameID() const noexcept { return frameID_; }
 
     /**
+     * @brief Set the segment identifier.
+     */
+    void setFrameID(std::size_t id) noexcept { frameID_ = id; }
+
+    /**
      * @brief Access the underlying byte buffer.
      */
     const std::vector<uint8_t> bytes() const noexcept;

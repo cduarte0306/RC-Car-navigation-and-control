@@ -54,11 +54,6 @@ protected:
         uint8_t payload[MaxPayloadSize];
     };
 
-    struct FramePackets {
-        uint8_t numSegments = 0;
-        uint64_t frameID = 0;   // ID tag
-        std::unordered_map<int, std::vector<uint8_t>> segmentMap;
-    };
 #pragma pack(pop)
     enum {
         StreamCamera,
@@ -92,17 +87,11 @@ protected:
         int mode      = CamModeNormal;
     } m_CamSettings;
 
-    typedef std::unordered_map<int, FramePackets> FrameEntry;
-
     // Parent main proc override
     virtual void mainProc() override;
 
     // Parent timer thread overridew
     virtual void OnTimer(void) override;
-
-    // Frame transmission handler
-    // Handles the decoding of JPEGs
-    void decodeJPEG(cv::Mat& frame, FramePackets& frameEntry);
 
     // Frame transmission handler
     void decodeJPEG(cv::Mat& frame, const VideoFrame& frameEntry);
@@ -147,12 +136,6 @@ protected:
 
     // Receive buffer
     std::vector<uint8_t> m_ReceivedFrameBuff;
-
-    // Received frame buffer
-    Msg::CircularBuffer<FramePackets> m_FrameRecvBuff;
-
-    // Received segment map
-    FramePackets m_SegmentMap;
 
     // Transmission port
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TxAdapter{nullptr};

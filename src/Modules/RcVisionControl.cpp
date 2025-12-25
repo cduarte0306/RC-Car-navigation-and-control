@@ -31,7 +31,7 @@
 
 namespace Modules {
 VisionControls::VisionControls(int moduleID, std::string name) : 
-    Base(moduleID, name), Adapter::CameraAdapter(name), m_FrameRecvBuff(100) {
+    Base(moduleID, name), Adapter::CameraAdapter(name) {
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Vision object initialized\r\n");
     setPeriod(1000);  // Set the timer thread to service ever second
@@ -132,7 +132,6 @@ void VisionControls::recvFrame(std::vector<char>& data) {
     char* pbuf = reinterpret_cast<char*>(data.data());
 
     Logger* logger = Logger::getLoggerInst();
-    FramePackets frameFragment;
     std::vector<uint8_t> segmentData;
     static uint64_t frameID = 0;
 
@@ -140,14 +139,12 @@ void VisionControls::recvFrame(std::vector<char>& data) {
     struct FragmentPayload* frameSegment = reinterpret_cast<struct FragmentPayload*>(const_cast<char*>(pbuf));
     uint8_t numSegments = frameSegment->metadata.numSegments;
 
-    if (m_SegmentMap.segmentMap.size() > 0 && (m_SegmentMap.frameID != frameSegment->metadata.sequenceID)) {
+    if (m_StreamInFrame.numSegments() > 0 && (m_StreamInFrame.frameID() != frameSegment->metadata.sequenceID)) {
         // Clear the map
-        m_SegmentMap.segmentMap.clear();
         m_StreamInFrame.reset(frameSegment->metadata.sequenceID);
     }
 
-    m_SegmentMap.frameID     = frameSegment->metadata.sequenceID;
-    m_SegmentMap.numSegments = frameSegment->metadata.numSegments;
+    m_StreamInFrame.setFrameID(frameSegment->metadata.sequenceID);
 
     // Append frame as long as the index is the same
     segmentData.resize(frameSegment->metadata.length);
@@ -162,19 +159,17 @@ void VisionControls::recvFrame(std::vector<char>& data) {
 
     // Store the frame ID
     frameID = frameSegment->metadata.sequenceID;
-    m_SegmentMap.segmentMap[frameSegment->metadata.segmentID] = std::move(segmentData);
 
     // Once we have all segments, assemble the frame via VideoFrame helper
-    if (m_SegmentMap.segmentMap.size() == numSegments) {
+    if (m_StreamInFrame.numSegments() == numSegments) {
         const std::vector<uint8_t> assembled = m_StreamInFrame.bytes();
 
         if (assembled.size() != frameSegment->metadata.totalLength) {
             logger->log(Logger::LOG_LVL_WARN,
                         "Frame %llu size mismatch (expected %u, got %zu)\n",
-                        static_cast<unsigned long long>(m_SegmentMap.frameID),
+                        static_cast<unsigned long long>(m_StreamInFrame.frameID()),
                         frameSegment->metadata.totalLength,
                         assembled.size());
-            m_SegmentMap.segmentMap.clear();
             m_StreamInFrame.reset(frameSegment->metadata.sequenceID + 1);
             return;  // drop corrupt frame
         }
@@ -182,64 +177,8 @@ void VisionControls::recvFrame(std::vector<char>& data) {
         if (!assembled.empty()) {
             m_VideoRecorder.pushFrame(m_StreamInFrame);
         }
-
-        // Push the segment map for decode path
-        m_FrameRecvBuff.push(m_SegmentMap);
-        m_SegmentMap.segmentMap.clear();
+        
         m_StreamInFrame.reset(frameSegment->metadata.sequenceID + 1);
-    }
-}
-
-
-/**
- * @brief Decode a JPEG frame from the received segments
- * 
- * @param frame Output frame
- * @param frameEntry FramePackets entry containing segments
- */
-void VisionControls::decodeJPEG(cv::Mat& frame, FramePackets& frameEntry) {
-    auto& frameMap = frameEntry.segmentMap;
-    const uint8_t numSegments = frameEntry.numSegments;
-
-    if (frameMap.empty()) {
-        frame.release();
-        return;
-    }
-
-    // Validate all segments exist
-    uint32_t totalSize = 0;
-    for (uint8_t segID = 0; segID < numSegments; ++segID) {
-        auto it = frameMap.find(segID);
-        if (it == frameMap.end()) {
-            frame.release();
-            return;
-        }
-        totalSize += it->second.size();
-    }
-
-    // Reassemble
-    std::vector<uint8_t> jpegFrame;
-    jpegFrame.reserve(totalSize);
-
-    for (uint8_t segID = 0; segID < numSegments; ++segID) {
-        const auto& seg = frameMap.at(segID);
-        jpegFrame.insert(jpegFrame.end(), seg.begin(), seg.end());
-    }
-
-    #if RCVC_HAVE_CUDAIMGCODECS
-    cv::cuda::GpuMat gpu = cv::cuda::imdecode(jpegFrame, cv::IMREAD_COLOR);
-    if (!gpu.empty()) {
-        gpu.download(frame);
-    } else {
-        frame.release();
-    }
-    #else
-    frame = cv::imdecode(jpegFrame, cv::IMREAD_COLOR);
-    #endif
-
-    if (frame.empty()) {
-        Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_WARN, "Failed to decode JPEG (bytes=%zu, segments=%u)\n", jpegFrame.size(), numSegments);
     }
 }
 
@@ -478,23 +417,6 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
  * 
  */
 void VisionControls::OnTimer(void) {
-    // static bool doOnce = false;
-    // Logger* logger = Logger::getLoggerInst();
-
-    // if (m_StreamStats.streamInStatus == VisionControls::StreamInOn) {
-    //    doOnce = false; 
-    // }
-    
-    // If we've not received frames in over 1 second, switchback to reading fromthe camera
-    // if (m_StreamStats.streamInCounter > 1) {
-    //     if (!doOnce) {
-    //         logger->log(Logger::LOG_LVL_INFO, "Timeout detected. Stream in is OFF\n");
-    //         doOnce = true;
-    //     }
-    //     m_StreamStats.streamInStatus = VisionControls::StreamInOff;
-    // } else {
-    //     m_StreamStats.streamInCounter ++;
-    // }
 }
 
 
