@@ -219,7 +219,7 @@ public:
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
             return std::move(CommsAdapter);
         } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
-            return std::move(CommsAdapter);
+            return std::move(CommandAdapter);
         } else {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
             return nullptr;
