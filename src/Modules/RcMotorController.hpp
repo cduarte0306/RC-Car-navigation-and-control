@@ -7,6 +7,7 @@
 #include "Devices/peripheralDriver.hpp"
 #include "Devices/Pwm.hpp"
 #include "Devices/DeviceBase.hpp"
+#include "Devices/network_interface/UdpServer.hpp"
 
 
 namespace Modules {
@@ -30,14 +31,16 @@ public:
         return this->peripheralDriver.get();
     }
 
+    int init(void) override;
+
     enum {
-        MOTOR_CMD_SET_SPEED,
-        MOTOR_CMD_STEER,
-        MOTOR_CMD_DISABLE,
+        MotorCmdSetSpeed,
+        MotorCmdSteer,
+        MotorCmdDisable,
         MOTOR_CMD_GET_STATUS,
-        MOTOR_CMD_READ_DATA,
-        MOTOR_CMD_SPI_WRITE,
-        MOTOR_CMD_SPI_READ
+        MotorCmdReadData,
+        MotorCmdSpiWrite,
+        MotorCmdSpiRead
     };
 
     typedef struct {
@@ -116,5 +119,8 @@ protected:
     Device::PeripheralCtrl::psocDataStruct psocData;
 
     std::mutex mtrControllerMutex;
+    
+    // Network adapter for telemetry
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TlmNetAdapter;
 };
 } // namespace Modules

@@ -12,29 +12,65 @@
 #include "Modules/AdapterBase.hpp"
 #include "Modules/RcBase.hpp"
 #include "Modules/RcMotorController.hpp"
-#include "Modules/RcWirelessComms.hpp"
+#include "Modules/RcCommsController.hpp"
+#include "Modules/RcCommandAndControl.hpp"
+#include "Modules/RcVisionControl.hpp"
+#include "Modules/RcCarTelemetry.hpp"
 
 
 int main(int argc, char* argv[]) {
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "RC Car navigation and control V%u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
-    
-    std::unique_ptr<Modules::MotorController> motorController = std::make_unique<Modules::MotorController>(Modules::MOTOR_CONTROLLER, "MainMotorController");
-    std::unique_ptr<Modules::WirelessComms>   commsController = std::make_unique<Modules::WirelessComms>  (Modules::WIRELESS_COMMS, "MainWirelessComms");
-    std::unique_ptr<Modules::AppCLI>          cli             = std::make_unique<Modules::AppCLI>(Modules::CLI_INTERFACE, "AppCli");
+
+    std::unique_ptr<Modules::MotorController  > motorController   = std::make_unique<Modules::MotorController>(Modules::MOTOR_CONTROLLER, "MainMotorController");
+    std::unique_ptr<Modules::NetworkComms     > networkComms      = std::make_unique<Modules::NetworkComms>(Modules::WIRELESS_COMMS, "MainNetworkComms");
+    std::unique_ptr<Modules::CommandController> commandController = std::make_unique<Modules::CommandController>(Modules::COMMAND_CONTROLLER, "MainCommsController");
+    std::unique_ptr<Modules::AppCLI           > cli               = std::make_unique<Modules::AppCLI>(Modules::CLI_INTERFACE, "AppCli");
+    std::unique_ptr<Modules::VisionControls   > rcVision          = std::make_unique<Modules::VisionControls>(Modules::CAMERA_CONTROLLER, "CamController");
+    std::unique_ptr<Modules::RcCarTelemetry   > rcTelemetry       = std::make_unique<Modules::RcCarTelemetry>(Modules::TELEMETRY_MODULE, "TelemetryModule");
 
     // Create adapters
-    commsController->createAdapter<Adapter::MotorAdapter>();
+    motorController->createAdapter<Adapter::TlmAdapter>();
+
+    commandController->createAdapter<Adapter::MotorAdapter>();
+    commandController->createAdapter<Adapter::CameraAdapter>();
+    commandController->createAdapter<Adapter::CommsAdapter>();
+
+    rcVision->createAdapter<Adapter::MotorAdapter>();
+    rcVision->createAdapter<Adapter::CommsAdapter>();
+    rcVision->createAdapter<Adapter::CommandAdapter>();
+    rcVision->createAdapter<Adapter::TlmAdapter>();
+
     cli->createAdapter<Adapter::MotorAdapter>();
 
+    rcTelemetry->createAdapter<Adapter::CommsAdapter>();
+
     // Bind modules
-    commsController->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
+    motorController->moduleBind<Adapter::TlmAdapter>(rcTelemetry->getInputAdapter());
+    commandController->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
+    commandController->moduleBind<Adapter::CameraAdapter>(rcVision->getInputAdapter());
+    commandController->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     cli->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
-    
-    // Start each module
+    rcVision->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
+    rcVision->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
+    rcVision->moduleBind<Adapter::TlmAdapter>(commandController->getInputAdapter());
+    rcTelemetry->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
+
+    // Preliminary initialization
     motorController->init();
-    commsController->init();
+    commandController->init();
+    networkComms->init();
+    rcVision->init();
+    rcTelemetry->init();
     cli->init();
+
+    // Start each module
+    motorController->trigger();
+    commandController->trigger();
+    networkComms->trigger();
+    rcVision->trigger();
+    rcTelemetry->trigger();
+    cli->trigger();
 
     // Connect modules to one another
     Modules::Base::joinThreads();

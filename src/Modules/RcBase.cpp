@@ -8,7 +8,7 @@ namespace Modules {
     }
 
     Base::~Base() {
-        this->running.store(false);
+        this->m_Running.store(false);
 
         // stop();
         if (thread.joinable()) {

@@ -17,7 +17,7 @@ MODE="$1"
 if [[ "$MODE" == "local" ]]; then
     echo "[*] Selected MODE: QEMU (local)"
     # ... (your unchanged local branch) ...
-    # [keep your existing QEMU + wait-for-port logic here]
+    # [keep your existing QEMU + wait-fbor-port logic here]
     exit 0
 
 elif [[ "$MODE" == "remote" ]]; then
@@ -25,34 +25,37 @@ elif [[ "$MODE" == "remote" ]]; then
 
     echo "[*] Building host app..."
     cd build
-    make -j"$(nproc)" && cd .. \
+    make -j16 && cd .. \
         || { echo "[!] Build failed"; exit 0; }
 
     echo "[*] Killing any previous gdbserver on Jetson..."
     ssh "${JETSON_USER}@${JETSON_IP}" \
-        "${GDBSERVER_PATH} --version &>/dev/null && pkill -9 -f gdbserver || true"
+        "pkill -9 gdbserver || true; rm -f ${JETSON_TARGET_DIR}/gdbserver.log"
 
     echo "[*] Uploading app to Jetson..."
     scp "$APP" "${JETSON_USER}@${JETSON_IP}:${JETSON_TARGET_DIR}/" \
         || { echo "[!] SCP failed"; exit 0; }
 
     echo "[*] Starting gdbserver on Jetson..."
-    ssh "${JETSON_USER}@${JETSON_IP}" <<EOF
-      nohup "${GDBSERVER_PATH}" :${PORT} "${REMOTE_APP_PATH}" \
-        &> "${JETSON_TARGET_DIR}/gdbserver.log" &
-EOF
+    ssh "${JETSON_USER}@${JETSON_IP}" \
+        "nohup ${GDBSERVER_PATH} :${PORT} ${REMOTE_APP_PATH} > ${JETSON_TARGET_DIR}/gdbserver.log 2>&1 &"
 
+    sleep 1  # Give gdbserver time to start and begin logging
+    
     # wait for port to open
     echo "[*] Waiting for gdbserver to listen on ${JETSON_IP}:${PORT}..."
     for i in {1..20}; do
       if nc -z "${JETSON_IP}" "${PORT}"; then
         echo "[*] gdbserver is up!"
+        echo "[*] Log file: ${JETSON_TARGET_DIR}/gdbserver.log"
         exit 0
       fi
       sleep 0.3
     done
 
     echo "[!] gdbserver never opened port ${PORT}"
+    echo "[*] Checking remote log..."
+    ssh "${JETSON_USER}@${JETSON_IP}" "cat ${JETSON_TARGET_DIR}/gdbserver.log" || true
     exit 0
     
 elif [[ "$MODE" == "upload" ]]; then
@@ -65,7 +68,7 @@ elif [[ "$MODE" == "upload" ]]; then
         exit 0
     fi
     cd build
-    make -j"$(nproc)" && cd .. \
+    make -j16 && cd .. \
         || { echo "[!] Build failed"; exit 0; }
 
     ssh "${JETSON_USER}@${JETSON_IP}" "killall -9 rc-car-updater || true"

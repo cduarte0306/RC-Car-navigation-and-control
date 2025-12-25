@@ -14,13 +14,12 @@ namespace Network {
 
 class UdpServer : public Sockets {
 public:
-    UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port);
-    UdpServer(boost::asio::io_context& io_context, int port, char* adapter, bool startThread=true);
+    UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port, size_t bufferSize=1024);
     ~UdpServer();
 
-    bool transmit(uint8_t* pBuf, size_t length) override;
+    bool transmit(uint8_t* pBuf, size_t length, std::string& ip) override;
 
-    virtual void startReceive(std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback_) override;
+    virtual void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_, bool asyncTx=true) override;
 private:
     void startReceive_(void);
 
@@ -29,7 +28,8 @@ private:
     static constexpr int TIMEOUT = 5000;
 
     bool threadCanRun = true;
-    struct sockaddr_in lastClientAddress;
+
+    bool m_HostFound{false};
 };
 
 }

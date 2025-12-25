@@ -5,6 +5,7 @@
 #include <string>
 #include "utils/logger.hpp"
 #include <nlohmann/json.hpp>
+#include "Devices/RegisterMap.hpp"
 
 
 namespace Modules {
@@ -13,16 +14,9 @@ MotorController::MotorController(int moduleID_, std::string name) : Base(moduleI
 
     try {
         this->peripheralDriver = std::make_unique<Device::PeripheralCtrl>();
-        int ret = this->peripheralDriver->doDetectDevice();
-        if (ret == 0) {
-            uint8_t major, minor, build;
-            this->peripheralDriver->getVers(major, minor, build);
-            logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
-            m_isControllerConnected = true;
-        }
 
         this->m_PwmFwd = std::make_unique<Device::Pwm>("/dev/pwm0", 1000);
-        ret = this->m_PwmFwd->writeEnable(true);
+        int ret = this->m_PwmFwd->writeEnable(true);
         if (ret < 0) {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to enable Motor control PWM\r\n");
         }
@@ -38,8 +32,32 @@ MotorController::MotorController(int moduleID_, std::string name) : Base(moduleI
 }
 
 MotorController::~MotorController() {
-    delete this->peripheralDriver.get();
+    this->m_PwmFwd.reset();
+    this->m_PwmSteer.reset();
+    this->peripheralDriver.reset();
 }
+
+
+/**
+ * @brief Initialize the motor controller module
+ * 
+ * @return int Error code
+ */
+int MotorController::init(void) {
+    // Open a network adapter for telemetry
+    Logger* logger = Logger::getLoggerInst();
+
+    // Register as telemetry source
+    int ret = this->TlmAdapter->registerTelemetrySource(this->getName());
+    if (ret < 0) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to register motor controller as telemetry source\r\n");
+        return -1;
+    }
+
+    logger->log(Logger::LOG_LVL_INFO, "Opened motor telemetry network adapter at port 65001\r\n");
+    return 0;
+}
+
 
 /**
  * @brief Serial-like interface for motor controller module
@@ -56,25 +74,25 @@ int MotorController::moduleCommand_(char* pbuf, size_t len) {
     bool ret = false;
     switch (cmd->command)
     {
-    case MOTOR_CMD_SET_SPEED:
+    case MotorCmdSetSpeed:
         break;
 
-    case MOTOR_CMD_STEER:
+    case MotorCmdSteer:
         /* code */
         break;
 
-    case MOTOR_CMD_DISABLE:
+    case MotorCmdDisable:
         /* code */
         break;
 
-    case MOTOR_CMD_READ_DATA:
+    case MotorCmdReadData:
         {
         std::lock_guard<std::mutex> lock(mtrControllerMutex);
         std::memcpy(payload, &psocData, sizeof(psocData));
         }
         break;
 
-    case MOTOR_CMD_SPI_WRITE:
+    case MotorCmdSpiWrite:
         logger->log(Logger::LOG_LVL_INFO, "SPI WRITE: Reg: %u Data: %u\r\n", cmd->data_1.u8, cmd->data_2.u32);
         {
             std::lock_guard<std::mutex> lock(mtrControllerMutex);
@@ -86,7 +104,7 @@ int MotorController::moduleCommand_(char* pbuf, size_t len) {
         }
         break;
 
-    case MOTOR_CMD_SPI_READ:
+    case MotorCmdSpiRead:
         logger->log(Logger::LOG_LVL_INFO, "SPI READ: Reg: %u\r\n", cmd->data_1.u8);
         {
             std::lock_guard<std::mutex> lock(mtrControllerMutex);
@@ -178,6 +196,8 @@ void MotorController::pollTlmData(void) {
         std::lock_guard<std::mutex> lock(mtrControllerMutex);
         this->peripheralDriver->readData(psocData);
     }
+    RegisterMap* regMap = RegisterMap::getInstance();
+    auto retVal = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP);
 
     nlohmann::json telemetryJson;
     telemetryJson["version_major"] = psocData.version_major.u8;
@@ -188,15 +208,33 @@ void MotorController::pollTlmData(void) {
     telemetryJson["leftDistance" ] = psocData.leftDistance.u32;
     telemetryJson["rightDistance"] = psocData.rightDistance.u32;
 
-    // Transmit over UDP
+    if (retVal.has_value()) {
+        this->TlmAdapter->publishTelemetry(this->getName(),
+            reinterpret_cast<const uint8_t*>(telemetryJson.dump().c_str()),
+            telemetryJson.dump().length());
+    }
 }
 
 
 void MotorController::mainProc() {
+    Logger* logger = Logger::getLoggerInst();
+    m_isControllerConnected = false;
+
     // Main processing loop for the motor controller
-    while (true) {
-        this->pollTlmData();
-        
+    while (m_Running.load()) {
+        if (!m_isControllerConnected) {
+            this->peripheralDriver->doDetectDevice();
+            int ret = this->peripheralDriver->doDetectDevice();
+            if (ret == 0) {
+                uint8_t major, minor, build;
+                this->peripheralDriver->getVers(major, minor, build);
+                logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
+                m_isControllerConnected = true;
+            }
+        } else {
+            pollTlmData();
+        }
+
         // Process motor commands
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }

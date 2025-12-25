@@ -1,0 +1,60 @@
+%% Top-level module architecture for RC-Car-navigation-and-control
+%% Save as docs/architecture.mmd and open in Mermaid viewer
+
+flowchart LR
+  subgraph Modules
+    CC["RC Command & Control\n(RcCommandAndControl)"]
+    COMMS["RC Comms Controller\n(RcCommsController)"]
+    MOTOR["RC Motor Controller\n(RcMotorController)"]
+    VISION["RC Vision Control\n(RcVisionControl)"]
+    CLI["CLI Interface\n(cli)"]
+  end
+
+  subgraph Adapters
+    M_ADP["MotorAdapter"]
+    C_ADP["CameraAdapter"]
+    X_ADP["CommsAdapter"]
+  end
+
+  %% Module-to-module flows (logical)
+  CC -->|control cmds| MOTOR
+  CC -->|high-level cmds| VISION
+  VISION -->|vision data| CC
+  COMMS -->|telemetry / remote cmds| CC
+  CLI -->|user input| CC
+
+  %% Adapters bound to modules (ownership/attach)
+  MOTOR -->|owns/binds| M_ADP
+  VISION -->|owns/binds| C_ADP
+  COMMS -->|owns/binds| X_ADP
+
+  %% Central mailbox and async context
+  MAIL["RcMessageLib mailbox"]
+  CC <-->|send/recv mailbox| MAIL
+  MOTOR <-->|send/recv mailbox| MAIL
+  VISION <-->|send/recv mailbox| MAIL
+  COMMS <-->|send/recv mailbox| MAIL
+
+  IO["Boost.Asio io_context (static)"]
+  WT["workerThreads (vector) / module threads"]
+  IO -.->|async ops| Modules
+  WT -.->|thread owner| Modules
+
+  classDef modules fill:#f9f,stroke:#333,stroke-width:1px;
+  class Modules modules;
+
+%% Diagram node -> source mapping (for maintainers)
+%% CC => src/Modules/RcCommandAndControl.*
+%% MOTOR => src/Modules/RcMotorController.*
+%% VISION => src/Modules/RcVisionControl.*
+%% COMMS => src/Modules/RcCommsController.*
+%% MAIL => src/Modules/RcMessageLib.hpp
+%% IO   => Modules::Base::io_context in src/Modules/RcBase.hpp
+
+%% Adapter binding relationships (non-owning in-adapter binds)
+%% These show which module adapters are bound to other module input adapters
+CC -.->|binds to motor input adapter| MOTOR
+CC -.->|binds to vision input adapter| VISION
+CLI -.->|binds to motor input adapter| MOTOR
+VISION -.->|binds to motor input adapter| MOTOR
+VISION -.->|binds to command input adapter| CC

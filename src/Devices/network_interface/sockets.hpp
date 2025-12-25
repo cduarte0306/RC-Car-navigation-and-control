@@ -9,6 +9,7 @@
 #include <netdb.h>
 
 #include <functional>
+#include <vector>
 #include <thread>
 #include <optional>
 
@@ -29,17 +30,27 @@ public:
 
     }
 
-    virtual bool transmit(uint8_t* pBuf, size_t length) {
+    virtual bool transmit(uint8_t* pBuf, size_t length, std::string& ip) {
         return true;   
     }
 
-    virtual bool receive(uint8_t* pBuf, size_t length) {
+    virtual bool receive(uint8_t* pBuf, size_t length, bool ) {
         return true;
     }
 
     boost::signals2::signal<void(const uint8_t* data, size_t length)> onDataReceived;
 
-    virtual void startReceive(std::function<void(const uint8_t* data, size_t& length)>)  = 0;
+    // Receive callback uses a mutable vector buffer to avoid raw pointer/length pairs.
+    virtual void startReceive(std::function<void(std::vector<char>&)> callback, bool asyncTx=true) = 0;
+
+    /**
+     * @brief Read the host IP
+     * 
+     * @return std::string 
+     */
+    std::string getHostIP() const {
+        return m_HostIP;
+    }
 
     std::optional<std::string> findInterface(const char* name) {
         if (!name) {
@@ -82,15 +93,20 @@ protected:
     int sport_ = -1;
     int dport_ = -1;
 
+    // Option to let the server known wether it should reply asynchronously
+    bool m_AsyncTx{false};
+
     /**
      * @brief Callback function when data is received
      * 
      */
-    std::function<void(const uint8_t* data, size_t& length)> dataReceivedCallback;
-
+    std::function<void(std::vector<char>&)> dataReceivedCallback;
+    
+    std::string m_HostIP;
     udp::socket socket_;
-    udp::endpoint remote_endpoint_;
-    std::array<char, 32768> recv_buffer_;
+    udp::endpoint remoteEndpoint;
+    // std::array<char, 32768> m_RecvBuffer;
+    std::vector<char> m_RecvBuffer;
 };
 
 
