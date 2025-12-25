@@ -56,14 +56,16 @@ int NetworkComms::configureAdapter(
 
     // Keep ownership in the map and cache a non-owning pointer to the first socket
     Network::UdpServer* socketPtr = udpSocket.get();
-    m_UdpSockets[adapterIdx] = move(udpSocket);
+    m_UdpSockets[adapterIdx] = std::move(udpSocket);
     if (!m_UdpSocket) {
         m_UdpSocket = socketPtr;
     }
 
+    // Map adapter name to the same non-owning socket pointer, without taking ownership again
     if (m_AdapterMap.find(adapter) == m_AdapterMap.end()) {
-        m_AdapterMap[adapter] = move(udpSocket);
+        m_AdapterMap[adapter] = socketPtr;
     }
+
     return 0;
 }
 

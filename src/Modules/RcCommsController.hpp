@@ -12,7 +12,7 @@ using namespace Adapter;
 namespace Modules {
 class NetworkComms : public Base, public Adapter::CommsAdapter {
 public:
-    NetworkComms(int moduleID, string name);
+    NetworkComms(int moduleID, std::string name);
     ~NetworkComms();
 
     virtual int init(void) override {
@@ -79,16 +79,16 @@ protected:
     int ethWrite(const uint8_t* data, size_t length);
     
     // Map of UDP sockets by adapter ID
-    unordered_map<int, unique_ptr<Network::UdpServer>> m_UdpSockets;
+    std::unordered_map<int, std::unique_ptr<Network::UdpServer>> m_UdpSockets;
 
-    // Map of adapter name to adapter index
-    unordered_map<string, unique_ptr<Network::UdpServer>> m_AdapterMap;
+    // Map of adapter name to non-owning socket pointers
+    std::unordered_map<std::string, Network::UdpServer*> m_AdapterMap;
 
-    // Ethernet adapter known hosto
-    string m_EthHostIP;  // Ethernet known host
+    // Ethernet adapter known host
+    std::string m_EthHostIP;  // Ethernet known host
 
     // WLAN known host
-    string m_WlanHostIP; // WLAN known host
+    std::string m_WlanHostIP; // WLAN known host
 
     // Non-owning pointer to the primary socket (first configured adapter)
     Network::UdpServer* m_UdpSocket{nullptr};
