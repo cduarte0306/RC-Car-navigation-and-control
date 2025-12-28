@@ -58,16 +58,24 @@ public:
      */
     void pushFrame(const cv::Mat& frame);
 
+    /**
+     * @brief Enqueue a stereo frame pair for transmission (frames are cloned).
+     */
+    void pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair);
+
 private:
-    void run();
+    void runMono();
+    void runStereo();
 
     int encodeQuality;
     Adapter::CommsAdapter::NetworkAdapter& m_TxAdapter;
     std::function<std::string()> m_DestIpProvider;
     std::atomic<bool>& m_CanRun;
     Msg::CircularBuffer<cv::Mat> m_Buffer;
+    Msg::CircularBuffer<std::pair<cv::Mat, cv::Mat>> m_BufferStereo;
     std::atomic<bool> m_Running{false};
-    std::thread m_Thread;
+    std::thread m_ThreadMono;
+    std::thread m_ThreadStereo;
 
     // Packetization helpers (packed to avoid padding inflating packet size)
     static constexpr long long MaxUDPLen = 65507;
@@ -78,13 +86,20 @@ private:
         uint8_t  numSegments;
         uint32_t totalLength;
         uint16_t length;
+
+    };
+
+    struct FragmentHeader {
+        uint8_t  frameType;  // 0 = mono, 1 = stereo
+        uint8_t  frameSide;  // 0 = left, 1 = right
     };
     #pragma pack(pop)
 
-    static constexpr std::size_t MaxPayloadSize = MaxUDPLen - sizeof(Metadata);
+    static constexpr std::size_t MaxPayloadSize = MaxUDPLen - sizeof(Metadata) - sizeof(FragmentHeader);
 
     #pragma pack(push, 1)
     struct FragmentPayload {
+        struct FragmentHeader FragmentHeader;
         struct Metadata metadata;
         uint8_t payload[MaxPayloadSize];
     };
@@ -94,5 +109,19 @@ private:
 
     uint32_t m_FrameID = 0;
 
-    int transmitFrame(cv::Mat& frame);
+    /**
+     * @brief Transmit a single frame.
+     * 
+     * @param frame Reference to the frame to transmit
+     * @return int 
+     */
+    int transmitFrame(cv::Mat& frame, int frameType=0, int frameSide=0);
+
+    /**
+     * @brief Transmit a stereo frame pair.
+     * 
+     * @param framePair Reference to the stereo frame pair to transmit
+     * @return int 
+     */
+    int prepFrame(const std::pair<cv::Mat, cv::Mat>& framePair);
 };

@@ -19,6 +19,8 @@
 #include "RcMessageLib.hpp"
 #include "AdapterBase.hpp"
 
+#include "lib/Thread.hpp"
+
 
 namespace Modules {
 
@@ -30,20 +32,6 @@ enum DeviceType {
     CAMERA_CONTROLLER,
     VIDEO_STREAMER,
     CLI_INTERFACE
-};
-
-struct MotorCommand {
-    int srcID;
-    int speed;
-    int direction;
-    bool brake;
-};
-
-struct CameraCommand {
-    int srcID;
-    int panAngle;
-    int tiltAngle;
-    bool captureImage;
 };
 
 class RcThread {
@@ -118,6 +106,8 @@ public:
                 worker.join();
             }
         }
+
+        Lib::Thread::joinAll();
     }
 
     /**

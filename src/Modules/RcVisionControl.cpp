@@ -2,7 +2,6 @@
 #include "RcMessageLib.hpp"
 #include "app/VideoStreamer.hpp"
 #include "app/VideoFrame.hpp"
-
 #include "utils/logger.hpp"
 #include <opencv2/opencv.hpp>
 #include <opencv2/dnn.hpp>
@@ -13,6 +12,9 @@
 #else
 #define RCVC_HAVE_CUDAIMGCODECS 0
 #endif
+
+#include "Devices/StereoCam.hpp"
+
 #include <opencv2/cudaimgproc.hpp>
 #include <gst/gst.h>
 #include <sstream>
@@ -30,10 +32,11 @@
 
 
 namespace Modules {
-VisionControls::VisionControls(int moduleID, std::string name) : 
-    Base(moduleID, name), Adapter::CameraAdapter(name) {
+VisionControls::VisionControls(int moduleID, std::string name) :
+    Base(moduleID, name), Adapter::CameraAdapter(name), m_CamGyro(){
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Vision object initialized\r\n");
+
     setPeriod(1000);  // Set the timer thread to service ever second
 }
 
@@ -392,7 +395,45 @@ void VisionControls::processFrame(cv::Mat& frame) {
             break;
         
         case CamModeDepth: {
+            if (frame.channels() == 4) {
+                cv::Mat bgr;
+                cv::cvtColor(frame, bgr, cv::COLOR_BGRA2BGR);
+                frame = bgr;
+            }
             processDepth(frame);
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
+
+/** * @brief Process a stereo frame pair (placeholder for future processing)
+ * 
+ * @param frame Input/output frame pair
+ */
+void VisionControls::processFrame(std::pair<cv::Mat, cv::Mat>& stereoFrame) {
+    using namespace std;
+    using namespace cv;
+    using namespace dnn;
+
+    cv::Mat& frameL = stereoFrame.first;
+    cv::Mat& frameR = stereoFrame.second;
+
+    switch (m_CamSettings.mode) {
+        case CamModeNormal:
+            /* code */
+            break;
+        
+        case CamModeDepth: {
+            if (frameL.channels() == 4) {
+                cv::Mat bgr;
+                cv::cvtColor(frameL, bgr, cv::COLOR_BGRA2BGR);
+                frameL = bgr;
+            }
+            processDepth(frameL);
             break;
         }
 
@@ -481,25 +522,43 @@ void VisionControls::mainProc() {
     streamer.start();
     m_VideoRecorder.setFrameRate(VideoRecording::FrameRate::_30Fps);
 
-    cv::VideoCapture cap(
-        "nvarguscamerasrc sensor-id=0 ! "
-        "video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1,format=NV12 ! "
-        "nvvidconv ! video/x-raw,format=BGRx ! "
-        "videoconvert ! video/x-raw,format=BGR ! appsink",
-        cv::CAP_GSTREAMER
-    );
+    Devices::StereoCam cam(0, 1);
+    cam.start(1280, 720, 30);
 
-    if (!cap.isOpened()) {
-        logger->log(Logger::LOG_LVL_ERROR, "ERROR: Could not open /dev/video0\n");
-        throw std::runtime_error("Could not open camera device");
-    }
+    // cv::VideoCapture capLeft(
+    //     "nvarguscamerasrc sensor-id=0 ! "
+    //     "video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1,format=NV12 ! "
+    //     "nvvidconv ! video/x-raw,format=BGRx ! "
+    //     "videoconvert ! video/x-raw,format=BGR ! appsink",
+    //     cv::CAP_GSTREAMER
+    // );
 
-    logger->log(Logger::LOG_LVL_INFO, "Opened camera at node: /dev/video0\n");
-    cv::Mat frame;
+    // cv::VideoCapture capRight(
+    //     "nvarguscamerasrc sensor-id=1 ! "
+    //     "video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1,format=NV12 ! "
+    //     "nvvidconv ! video/x-raw,format=BGRx ! "
+    //     "videoconvert ! video/x-raw,format=BGR ! appsink",
+    //     cv::CAP_GSTREAMER
+    // );
+
+    // if (!capLeft.isOpened() || !capRight.isOpened()) {
+    //     logger->log(Logger::LOG_LVL_ERROR, "ERROR: Could not open /dev/video0 or /dev/video1\n");
+    //     throw std::runtime_error("Could not open camera device");
+    // }
+
+    logger->log(Logger::LOG_LVL_INFO, "Opened camera at node: /dev/video0 and /dev/video1\n");
+    cv::Mat frameL;
+    cv::Mat frameR;
+
+    cv::Mat frameSim;
+    std::pair<cv::Mat, cv::Mat> stereoFrame;
     while (m_Running.load()) {
         switch(m_StreamStats.streamInStatus) {
             case StreamCamera:
-                cap.read(frame);
+                cam.read(frameL, frameR);
+                // capLeft.read(frameL);
+                // capRight.read(frameR);
+                stereoFrame = std::make_pair(frameL, frameL);
                 break;  
 
             case StreamSim: {
@@ -510,8 +569,8 @@ void VisionControls::mainProc() {
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     continue;
                 }
-                decodeJPEG(frame, simFrame);
-                if (frame.empty()) {
+                decodeJPEG(frameSim, simFrame);
+                if (frameSim.empty()) {
                     logger->log(Logger::LOG_LVL_WARN, "Could not decode JPEG from simulation frame\n");
                     continue;
                 }
@@ -522,14 +581,13 @@ void VisionControls::mainProc() {
                 break;
         }
 
-        if (frame.empty()) {
-            continue;
-        }
+        // if (frameL.empty() || frameR.empty()) {
+        //     continue;
+        // }
 
-        processFrame(frame);
-
+        processFrame(frameR);
         if (m_StreamerCanRun.load()) {
-            streamer.pushFrame(frame);
+            streamer.pushFrame(stereoFrame);
         }
     }
 }

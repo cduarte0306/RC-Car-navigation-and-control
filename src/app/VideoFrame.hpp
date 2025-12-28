@@ -76,7 +76,7 @@ public:
      * @brief Get the segment identifier.
      */
     std::size_t id() const noexcept;
-
+    
     std::size_t frameID() const noexcept { return frameID_; }
 
     /**

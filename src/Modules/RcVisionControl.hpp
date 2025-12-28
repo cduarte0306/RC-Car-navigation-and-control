@@ -10,6 +10,7 @@
 #include <opencv2/dnn.hpp>
 #include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
+#include "Devices/GyroScope.hpp"
 
 #include "app/VideoRecording.hpp"
 
@@ -102,6 +103,9 @@ protected:
     // Frame processing handler
     void processFrame(cv::Mat& frame);
 
+    // Stereo frame processing handler
+    void processFrame(std::pair<cv::Mat, cv::Mat>& stereoFrame);
+
     // Depth processing handler
     void processDepth(cv::Mat& frame);
 
@@ -142,6 +146,9 @@ protected:
 
     // Reception port
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_RxAdapter{nullptr};
+
+    // Camera Gyro
+    Device::GyroScope m_CamGyro;
 
     // Video recorder
     VideoRecording m_VideoRecorder;

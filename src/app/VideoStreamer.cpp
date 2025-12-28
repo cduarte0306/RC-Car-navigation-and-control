@@ -16,7 +16,7 @@ VideoStreamer::VideoStreamer(std::atomic<bool>& canRunFlag,
             m_TxAdapter(txAdapter),
             m_DestIpProvider(std::move(destIpProvider)),
             m_CanRun(canRunFlag),
-            m_Buffer(bufferCapacity) {}
+            m_Buffer(bufferCapacity), m_BufferStereo(bufferCapacity) {}
 
 
 VideoStreamer::~VideoStreamer() {
@@ -28,7 +28,8 @@ void VideoStreamer::start() {
     if (m_Running.exchange(true)) {
         return;  // already running
     }
-    m_Thread = std::thread(&VideoStreamer::run, this);
+    m_ThreadMono = std::thread(&VideoStreamer::runMono, this);
+    m_ThreadStereo = std::thread(&VideoStreamer::runStereo, this);
 }
 
 
@@ -36,8 +37,11 @@ void VideoStreamer::stop() {
     if (!m_Running.exchange(false)) {
         return;
     }
-    if (m_Thread.joinable()) {
-        m_Thread.join();
+    if (m_ThreadMono.joinable()) {
+        m_ThreadMono.join();
+    }
+    if (m_ThreadStereo.joinable()) {
+        m_ThreadStereo.join();
     }
 }
 
@@ -50,13 +54,35 @@ void VideoStreamer::pushFrame(const cv::Mat& frame) {
 }
 
 
-void VideoStreamer::run() {
+void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
+    const cv::Mat& frameL = framePair.first;
+    const cv::Mat& frameR = framePair.second;
+    if (!m_Running.load()) return;
+    if (!m_CanRun.load()) return;
+    if (frameL.empty()) return;
+    m_BufferStereo.push(framePair);
+}
+
+
+void VideoStreamer::runMono() {
     // Wait until allowed to run
     while (m_Running && !m_CanRun.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
     auto lastTime = std::chrono::steady_clock::now();
+
+    auto enforceFps = [&](int targetFps) {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTime).count();
+        int frameDuration = 1000 / targetFps;
+        if (elapsed < frameDuration) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(frameDuration - elapsed));
+            lastTime = std::chrono::steady_clock::now();
+        } else {
+            lastTime = now;
+        }
+    };
 
     while (m_Running) {
         if (m_Buffer.isEmpty()) {
@@ -69,40 +95,78 @@ void VideoStreamer::run() {
         m_Buffer.pop();
 
         // Maintain approximately 30 FPS
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTime).count();
-        if (elapsed < 33) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(33 - elapsed));
-            lastTime = std::chrono::steady_clock::now();
-        } else {
-            lastTime = now;
-        }
+        enforceFps(30);
 
         if (frame.empty()) {
             continue;
         }
 
         transmitFrame(frame);
+        m_FrameID++;
     }
 }
 
 
-int VideoStreamer::transmitFrame(cv::Mat& frame) {
+void VideoStreamer::runStereo() {
+    // Wait until allowed to run
+    while (m_Running && !m_CanRun.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    auto lastTime = std::chrono::steady_clock::now();
+
+    auto enforceFps = [&](int targetFps) {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTime).count();
+        int frameDuration = 1000 / targetFps;
+        if (elapsed < frameDuration) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(frameDuration - elapsed));
+            lastTime = std::chrono::steady_clock::now();
+        } else {
+            lastTime = now;
+        }
+    };
+
+    std::pair<cv::Mat, cv::Mat> stereoFrames;
+
+    while (m_Running) {
+        if (m_BufferStereo.isEmpty()) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            continue;
+        }
+
+        // Copy frame before popping to avoid holding buffer refs
+        stereoFrames = m_BufferStereo.getHead();
+        m_BufferStereo.pop();
+
+        // Maintain approximately 30 FPS
+        enforceFps(30);
+
+        if (stereoFrames.first.empty() || stereoFrames.second.empty()) {
+            continue;
+        }
+
+        prepFrame(stereoFrames);
+    }
+}
+
+
+int VideoStreamer::transmitFrame(cv::Mat& frame, int frameType, int frameSide) {
     if (frame.empty()) {
         return -1;
     }
 
-#ifdef HAVE_OPENCV_CUDAIMGPROC
-    // Optional GPU pass-through; extend with filters if needed
-    cv::cuda::GpuMat gsrc;
-    gsrc.upload(frame);
-    gsrc.download(frame);
-#endif
+    cv::Mat encodeBgr;
+    cv::Mat* encodeFrame = &frame;
+    if (frame.channels() == 4) {
+        cv::cvtColor(frame, encodeBgr, cv::COLOR_BGRA2BGR);
+        encodeFrame = &encodeBgr;
+    }
 
     // Encode JPEG
     std::vector<uint8_t> encoded;
     std::vector<int> params = { cv::IMWRITE_JPEG_QUALITY, encodeQuality };
-    cv::imencode(".jpg", frame, encoded, params);
+    cv::imencode(".jpg", *encodeFrame, encoded, params);
 
     size_t totalSize      = encoded.size();
     size_t bytesRemaining = totalSize;
@@ -131,6 +195,8 @@ int VideoStreamer::transmitFrame(cv::Mat& frame) {
         meta.length = static_cast<uint16_t>(bytesToSend);
 
         // Write metadata
+        packet.FragmentHeader.frameType = static_cast<uint8_t>(frameType);
+        packet.FragmentHeader.frameSide = static_cast<uint8_t>(frameSide);
         packet.metadata = meta;
 
         // Copy payload bytes
@@ -149,6 +215,24 @@ int VideoStreamer::transmitFrame(cv::Mat& frame) {
         uint8_t* raw      = reinterpret_cast<uint8_t*>(&packet);
 
         m_TxAdapter.send(destIp, raw, packetSize);
+    }
+    return 0;
+}
+
+
+int VideoStreamer::prepFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
+    cv::Mat& frameL = const_cast<cv::Mat&>(framePair.first);
+    cv::Mat& frameR = const_cast<cv::Mat&>(framePair.second);
+    if (frameL.empty() || frameR.empty()) {
+        return -1;
+    }
+
+    if (!frameL.empty()) {
+        transmitFrame(frameL, 1, 0);  // frameType=1 (stereo), frameSide=0 (left)
+    }
+
+    if (!frameR.empty()) {
+        transmitFrame(frameR, 1, 1);  // frameType=1 (stereo), frameSide=1 (right)
     }
 
     m_FrameID++;

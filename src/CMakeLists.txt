@@ -33,14 +33,23 @@ set(SOURCE
     Devices/network_interface/UdpServer.hpp
     Devices/RegisterMap.hpp
     Devices/RegisterMap.cpp
+    Devices/GyroScope.cpp
+    Devices/GyroScope.hpp
+    Devices/StereoCam.cpp
+    Devices/StereoCam.hpp
+    lib/Thread.cpp
+    lib/Thread.hpp
 )
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED gstreamer-1.0)
 pkg_check_modules(GSTAPP REQUIRED gstreamer-app-1.0)
 pkg_check_modules(GSTVIDEO REQUIRED gstreamer-video-1.0)
+pkg_check_modules(GPIOD REQUIRED libgpiod)
 
 add_executable(${PROJECT_NAME} ${SOURCE})
+
+option(RC_CAR_ENABLE_JETSON_MULTIMEDIA "Enable Jetson multimedia (Argus/NvBuf) integration when libraries are available" ON)
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/external/json/include
@@ -48,6 +57,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src/Devices/network_interface
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/lib
     ${CMAKE_SOURCE_DIR}/src/Modules
     ${OPENCV_INCLUDE_DIRS}
 )
@@ -57,8 +67,67 @@ target_link_libraries(${PROJECT_NAME}
         ${Boost_LIBRARIES}
         embedded_cli_lib
         systemd
+        pthread
+        EGL
+        GLESv2
         ${OPENCV_LIBRARIES}
 )
+
+if (RC_CAR_ENABLE_JETSON_MULTIMEDIA)
+    if (RC_CAR_ENABLE_JETSON_MULTIMEDIA)
+        # Use SDK sysroot if present
+        if (NOT CMAKE_SYSROOT AND DEFINED ENV{SDKTARGETSYSROOT})
+            set(CMAKE_SYSROOT "$ENV{SDKTARGETSYSROOT}")
+        endif()
+
+        find_library(RC_CAR_NVARGUS_SOCKETCLIENT_LIBRARY
+            NAMES nvargus_socketclient
+            HINTS "${CMAKE_SYSROOT}/usr/lib"
+        )
+
+        find_library(RC_CAR_NVBUF_SURFACE_LIBRARY
+            NAMES nvbufsurface
+            HINTS "${CMAKE_SYSROOT}/usr/lib"
+        )
+
+        find_library(RC_CAR_NVBUF_SURFTRANSFORM_LIBRARY
+            NAMES nvbufsurftransform
+            HINTS "${CMAKE_SYSROOT}/usr/lib"
+        )
+
+        if (RC_CAR_NVARGUS_SOCKETCLIENT_LIBRARY AND RC_CAR_NVBUF_SURFACE_LIBRARY AND RC_CAR_NVBUF_SURFTRANSFORM_LIBRARY)
+            target_compile_definitions(${PROJECT_NAME} PRIVATE RC_CAR_HAVE_JETSON_MULTIMEDIA=1)
+
+            # If your code uses #include <Argus/Argus.h>, add ${CMAKE_SYSROOT}/usr/include
+            # If it uses #include <Argus.h>, add ${CMAKE_SYSROOT}/usr/include/Argus
+            target_include_directories(${PROJECT_NAME} PRIVATE
+                "${CMAKE_SYSROOT}/usr/include"
+                "${CMAKE_SYSROOT}/usr/include/Argus"
+            )
+
+            target_link_libraries(${PROJECT_NAME} PRIVATE
+                ${RC_CAR_NVARGUS_SOCKETCLIENT_LIBRARY}
+                ${RC_CAR_NVBUF_SURFACE_LIBRARY}
+                ${RC_CAR_NVBUF_SURFTRANSFORM_LIBRARY}
+                pthread
+                dl
+            )
+        else()
+            message(STATUS "Jetson multimedia libs not found (nvargus_socketclient/nvbufsurface/nvbufsurftransform); building without Jetson multimedia support")
+            target_compile_definitions(${PROJECT_NAME} PRIVATE RC_CAR_HAVE_JETSON_MULTIMEDIA=0)
+        endif()
+    endif()
+
+    if (RC_CAR_ARGUS_LIBRARY AND RC_CAR_NVBUF_UTILS_LIBRARY)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE RC_CAR_HAVE_JETSON_MULTIMEDIA=1)
+        target_link_libraries(${PROJECT_NAME} PRIVATE ${RC_CAR_ARGUS_LIBRARY} ${RC_CAR_NVBUF_UTILS_LIBRARY})
+    else()
+        message(STATUS "Jetson multimedia libs not found (argus/nvbuf_utils); building without Jetson multimedia support")
+        target_compile_definitions(${PROJECT_NAME} PRIVATE RC_CAR_HAVE_JETSON_MULTIMEDIA=0)
+    endif()
+else()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE RC_CAR_HAVE_JETSON_MULTIMEDIA=0)
+endif()
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${GST_INCLUDE_DIRS}
@@ -70,4 +139,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${GST_LIBRARIES}
     ${GSTAPP_LIBRARIES}
     ${GSTVIDEO_LIBRARIES}
+    ${GPIOD_LIBRARIES}
+)
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${GPIOD_INCLUDE_DIRS}
+)
+
+target_compile_options(${PROJECT_NAME} PRIVATE
+    ${GPIOD_CFLAGS_OTHER}
 )
