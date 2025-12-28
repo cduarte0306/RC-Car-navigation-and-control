@@ -4,6 +4,7 @@
 #include <EGLStream/EGLStream.h>
 #include <opencv2/opencv.hpp>
 #include <array>
+#include <atomic>
 #include <mutex>
 #include <condition_variable>
 #include "lib/Thread.hpp"
@@ -126,6 +127,9 @@ private:
     std::array<int, kNumCameras> frameBufferFds_ = {-1, -1};
     std::array<NvBufSurface*, kNumCameras> frameSurfaces_ = {nullptr, nullptr};
     std::array<NvBufSurface*, kNumCameras> bgrSurfaces_ = {nullptr, nullptr};
+    std::array<void*, kNumCameras> bgrMappedPtr_ = {nullptr, nullptr};
+    std::array<uint32_t, kNumCameras> bgrPitch_ = {0, 0};
+    std::array<bool, kNumCameras> bgrMapped_ = {false, false};
     bool transformConfigured_ = false;
 
     std::array<ThreadContext, kNumCameras> threadCtx_;
@@ -135,15 +139,15 @@ private:
     Lib::Thread m_Cam1CaptureThread_;
     Lib::Thread m_CamSynchronizer;
 
-    // Producer buffers
-    Msg::CircularBuffer<FrameObject> m_ProducerLeftBuffer{100};
-    Msg::CircularBuffer<FrameObject> m_ProducerRightBuffer{100};
-    Msg::CircularBuffer<std::pair<cv::Mat, cv::Mat>> m_StereoBuffer{100};
+    // Producer buffers: keep small to avoid backlog/latency.
+    Msg::CircularBuffer<FrameObject> m_ProducerLeftBuffer{4};
+    Msg::CircularBuffer<FrameObject> m_ProducerRightBuffer{4};
+    Msg::CircularBuffer<std::pair<cv::Mat, cv::Mat>> m_StereoBuffer{4};
 
     std::mutex startMtx_;
     std::condition_variable startCv_;
     bool start_ = false;
-    bool m_ThreadCanRun{true};
+    std::atomic<bool> m_ThreadCanRun{true};
 };
 };
 

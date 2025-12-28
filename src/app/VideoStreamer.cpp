@@ -50,7 +50,8 @@ void VideoStreamer::pushFrame(const cv::Mat& frame) {
     if (!m_Running.load()) return;
     if (!m_CanRun.load()) return;
     if (frame.empty()) return;
-    m_Buffer.push(frame.clone());
+    // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
+    m_Buffer.push(frame);
 }
 
 
@@ -59,7 +60,7 @@ void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
     const cv::Mat& frameR = framePair.second;
     if (!m_Running.load()) return;
     if (!m_CanRun.load()) return;
-    if (frameL.empty()) return;
+    if (frameL.empty() || frameR.empty()) return;
     m_BufferStereo.push(framePair);
 }
 
@@ -70,32 +71,15 @@ void VideoStreamer::runMono() {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    auto lastTime = std::chrono::steady_clock::now();
-
-    auto enforceFps = [&](int targetFps) {
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTime).count();
-        int frameDuration = 1000 / targetFps;
-        if (elapsed < frameDuration) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(frameDuration - elapsed));
-            lastTime = std::chrono::steady_clock::now();
-        } else {
-            lastTime = now;
-        }
-    };
-
     while (m_Running) {
         if (m_Buffer.isEmpty()) {
             std::this_thread::sleep_for(std::chrono::microseconds(100));
             continue;
         }
 
-        // Copy frame before popping to avoid holding buffer refs
-        cv::Mat frame = m_Buffer.getHead().clone();
+        // For lowest latency, always transmit the newest frame.
+        cv::Mat frame = m_Buffer.getHead();
         m_Buffer.pop();
-
-        // Maintain approximately 30 FPS
-        enforceFps(30);
 
         if (frame.empty()) {
             continue;
@@ -113,20 +97,6 @@ void VideoStreamer::runStereo() {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    auto lastTime = std::chrono::steady_clock::now();
-
-    auto enforceFps = [&](int targetFps) {
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTime).count();
-        int frameDuration = 1000 / targetFps;
-        if (elapsed < frameDuration) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(frameDuration - elapsed));
-            lastTime = std::chrono::steady_clock::now();
-        } else {
-            lastTime = now;
-        }
-    };
-
     std::pair<cv::Mat, cv::Mat> stereoFrames;
 
     while (m_Running) {
@@ -135,12 +105,9 @@ void VideoStreamer::runStereo() {
             continue;
         }
 
-        // Copy frame before popping to avoid holding buffer refs
+        // For lowest latency, always transmit the newest stereo pair.
         stereoFrames = m_BufferStereo.getHead();
         m_BufferStereo.pop();
-
-        // Maintain approximately 30 FPS
-        enforceFps(30);
 
         if (stereoFrames.first.empty() || stereoFrames.second.empty()) {
             continue;
@@ -202,17 +169,14 @@ int VideoStreamer::transmitFrame(cv::Mat& frame, int frameType, int frameSide) {
         // Copy payload bytes
         std::memcpy(packet.payload, encoded.data() + offset, bytesToSend);
 
-        // Zero-fill remainder (keeps packet size fixed)
-        if (bytesToSend < MaxPayloadSize) {
-            std::memset(packet.payload + bytesToSend, 0, MaxPayloadSize - bytesToSend);
-        }
-
         offset         += bytesToSend;
         bytesRemaining -= bytesToSend;
         segmentIndex++;
 
-        size_t packetSize = sizeof(Metadata) + MaxPayloadSize;
-        uint8_t* raw      = reinterpret_cast<uint8_t*>(&packet);
+        // Lowest-latency: send only the bytes we actually have.
+        // This avoids sending/zero-filling ~64KB UDP datagrams for small JPEG segments.
+        const std::size_t packetSize = sizeof(FragmentHeader) + sizeof(Metadata) + bytesToSend;
+        auto* raw = reinterpret_cast<uint8_t*>(&packet);
 
         m_TxAdapter.send(destIp, raw, packetSize);
     }

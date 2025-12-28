@@ -518,35 +518,12 @@ void VisionControls::mainProc() {
             return m_HostIP;
         },
         35,
-        100);
+        1);
     streamer.start();
     m_VideoRecorder.setFrameRate(VideoRecording::FrameRate::_30Fps);
 
     Devices::StereoCam cam(0, 1);
     cam.start(1280, 720, 30);
-
-    // cv::VideoCapture capLeft(
-    //     "nvarguscamerasrc sensor-id=0 ! "
-    //     "video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1,format=NV12 ! "
-    //     "nvvidconv ! video/x-raw,format=BGRx ! "
-    //     "videoconvert ! video/x-raw,format=BGR ! appsink",
-    //     cv::CAP_GSTREAMER
-    // );
-
-    // cv::VideoCapture capRight(
-    //     "nvarguscamerasrc sensor-id=1 ! "
-    //     "video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1,format=NV12 ! "
-    //     "nvvidconv ! video/x-raw,format=BGRx ! "
-    //     "videoconvert ! video/x-raw,format=BGR ! appsink",
-    //     cv::CAP_GSTREAMER
-    // );
-
-    // if (!capLeft.isOpened() || !capRight.isOpened()) {
-    //     logger->log(Logger::LOG_LVL_ERROR, "ERROR: Could not open /dev/video0 or /dev/video1\n");
-    //     throw std::runtime_error("Could not open camera device");
-    // }
-
-    logger->log(Logger::LOG_LVL_INFO, "Opened camera at node: /dev/video0 and /dev/video1\n");
     cv::Mat frameL;
     cv::Mat frameR;
 
@@ -556,9 +533,7 @@ void VisionControls::mainProc() {
         switch(m_StreamStats.streamInStatus) {
             case StreamCamera:
                 cam.read(frameL, frameR);
-                // capLeft.read(frameL);
-                // capRight.read(frameR);
-                stereoFrame = std::make_pair(frameL, frameL);
+                stereoFrame = std::make_pair(frameL, frameR);
                 break;  
 
             case StreamSim: {

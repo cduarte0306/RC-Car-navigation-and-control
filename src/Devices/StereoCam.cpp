@@ -7,6 +7,7 @@
 #include <nvbufsurface.h>
 #include <nvbufsurftransform.h>
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <thread>
@@ -94,7 +95,59 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
     iProvider_->getCameraDevices(&devices);
     if (sensorId >= devices.size()) return -1;
 
-    sessions_[index].reset(iProvider_->createCaptureSession(devices[sensorId]));
+    // Choose an explicit sensor mode that can actually sustain the requested FPS.
+    // If Argus picks a mode that allows long exposures (low-light), you can end up with ~20 FPS.
+    CameraDevice* device = devices[sensorId];
+    SensorMode* selectedMode = nullptr;
+    Range<uint64_t> selectedFdRange(0, 0);
+    Range<uint64_t> selectedExpRange(0, 0);
+    {
+        ICameraProperties* iProps = interface_cast<ICameraProperties>(device);
+        if (iProps) {
+            std::vector<SensorMode*> modes;
+            iProps->getAllSensorModes(&modes);
+
+            const uint64_t targetFrameDuration = 1'000'000'000ULL / std::max<uint32_t>(1, fps_);
+
+            auto modeSupports = [&](SensorMode* mode) -> bool {
+                ISensorMode* iMode = interface_cast<ISensorMode>(mode);
+                if (!iMode) return false;
+                const Size2D<uint32_t> res = iMode->getResolution();
+                if (res.width() != w_ || res.height() != h_) return false;
+                const Range<uint64_t> fd = iMode->getFrameDurationRange();
+                return (fd.min() <= targetFrameDuration) && (targetFrameDuration <= fd.max());
+            };
+
+            // Prefer an exact resolution match that supports the requested frame duration.
+            for (SensorMode* m : modes) {
+                if (modeSupports(m)) {
+                    selectedMode = m;
+                    ISensorMode* iMode = interface_cast<ISensorMode>(m);
+                    selectedFdRange = iMode->getFrameDurationRange();
+                    selectedExpRange = iMode->getExposureTimeRange();
+                    break;
+                }
+            }
+
+            // If no exact match, fall back to the mode with the smallest min frame duration (highest FPS).
+            if (!selectedMode && !modes.empty()) {
+                selectedMode = *std::min_element(
+                    modes.begin(), modes.end(),
+                    [](SensorMode* a, SensorMode* b) {
+                        ISensorMode* ia = interface_cast<ISensorMode>(a);
+                        ISensorMode* ib = interface_cast<ISensorMode>(b);
+                        if (!ia || !ib) return false;
+                        return ia->getFrameDurationRange().min() < ib->getFrameDurationRange().min();
+                    });
+                if (ISensorMode* iMode = interface_cast<ISensorMode>(selectedMode)) {
+                    selectedFdRange = iMode->getFrameDurationRange();
+                    selectedExpRange = iMode->getExposureTimeRange();
+                }
+            }
+        }
+    }
+
+    sessions_[index].reset(iProvider_->createCaptureSession(device));
     iSessions_[index] = interface_cast<ICaptureSession>(sessions_[index]);
     if (!iSessions_[index]) return -1;
 
@@ -131,7 +184,22 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
     if (!iSource) return -1;
 
     const uint64_t frameDuration = 1'000'000'000ULL / fps_;
+
+    if (selectedMode) {
+        iSource->setSensorMode(selectedMode);
+    }
     iSource->setFrameDurationRange(Range<uint64_t>(frameDuration, frameDuration));
+
+    // Cap exposure time to the frame period to prevent long exposures from lowering FPS.
+    // (This API is exposed on ISourceSettings in this Argus SDK.)
+    {
+        const uint64_t expMin = (selectedExpRange.min() > 0) ? selectedExpRange.min() : 1ULL;
+        const uint64_t expMaxMode = (selectedExpRange.max() > 0) ? selectedExpRange.max() : frameDuration;
+        const uint64_t expMax = std::min<uint64_t>(expMaxMode, frameDuration);
+        if (expMin <= expMax) {
+            iSource->setExposureTimeRange(Range<uint64_t>(expMin, expMax));
+        }
+    }
 
     if (iSessions_[index]->repeat(requests_[index].get()) != STATUS_OK) return -1;
 
@@ -141,6 +209,12 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
 
 int StereoCam::close() {
     for (size_t i = 0; i < kNumCameras; ++i) {
+        if (bgrSurfaces_[i] && bgrMapped_[i]) {
+            NvBufSurfaceUnMap(bgrSurfaces_[i], 0, 0);
+            bgrMapped_[i] = false;
+            bgrMappedPtr_[i] = nullptr;
+            bgrPitch_[i] = 0;
+        }
         if (bgrSurfaces_[i]) {
             NvBufSurfaceDestroy(bgrSurfaces_[i]);
             bgrSurfaces_[i] = nullptr;
@@ -173,8 +247,8 @@ int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr) {
 
     // If you can, replace this with a blocking condition variable from your CircularBuffer.
     while (m_StereoBuffer.isEmpty()) {
-        std::this_thread::sleep_for(std::chrono::microseconds(200));
-        if (!m_ThreadCanRun) return -1;
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+        if (!m_ThreadCanRun.load()) return -1;
     }
 
     auto& frames = m_StereoBuffer.getHead();
@@ -258,50 +332,64 @@ int StereoCam::readCamera_(size_t index, cv::Mat& outBgr, uint64_t& outTimestamp
 
     NvBufSurfTransformParams transformParams = {};
     transformParams.transform_flag = NVBUFSURF_TRANSFORM_FILTER;
-    transformParams.transform_filter = NvBufSurfTransformInter_Default;
+    // Fastest is usually nearest; we're not scaling here.
+    transformParams.transform_filter = NvBufSurfTransformInter_Nearest;
 
     if (NvBufSurfTransform(srcSurface, dstSurface, &transformParams) != NvBufSurfTransformError_Success) return -1;
 
-    if (NvBufSurfaceMap(dstSurface, 0, 0, NVBUF_MAP_READ) != 0) return -1;
+    // Map once per camera and keep it mapped; just sync per-frame.
+    if (!bgrMapped_[index]) {
+        if (NvBufSurfaceMap(dstSurface, 0, 0, NVBUF_MAP_READ) != 0) return -1;
+        bgrMappedPtr_[index] = dstSurface->surfaceList[0].mappedAddr.addr[0];
+        bgrPitch_[index] = dstSurface->surfaceList[0].pitch;
+        if (!bgrMappedPtr_[index] || bgrPitch_[index] == 0) {
+            NvBufSurfaceUnMap(dstSurface, 0, 0);
+            bgrMappedPtr_[index] = nullptr;
+            bgrPitch_[index] = 0;
+            return -1;
+        }
+        bgrMapped_[index] = true;
+    }
+
     if (NvBufSurfaceSyncForCpu(dstSurface, 0, 0) != 0) {
-        NvBufSurfaceUnMap(dstSurface, 0, 0);
         return -1;
     }
 
-    void* data = dstSurface->surfaceList[0].mappedAddr.addr[0];
-    const uint32_t pitch = dstSurface->surfaceList[0].pitch;
-    if (!data) {
-        NvBufSurfaceUnMap(dstSurface, 0, 0);
-        return -1;
+    // Copy into a preallocated cv::Mat (avoid per-frame allocations).
+    outBgr.create(static_cast<int>(h_), static_cast<int>(w_), CV_8UC4);
+    const auto* src = static_cast<const uint8_t*>(bgrMappedPtr_[index]);
+    const uint32_t pitch = bgrPitch_[index];
+    const uint32_t rowBytes = w_ * 4;
+    for (uint32_t y = 0; y < h_; ++y) {
+        std::memcpy(outBgr.ptr(static_cast<int>(y)), src + static_cast<std::size_t>(y) * pitch, rowBytes);
     }
-
-    // Deep copy once here so the mapped buffer can be unmapped immediately.
-    cv::Mat bgrx(h_, w_, CV_8UC4, data, pitch);
-    outBgr = bgrx.clone();
-
-    NvBufSurfaceUnMap(dstSurface, 0, 0);
     return 0;
 }
 
 
 void StereoCam::streamProducer(CamIdx idx, Msg::CircularBuffer<FrameObject>& producerBuffer) {
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
-                                 "Starting camera stream producer for camera %d\n",
-                                 static_cast<int>(idx));
+    // Small pool so we can reuse allocations without overwriting frames still queued.
+    constexpr std::size_t kPoolSize = 6;
+    std::array<cv::Mat, kPoolSize> framePool;
+    std::size_t poolIdx = 0;
 
-    cv::Mat frame;
     uint64_t timestampNs = 0;
 
     // Start barrier: wait until consumer signals start_
     {
         std::unique_lock<std::mutex> lk(startMtx_);
-        startCv_.wait(lk, [this] { return start_ || !m_ThreadCanRun; });
+        startCv_.wait(lk, [this] { return start_ || !m_ThreadCanRun.load(); });
     }
 
-    if (openCamera_(static_cast<size_t>(idx), threadCtx_[static_cast<size_t>(idx)].deviceIdx) != 0) throw std::runtime_error("Failed to open left camera");
+        if (openCamera_(static_cast<size_t>(idx), threadCtx_[static_cast<size_t>(idx)].deviceIdx) != 0) {
+            throw std::runtime_error("Failed to open camera");
+        }
 
-    while (m_ThreadCanRun) {
-        if (readCamera_(static_cast<size_t>(idx), frame, timestampNs) != 0) {
+        while (m_ThreadCanRun.load()) {
+            cv::Mat& frameSlot = framePool[poolIdx];
+            poolIdx = (poolIdx + 1) % kPoolSize;
+
+            if (readCamera_(static_cast<size_t>(idx), frameSlot, timestampNs) != 0) {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
                                          "Failed to read frame from camera %d\n",
                                          static_cast<int>(idx));
@@ -309,7 +397,7 @@ void StereoCam::streamProducer(CamIdx idx, Msg::CircularBuffer<FrameObject>& pro
         }
 
         FrameObject frameObj;
-        frameObj.frame = std::move(frame);  // move to reduce copies
+            frameObj.frame = frameSlot;  // shallow copy; backing store is the pool slot
         frameObj.timestampNs = timestampNs;
 
         producerBuffer.push(frameObj);
@@ -318,9 +406,7 @@ void StereoCam::streamProducer(CamIdx idx, Msg::CircularBuffer<FrameObject>& pro
 
 
 void StereoCam::streamConsumer() {
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Starting stereo stream consumer\n");
-
-    const uint64_t THRESH_NS = 10ULL * 1000 * 1000; // 5 ms
+    const uint64_t THRESH_NS = 5ULL * 1000 * 1000; // 5 ms
 
     // Release producers at (nearly) the same time
     {
@@ -329,25 +415,34 @@ void StereoCam::streamConsumer() {
     }
     startCv_.notify_all();
 
-    while (m_ThreadCanRun) {
+    while (m_ThreadCanRun.load()) {
         if (m_ProducerLeftBuffer.isEmpty() || m_ProducerRightBuffer.isEmpty()) {
             std::this_thread::sleep_for(std::chrono::microseconds(500));
             continue;
         }
 
-        FrameObject left  = m_ProducerLeftBuffer.getHead();
-        FrameObject right = m_ProducerRightBuffer.getHead();
+        const FrameObject& left  = m_ProducerLeftBuffer.getHead();
+        const FrameObject& right = m_ProducerRightBuffer.getHead();
 
         // Check timestamp alignment
         int64_t timeDiff = static_cast<int64_t>(left.timestampNs) - static_cast<int64_t>(right.timestampNs);
-        // std::cout << "Left ts: " << float(left.timestampNs) << " Right: " << float(right.timestampNs) << " timeDiff: " << float(timeDiff / 1000000) << std::endl;
 
-        // Pop the aligned heads
-        m_ProducerLeftBuffer.pop();
-        m_ProducerRightBuffer.pop();
-
-        // Push paired frames (no deep copies here)
-        m_StereoBuffer.push({left.frame, right.frame});
+        const uint64_t absDiff = static_cast<uint64_t>(timeDiff < 0 ? -timeDiff : timeDiff);
+        if (absDiff <= THRESH_NS) {
+            // Aligned: pop both and publish.
+            FrameObject leftOut = left;
+            FrameObject rightOut = right;
+            m_ProducerLeftBuffer.pop();
+            m_ProducerRightBuffer.pop();
+            m_StereoBuffer.push({leftOut.frame, rightOut.frame});
+        } else {
+            // Not aligned: drop the older frame (smaller timestamp) to catch up.
+            if (timeDiff < 0) {
+                m_ProducerLeftBuffer.pop();
+            } else {
+                m_ProducerRightBuffer.pop();
+            }
+        }
     }
 }
 
