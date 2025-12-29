@@ -26,7 +26,7 @@
 #include <fstream>
 #include <iostream>
 
-#define STREAM_PORT 5000
+#define STREAM_PORT 5005
 
 #define MODEL_PATH  "/opt/rc-car/models/model-small.onnx"
 

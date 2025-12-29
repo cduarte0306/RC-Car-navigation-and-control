@@ -10,7 +10,7 @@ public:
     ~Pwm();
 
     int writeEnable(bool status);
-    int writeDutyCycle(int period);
+    int writeDutyCycle(int dutyPercent);
 private:
     int doIoctl(int fd, unsigned long cmd, void *arg);
 

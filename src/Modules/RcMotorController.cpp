@@ -3,6 +3,7 @@
 #include <iostream>
 #include <chrono>
 #include <string>
+#include <algorithm>
 #include "utils/logger.hpp"
 #include <nlohmann/json.hpp>
 #include "Devices/RegisterMap.hpp"
@@ -143,7 +144,10 @@ int MotorController::setMotorSpeed_(int speed) {
     if (speed < 3) {
         speed = 0;
     }
+
+    speed = std::clamp(speed, 0, 100);
     Logger* logger = Logger::getLoggerInst();
+    // int ret =0;
     int ret = this->m_PwmFwd->writeDutyCycle(speed);
     if (ret < 0) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to set PWM duty cycle\r\n");
