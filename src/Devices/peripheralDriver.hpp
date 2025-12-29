@@ -19,6 +19,12 @@ public:
         val_type_t frontDistance;  // Distance in mm
         val_type_t leftDistance;   // Distance in mm
         val_type_t rightDistance;  // Distance in mm
+        val_type_t accelerationX; // Acceleration in X axis
+        val_type_t accelerationY; // Acceleration in Y axis
+        val_type_t accelerationZ; // Acceleration in Z axis
+        val_type_t magneticX;     // Magnetic field in X axis
+        val_type_t magneticY;     // Magnetic field in Y axis
+        val_type_t magneticZ;     // Magnetic field in Z axis
     } psocDataStruct;
 
     typedef enum
@@ -59,6 +65,21 @@ private:
         REG_FRONT_DISTANCE,
         REG_LEFT_DISTANCE,
         REG_RIGHT_DISTANCE,
+
+        // IMU Registers
+        REG_ACCEL_X,
+        REG_ACCEL_Y,
+        REG_ACCEL_Z,
+        REG_GYRO_X,
+        REG_GYRO_Y,
+        REG_GYRO_Z,
+        
+        MAG_X,
+        MAG_Y,
+        MAG_Z,
+        
+        REG_TEMPERATURE,
+        
         REG_RO_END
     } registerEnumsReadOnly;
 
