@@ -216,6 +216,42 @@ int PeripheralCtrl::readData(psocDataStruct& data) {
         return -1;
     }
 
+    ret = this->xfer(&data.accelerationX, REG_ACCEL_X);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read acceleration X register.\r\n");
+        return -1;
+    }
+    
+    ret = this->xfer(&data.accelerationY, REG_ACCEL_Y);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read acceleration Y register.\r\n");
+        return -1;
+    }
+
+    ret = this->xfer(&data.accelerationZ, REG_ACCEL_Z);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read acceleration Z register.\r\n");
+        return -1;
+    }
+
+    ret = this->xfer(&data.magneticX, MAG_X);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read magnetic X register.\r\n");
+        return -1;
+    }
+
+    ret = this->xfer(&data.magneticY, MAG_Y);;
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read magnetic Y register.\r\n");
+        return -1;
+    }
+
+    ret = this->xfer(&data.magneticZ, MAG_Z);;
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read magnetic Z register.\r\n");
+        return -1;
+    }
+
     data.version_major = this->psocData.version_major;
     data.version_minor = this->psocData.version_minor;
     data.version_build = this->psocData.version_build;
