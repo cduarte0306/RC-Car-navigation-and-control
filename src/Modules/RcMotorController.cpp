@@ -207,6 +207,12 @@ void MotorController::pollTlmData(void) {
     telemetryJson["frontDistance"] = psocData.frontDistance.u32;
     telemetryJson["leftDistance" ] = psocData.leftDistance.u32;
     telemetryJson["rightDistance"] = psocData.rightDistance.u32;
+    telemetryJson["accelerationX"] = psocData.accelerationX.f32;
+    telemetryJson["accelerationY"] = psocData.accelerationY.f32;
+    telemetryJson["accelerationZ"] = psocData.accelerationZ.f32;
+    telemetryJson["magneticX"   ] = psocData.magneticX.f32;
+    telemetryJson["magneticY"   ] = psocData.magneticY.f32;
+    telemetryJson["magneticZ"   ] = psocData.magneticZ.f32;
 
     if (retVal.has_value()) {
         this->TlmAdapter->publishTelemetry(this->getName(),
