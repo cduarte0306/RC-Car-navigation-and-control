@@ -51,7 +51,7 @@ int VisionControls::init(void) {
     m_TxAdapter = this->CommsAdapter->createNetworkAdapter(STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
     m_RxAdapter = this->CommsAdapter->createNetworkAdapter(STREAM_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
     if (!m_TxAdapter || !m_RxAdapter) {
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to create vision network adapters\r\n");
+        logger->log(Logger::LOG_LVL_WARN, "Failed to create vision network adapters\r\n");
         return -1;
     }
 

@@ -256,6 +256,7 @@ namespace Adapter {
             std::string adapter;
             const int port = -1;
             const size_t bufferSize = 0;
+            bool connected = false;
 
             int send(std::string destIp, const uint8_t* data, size_t length) {
                 if (sendCallback) {
@@ -445,7 +446,6 @@ namespace Adapter {
             const int cfgStatus = configureAdapter(*netAdapter, netAdapter->id);
             if (cfgStatus != 0) {
                 std::string msg("Failed to configure adapter " + adapter + " for parent " + parent + "\n");
-                throw(msg);
             }
 
             return netAdapter;
