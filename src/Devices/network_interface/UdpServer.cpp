@@ -53,11 +53,7 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, s
 
     std::string ipAddress = getAdapter(adapter);
     if (ipAddress.empty()) {
-        ipAddress = getAdapter(fallbackAdapter);
-        if (ipAddress.empty()) {
-            logger->log(Logger::LOG_LVL_ERROR, "Could not find IP for interface %s\r\n", adapter.c_str());
-            throw std::runtime_error("");
-        }
+        throw std::runtime_error("");
     }
 
     udp::endpoint listen_endpoint(boost::asio::ip::make_address(ipAddress), port);

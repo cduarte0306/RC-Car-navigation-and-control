@@ -2,6 +2,7 @@
 #include <mutex>
 #include <atomic>
 #include <types.h>
+#include <map>
 #include "RcBase.hpp"
 
 #include "Devices/network_interface/UdpServer.hpp"
@@ -58,7 +59,7 @@ protected:
     }
 
     // Main Process
-    virtual void mainProc() override;
+    virtual void mainProc();
 
     // Opens network adapters
     virtual int configureAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
@@ -92,5 +93,11 @@ protected:
 
     // Non-owning pointer to the primary socket (first configured adapter)
     Network::UdpServer* m_UdpSocket{nullptr};
+
+    // List of adapter names that failed to open
+    std::vector<std::pair<int, Adapter::CommsAdapter::NetworkAdapter*>> m_FailedAdapters;
+
+    // Map of adapter IDs to failed adapter structs for quick lookup
+    std::map<int, Adapter::CommsAdapter::NetworkAdapter*> m_FailedAdapterMap;
 };
 };

@@ -17,14 +17,12 @@ class VideoStreamer {
 public:
     /**
      * @brief Construct a streamer.
-     * @param canRunFlag external flag that gates streaming readiness.
      * @param txAdapter outbound network adapter used to send packets.
      * @param destIpProvider callable returning the current destination IP (thread-safe in caller).
      * @param jpegQuality JPEG quality [0-100]; defaults to 35.
      * @param bufferCapacity number of frames buffered for jitter smoothing.
      */
-    VideoStreamer(std::atomic<bool>& canRunFlag,
-                  Adapter::CommsAdapter::NetworkAdapter& txAdapter,
+    VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
                   std::function<std::string()> destIpProvider,
                   int jpegQuality = 35,
                   std::size_t bufferCapacity = 100);
@@ -64,7 +62,7 @@ private:
     int encodeQuality;
     Adapter::CommsAdapter::NetworkAdapter& m_TxAdapter;
     std::function<std::string()> m_DestIpProvider;
-    std::atomic<bool>& m_CanRun;
+    std::string m_DestIp;
     Msg::CircularBuffer<cv::Mat> m_Buffer;
     std::atomic<bool> m_Running{false};
     std::thread m_Thread;

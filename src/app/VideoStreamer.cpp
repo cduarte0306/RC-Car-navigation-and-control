@@ -2,21 +2,23 @@
 #include <cstring>
 
 #include <thread>
+#include "Devices/RegisterMap.hpp"
 
 #ifdef HAVE_OPENCV_CUDAIMGPROC
 #include <opencv2/cudaimgproc.hpp>
 #endif
 
-VideoStreamer::VideoStreamer(std::atomic<bool>& canRunFlag,
-                                                         Adapter::CommsAdapter::NetworkAdapter& txAdapter,
-                                                         std::function<std::string()> destIpProvider,
-                                                         int jpegQuality,
-                                                         std::size_t bufferCapacity)
-        : encodeQuality(jpegQuality),
-            m_TxAdapter(txAdapter),
-            m_DestIpProvider(std::move(destIpProvider)),
-            m_CanRun(canRunFlag),
-            m_Buffer(bufferCapacity) {}
+#include "utils/logger.hpp"
+
+
+VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
+                            std::function<std::string()> destIpProvider,
+                            int jpegQuality,
+                            std::size_t bufferCapacity)
+      : encodeQuality(jpegQuality),
+        m_TxAdapter(txAdapter),
+        m_DestIpProvider(std::move(destIpProvider)),
+        m_Buffer(bufferCapacity) {}
 
 
 VideoStreamer::~VideoStreamer() {
@@ -44,7 +46,6 @@ void VideoStreamer::stop() {
 
 void VideoStreamer::pushFrame(const cv::Mat& frame) {
     if (!m_Running.load()) return;
-    if (!m_CanRun.load()) return;
     if (frame.empty()) return;
     m_Buffer.push(frame.clone());
 }
@@ -52,11 +53,16 @@ void VideoStreamer::pushFrame(const cv::Mat& frame) {
 
 void VideoStreamer::run() {
     // Wait until allowed to run
-    while (m_Running && !m_CanRun.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    RegisterMap* regMap = RegisterMap::getInstance();
+    std::optional<std::string> destIpReg;
+    while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer started. Host IP: %s\n", destIpReg->c_str());
+
     auto lastTime = std::chrono::steady_clock::now();
+    m_DestIp = *destIpReg;
 
     while (m_Running) {
         if (m_Buffer.isEmpty()) {
@@ -115,7 +121,7 @@ int VideoStreamer::transmitFrame(cv::Mat& frame) {
     FragmentPayload packet;
     Metadata meta;
 
-    std::string destIp = m_DestIpProvider ? m_DestIpProvider() : std::string();
+    std::string destIp = m_DestIp;
     if (destIp.empty()) {
         return -1;
     }

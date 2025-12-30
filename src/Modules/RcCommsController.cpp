@@ -28,16 +28,26 @@ NetworkComms::~NetworkComms() {
  */
 int NetworkComms::configureAdapter(
     Adapter::CommsAdapter::NetworkAdapter& netAdapter, int adapterIdx) {
-    
+
     std::string& adapter = netAdapter.adapter;
 
     // Dynamically create the UDP object and connect the members from the NeworkComms
-    std::unique_ptr<Network::UdpServer> udpSocket = make_unique<Network::UdpServer>(
-        io_context, adapter, "enP8p1s0", netAdapter.port, netAdapter.bufferSize);  // Default bakeup interface is enP8p1s0
+    std::unique_ptr<Network::UdpServer> udpSocket;
+    try {
+        udpSocket = make_unique<Network::UdpServer>(
+            io_context, adapter, "enP8p1s0", netAdapter.port, netAdapter.bufferSize);  // Default bakeup interface is enP8p1s0
+    } catch(const std::exception& e) {
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to create UDP socket for adapter %s: %s\r\n", adapter.c_str(), e.what());
+        std::pair<int, Adapter::CommsAdapter::NetworkAdapter*> adapterInfo{adapterIdx, &netAdapter};
+        m_FailedAdapters.push_back(adapterInfo);
+        m_FailedAdapterMap[adapterIdx] = &netAdapter;
+        return -1;
+    }
 
     // Set up the transmit callback
-    netAdapter.sendCallback = [this, udpSocket=udpSocket.get()](std::string destIp, const uint8_t* data, size_t length) {
-        if (!data || length == 0) return -1;
+    netAdapter.sendCallback = [this, udpSocket=udpSocket.get(), &netAdapter](std::string destIp, const uint8_t* data, size_t length) {
+        if (!data || length == 0 || !netAdapter.connected) return -1;
 
         if (!udpSocket) return -1;
 
@@ -66,6 +76,7 @@ int NetworkComms::configureAdapter(
         m_AdapterMap[adapter] = socketPtr;
     }
 
+    netAdapter.connected = true;
     return 0;
 }
 
@@ -136,7 +147,6 @@ void NetworkComms::mainProc() {
     string lastHost("");
 
     while (true) {
-        // Process motor commands
         for (auto& [adapterName, udpSocketPtr] : m_AdapterMap) {
             if (!udpSocketPtr) {
                 continue;
@@ -148,6 +158,20 @@ void NetworkComms::mainProc() {
             } else if (adapterName.find("en") != string::npos) {
                 // Ethernet adapter
                 m_EthHostIP = udpSocketPtr->getHostIP();
+            }
+        }
+
+        for (const auto& [adapterIdx, netAdapterPtr] : m_FailedAdapterMap) {
+            std::string& adapter = netAdapterPtr->adapter;
+            std::optional<std::string> res = Sockets::findInterface(adapter.c_str());
+            if (res.has_value()) {
+                int ret = configureAdapter(*netAdapterPtr, adapterIdx);
+                if (ret == 0) {
+                    // Successfully reconfigured; remove from failed list
+                    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Successfully reconfigured adapter %s\r\n", netAdapterPtr->adapter.c_str());
+                    m_FailedAdapterMap.erase(adapterIdx);
+                    break;
+                }
             }
         }
 
