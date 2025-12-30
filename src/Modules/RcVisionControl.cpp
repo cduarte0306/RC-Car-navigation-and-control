@@ -24,7 +24,7 @@
 #include <fstream>
 #include <iostream>
 
-#define STREAM_PORT 5000
+#define STREAM_PORT 5005
 
 #define MODEL_PATH  "/opt/rc-car/models/model-small.onnx"
 
@@ -108,15 +108,6 @@ int VisionControls::init(void) {
  */
 int VisionControls::configurePipeline_(const std::string& host) {
     // Close if open
-    if (m_Writer.isOpened()) {
-        m_Writer.release();
-    }
-
-    Logger* logger = Logger::getLoggerInst();
-    std::lock_guard<std::mutex> lock(m_HostIPMutex); 
-    m_HostIP = host;
-    m_StreamerCanRun.store(true);
-    logger->log(Logger::LOG_LVL_INFO, "Configured host: %s\n", host.c_str());
     return 0;
 }
 
@@ -470,7 +461,6 @@ void VisionControls::mainProc() {
 
     // Handles jitter smoothing and transmission in its own thread
     VideoStreamer streamer(
-        m_StreamerCanRun,
         *m_TxAdapter,
         [this]() {
             std::lock_guard<std::mutex> lock(m_HostIPMutex);
@@ -528,9 +518,7 @@ void VisionControls::mainProc() {
 
         processFrame(frame);
 
-        if (m_StreamerCanRun.load()) {
-            streamer.pushFrame(frame);
-        }
+        streamer.pushFrame(frame);
     }
 }
 }
