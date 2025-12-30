@@ -242,7 +242,7 @@ int StereoCam::close() {
     return 0;
 }
 
-int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr) {
+int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t& yGyro, int16_t& zGyro) {
     if (!started_) return -1;
 
     // If you can, replace this with a blocking condition variable from your CircularBuffer.
@@ -252,11 +252,16 @@ int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr) {
     }
 
     auto& frames = m_StereoBuffer.getHead();
+    std::pair<cv::Mat, cv::Mat>& frameBuffers_ = frames.first;
+    Device::GyroScope::GyroData& gyroData = frames.second;
 
     // No deep clone here. You already clone in readCamera_ after mapping.
-    leftBgr  = frames.first;
-    rightBgr = frames.second;
+    leftBgr  = frameBuffers_.first;
+    rightBgr = frameBuffers_.second;
 
+    xGyro = gyroData.gx;
+    yGyro = gyroData.gy;
+    zGyro = gyroData.gz;
     m_StereoBuffer.pop();
     return 0;
 }
@@ -414,6 +419,11 @@ void StereoCam::streamConsumer() {
         start_ = true;
     }
     startCv_.notify_all();
+    
+    // Gyroscope for timestamping
+    Device::GyroScope::GyroData gyroData;
+    Device::GyroScope gyroScope_{"/dev/i2c-7"};
+    // gyroScope_.initialize();
 
     while (m_ThreadCanRun.load()) {
         if (m_ProducerLeftBuffer.isEmpty() || m_ProducerRightBuffer.isEmpty()) {
@@ -434,7 +444,9 @@ void StereoCam::streamConsumer() {
             FrameObject rightOut = right;
             m_ProducerLeftBuffer.pop();
             m_ProducerRightBuffer.pop();
-            m_StereoBuffer.push({leftOut.frame, rightOut.frame});
+
+            // Read gyro and appen 
+            m_StereoBuffer.push({{leftOut.frame, rightOut.frame}, gyroData});
         } else {
             // Not aligned: drop the older frame (smaller timestamp) to catch up.
             if (timeDiff < 0) {

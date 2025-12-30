@@ -46,6 +46,29 @@ void VideoStreamer::stop() {
 }
 
 
+int VideoStreamer::decodePacket(const char* pbuf, size_t len, uint8_t& numSegments, uint8_t& segmentID, uint32_t& totalLength, uint16_t& payloadLen, uint64_t& seqId, std::vector<uint8_t>& payload) {
+    if (len < sizeof(FragmentHeader) + sizeof(Metadata)) {
+        return -1;
+    }
+    
+    // Placeholder implementation
+    struct FragmentPayload*  frameSegment = reinterpret_cast<struct FragmentPayload*>(const_cast<char*>(pbuf));
+    numSegments  = frameSegment->metadata.numSegments;
+    segmentID    = frameSegment->metadata.segmentID;
+    totalLength  = frameSegment->metadata.totalLength;
+    payloadLen   = frameSegment->metadata.length;
+    seqId        = frameSegment->metadata.sequenceID;
+
+    if (payloadLen > 0) {
+        payload.resize(payloadLen);
+        std::memcpy(payload.data(), frameSegment->payload, payloadLen);
+    } else {
+        payload.clear();
+    }
+    return 0;
+}
+
+
 void VideoStreamer::pushFrame(const cv::Mat& frame) {
     if (!m_Running.load()) return;
     if (!m_CanRun.load()) return;

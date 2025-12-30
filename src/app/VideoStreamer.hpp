@@ -63,6 +63,21 @@ public:
      */
     void pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair);
 
+    /**
+     * @brief Decode a received packet into its components.
+     * 
+     * @param pbuf Pointer to the packet buffer.
+     * @param len Length of the packet buffer.
+     * @param numSegments Output number of segments for the frame.
+     * @param segmentID Output segment ID of this packet.
+     * @param totalLength Output total length of the frame.
+     * @param payloadLen Output length of the payload in this packet.
+     * @param seqId Output sequence ID of the frame.
+     * @param payload Output vector to hold the payload data.
+     * @return int 0 on success, negative on failure.
+     */
+    static int decodePacket(const char* pbuf, size_t len, uint8_t& numSegments, uint8_t& segmentID, uint32_t& totalLength, uint16_t& payloadLen, uint64_t& seqId, std::vector<uint8_t>& payload);
+
 private:
     void runMono();
     void runStereo();

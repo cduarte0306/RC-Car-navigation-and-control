@@ -33,7 +33,7 @@
 
 namespace Modules {
 VisionControls::VisionControls(int moduleID, std::string name) :
-    Base(moduleID, name), Adapter::CameraAdapter(name), m_CamGyro(){
+    Base(moduleID, name), Adapter::CameraAdapter(name){
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Vision object initialized\r\n");
 
@@ -145,67 +145,58 @@ void VisionControls::recvFrame(std::vector<char>& data) {
     static uint64_t frameID = 0;
 
     // Decode the image
-    struct FragmentPayload* frameSegment = reinterpret_cast<struct FragmentPayload*>(const_cast<char*>(pbuf));
-    const uint8_t numSegments = frameSegment->metadata.numSegments;
-    const uint8_t segmentID = frameSegment->metadata.segmentID;
-    const uint32_t totalLength = frameSegment->metadata.totalLength;
-    const uint16_t payloadLen = frameSegment->metadata.length;
+    uint8_t  numSegments  = 0;
+    uint8_t  segmentID    = 0;
+    uint32_t totalLength  = 0;
+    uint16_t payloadLen   = 0;
+    uint64_t seqId        = 0;
+    int ret = VideoStreamer::decodePacket(pbuf, packetSize, const_cast<uint8_t&>(numSegments), const_cast<uint8_t&>(segmentID), const_cast<uint32_t&>(totalLength), const_cast<uint16_t&>(payloadLen), const_cast<uint64_t&>(seqId), segmentData);
+    if (ret != 0) {
+        logger->log(Logger::LOG_LVL_WARN, "Frame %llu decode packet error %d\n", static_cast<unsigned long long>(seqId), ret);
+        m_StreamInFrame.reset();
+        return;
+    }
 
     // Basic header sanity
     if (numSegments == 0) {
-        logger->log(Logger::LOG_LVL_WARN, "Frame %u has zero segments\n", frameSegment->metadata.sequenceID);
+        logger->log(Logger::LOG_LVL_WARN, "Frame %llu has zero segments\n", static_cast<unsigned long long>(seqId));
         m_StreamInFrame.reset();
         return;
     }
 
     if (segmentID >= numSegments) {
-        logger->log(Logger::LOG_LVL_WARN, "Frame %u invalid segment id %u / %u\n", frameSegment->metadata.sequenceID, segmentID, numSegments);
+        logger->log(Logger::LOG_LVL_WARN, "Frame %llu invalid segment id %u / %u\n", static_cast<unsigned long long>(seqId), segmentID, numSegments);
         m_StreamInFrame.reset();
         return;
     }
 
     if (payloadLen == 0 || payloadLen > MaxPayloadSize) {
-        logger->log(Logger::LOG_LVL_WARN, "Frame %u invalid payload length %u (max %lld)\n", frameSegment->metadata.sequenceID, payloadLen, static_cast<long long>(MaxPayloadSize));
+        logger->log(Logger::LOG_LVL_WARN, "Frame %llu invalid payload length %u (max %lld)\n", static_cast<unsigned long long>(seqId), payloadLen, static_cast<long long>(MaxPayloadSize));
         m_StreamInFrame.reset();
         return;
     }
 
-    if (sizeof(Metadata) + payloadLen > packetSize) {
-        logger->log(Logger::LOG_LVL_WARN,
-                    "Frame %u packet truncated (have %zu, need %zu)\n",
-                    frameSegment->metadata.sequenceID,
-                    packetSize,
-                    sizeof(Metadata) + static_cast<std::size_t>(payloadLen));
-        m_StreamInFrame.reset();
-        return;
-    }
-
-    if (m_StreamInFrame.numSegments() > 0 && (m_StreamInFrame.frameID() != frameSegment->metadata.sequenceID)) {
+    if (m_StreamInFrame.numSegments() > 0 && (m_StreamInFrame.frameID() != seqId)) {
         // Clear the map
         m_StreamInFrame.reset();
     }
 
-    m_StreamInFrame.setFrameID(frameSegment->metadata.sequenceID);
+    m_StreamInFrame.setFrameID(seqId);
 
     // Drop duplicates to avoid over-assembly
     if (m_StreamInFrame.getSegmentMap().count(segmentID) > 0) {
         logger->log(Logger::LOG_LVL_WARN,
-                    "Frame %u duplicate segment %u/%u\n",
-                    frameSegment->metadata.sequenceID,
+                    "Frame %llu duplicate segment %u/%u\n",
+                    static_cast<unsigned long long>(seqId),
                     segmentID,
                     numSegments);
         return;
     }
 
-    segmentData.resize(payloadLen);
-
-    // Copy the data into the buffer
-    std::memcpy(segmentData.data(), frameSegment->payload, payloadLen);
-
     m_StreamInFrame.append(static_cast<int>(segmentID), segmentData);
 
     // Store the frame ID
-    frameID = frameSegment->metadata.sequenceID;
+    frameID = seqId;
 
     // Once we have all segments, assemble the frame via VideoFrame helper
     if (m_StreamInFrame.numSegments() == numSegments) {
@@ -529,11 +520,13 @@ void VisionControls::mainProc() {
 
     cv::Mat frameSim;
     std::pair<cv::Mat, cv::Mat> stereoFrame;
+    int16_t xGyro, yGyro, zGyro;
     while (m_Running.load()) {
         switch(m_StreamStats.streamInStatus) {
             case StreamCamera:
-                cam.read(frameL, frameR);
+                cam.read(frameL, frameR, xGyro, yGyro, zGyro);
                 stereoFrame = std::make_pair(frameL, frameR);
+                streamer.pushFrame(stereoFrame);
                 break;  
 
             case StreamSim: {
@@ -549,20 +542,13 @@ void VisionControls::mainProc() {
                     logger->log(Logger::LOG_LVL_WARN, "Could not decode JPEG from simulation frame\n");
                     continue;
                 }
+                processFrame(frameSim);
+                streamer.pushFrame(frameSim);
                 break;
             }
 
             default:
                 break;
-        }
-
-        // if (frameL.empty() || frameR.empty()) {
-        //     continue;
-        // }
-
-        processFrame(frameR);
-        if (m_StreamerCanRun.load()) {
-            streamer.pushFrame(stereoFrame);
         }
     }
 }

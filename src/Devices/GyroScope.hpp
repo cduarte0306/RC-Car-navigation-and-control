@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <stdint.h>
 #include <atomic>
+#include <mutex>
 #include <thread>
 #include <RcMessageLib.hpp>
 #include "DeviceBase.hpp"
@@ -59,6 +60,13 @@ private:
     int initializeI2C();
 
     /**
+     * @brief Initialize/configure the ICM-20948 after I2C is up
+     *
+     * @return int Status code
+     */
+    int initializeDevice();
+
+    /**
      * @brief Read data from I2C device
      * 
      * @param reg Register address
@@ -76,7 +84,12 @@ private:
      * @param length Length of data to write
      * @return int Status code
      */
-    int writeI2CData(uint8_t reg, uint8_t* data, size_t length);
+    int writeI2CData(uint8_t reg, const uint8_t* data, size_t length);
+
+    int setRegisterBankLocked(uint8_t bank);
+    int readRegister(uint8_t bank, uint8_t reg, uint8_t* data, size_t length);
+    int writeRegister(uint8_t bank, uint8_t reg, const uint8_t* data, size_t length);
+    int clearDataReadyInterrupt();
 
     /**
      * @brief Read gyroscope data
@@ -113,6 +126,9 @@ private:
 
     // I2C device file path
     const int gyroAddress_ = 0x68;  // I2C address for the gyro
+
+    std::mutex m_I2cMutex;
+    uint8_t m_CurrentBank = 0xFF;
 
     // Optional GPIO interrupt (data-ready) support via libgpiod
     struct gpiod_chip* m_IrqChip = nullptr;

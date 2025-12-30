@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include "lib/Thread.hpp"
 #include "Modules/RcMessageLib.hpp"
+#include "Devices/GyroScope.hpp"
 
 struct NvBufSurface;
 
@@ -42,9 +43,12 @@ public:
      * 
      * @param leftBgr Left camera BGR frame output
      * @param rightBgr Right camera BGR frame output
+     * @param xGyro X-axis gyroscope data output
+     * @param yGyro Y-axis gyroscope data output
+     * @param zGyro Z-axis gyroscope data output
      * @return int 
      */
-    int read(cv::Mat& leftBgr, cv::Mat& rightBgr);
+    int read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t& yGyro, int16_t& zGyro);
 
 private:
     enum class CamIdx : uint8_t {
@@ -142,7 +146,7 @@ private:
     // Producer buffers: keep small to avoid backlog/latency.
     Msg::CircularBuffer<FrameObject> m_ProducerLeftBuffer{4};
     Msg::CircularBuffer<FrameObject> m_ProducerRightBuffer{4};
-    Msg::CircularBuffer<std::pair<cv::Mat, cv::Mat>> m_StereoBuffer{4};
+    Msg::CircularBuffer<std::pair<std::pair<cv::Mat, cv::Mat>, Device::GyroScope::GyroData>> m_StereoBuffer{4};
 
     std::mutex startMtx_;
     std::condition_variable startCv_;

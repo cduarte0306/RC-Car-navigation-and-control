@@ -147,9 +147,6 @@ protected:
     // Reception port
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_RxAdapter{nullptr};
 
-    // Camera Gyro
-    Device::GyroScope m_CamGyro;
-
     // Video recorder
     VideoRecording m_VideoRecorder;
 
