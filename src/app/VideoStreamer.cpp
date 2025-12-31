@@ -2,21 +2,23 @@
 #include <cstring>
 
 #include <thread>
+#include "Devices/RegisterMap.hpp"
 
 #ifdef HAVE_OPENCV_CUDAIMGPROC
 #include <opencv2/cudaimgproc.hpp>
 #endif
 
-VideoStreamer::VideoStreamer(std::atomic<bool>& canRunFlag,
-                                                         Adapter::CommsAdapter::NetworkAdapter& txAdapter,
-                                                         std::function<std::string()> destIpProvider,
-                                                         int jpegQuality,
-                                                         std::size_t bufferCapacity)
-        : encodeQuality(jpegQuality),
-            m_TxAdapter(txAdapter),
-            m_DestIpProvider(std::move(destIpProvider)),
-            m_CanRun(canRunFlag),
-            m_Buffer(bufferCapacity), m_BufferStereo(bufferCapacity) {}
+#include "utils/logger.hpp"
+
+
+VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
+                            std::function<std::string()> destIpProvider,
+                            int jpegQuality,
+                            std::size_t bufferCapacity)
+      : encodeQuality(jpegQuality),
+        m_TxAdapter(txAdapter),
+        m_DestIpProvider(std::move(destIpProvider)),
+        m_Buffer(bufferCapacity), m_BufferStereo(bufferCapacity) {}
 
 
 VideoStreamer::~VideoStreamer() {
@@ -71,7 +73,6 @@ int VideoStreamer::decodePacket(const char* pbuf, size_t len, uint8_t& numSegmen
 
 void VideoStreamer::pushFrame(const cv::Mat& frame) {
     if (!m_Running.load()) return;
-    if (!m_CanRun.load()) return;
     if (frame.empty()) return;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
     m_Buffer.push(frame);
@@ -82,7 +83,6 @@ void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
     const cv::Mat& frameL = framePair.first;
     const cv::Mat& frameR = framePair.second;
     if (!m_Running.load()) return;
-    if (!m_CanRun.load()) return;
     if (frameL.empty() || frameR.empty()) return;
     m_BufferStereo.push(framePair);
 }
@@ -90,9 +90,16 @@ void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
 
 void VideoStreamer::runMono() {
     // Wait until allowed to run
-    while (m_Running && !m_CanRun.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    RegisterMap* regMap = RegisterMap::getInstance();
+    std::optional<std::string> destIpReg;
+    while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer started. Host IP: %s\n", destIpReg->c_str());
+
+    auto lastTime = std::chrono::steady_clock::now();
+    m_DestIp = *destIpReg;
 
     while (m_Running) {
         if (m_Buffer.isEmpty()) {
@@ -116,9 +123,14 @@ void VideoStreamer::runMono() {
 
 void VideoStreamer::runStereo() {
     // Wait until allowed to run
-    while (m_Running && !m_CanRun.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    RegisterMap* regMap = RegisterMap::getInstance();
+    std::optional<std::string> destIpReg;
+    while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer started. Host IP: %s\n", destIpReg->c_str());
+    m_DestIp = *destIpReg;
 
     std::pair<cv::Mat, cv::Mat> stereoFrames;
 
@@ -169,7 +181,7 @@ int VideoStreamer::transmitFrame(cv::Mat& frame, int frameType, int frameSide) {
     FragmentPayload packet;
     Metadata meta;
 
-    std::string destIp = m_DestIpProvider ? m_DestIpProvider() : std::string();
+    std::string destIp = m_DestIp;
     if (destIp.empty()) {
         return -1;
     }

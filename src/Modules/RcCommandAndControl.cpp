@@ -34,7 +34,6 @@ int CommandController::init(void) {
         return -1;
     }
 
-    this->CommsAdapter->startReceive(*m_CommandNetAdapter, std::bind(&CommandController::processIncomingData, this, std::placeholders::_1));
     return 0;
 }
 
@@ -136,6 +135,13 @@ void CommandController::mainProc() {
         std::string hostIP("");
         std::string lastHost("");
         RegisterMap* regMap = RegisterMap::getInstance();
+
+        while(!m_CommandNetAdapter->connected) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "CommandController network adapter connected. Configuring receive callback\r\n");
+        this->CommsAdapter->startReceive(*m_CommandNetAdapter, std::bind(&CommandController::processIncomingData, this, std::placeholders::_1));
 
         while (true) {
             // Process motor commands

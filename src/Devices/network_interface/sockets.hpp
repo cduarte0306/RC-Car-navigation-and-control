@@ -51,8 +51,9 @@ public:
     std::string getHostIP() const {
         return m_HostIP;
     }
+    
 
-    std::optional<std::string> findInterface(const char* name) {
+    static std::optional<std::string> findInterface(const char* name) {
         if (!name) {
             return std::nullopt;
         }

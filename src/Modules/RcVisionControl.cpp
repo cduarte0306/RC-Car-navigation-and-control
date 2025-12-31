@@ -54,7 +54,7 @@ int VisionControls::init(void) {
     m_TxAdapter = this->CommsAdapter->createNetworkAdapter(STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
     m_RxAdapter = this->CommsAdapter->createNetworkAdapter(STREAM_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
     if (!m_TxAdapter || !m_RxAdapter) {
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to create vision network adapters\r\n");
+        logger->log(Logger::LOG_LVL_WARN, "Failed to create vision network adapters\r\n");
         return -1;
     }
 
@@ -111,15 +111,6 @@ int VisionControls::init(void) {
  */
 int VisionControls::configurePipeline_(const std::string& host) {
     // Close if open
-    if (m_Writer.isOpened()) {
-        m_Writer.release();
-    }
-
-    Logger* logger = Logger::getLoggerInst();
-    std::lock_guard<std::mutex> lock(m_HostIPMutex); 
-    m_HostIP = host;
-    m_StreamerCanRun.store(true);
-    logger->log(Logger::LOG_LVL_INFO, "Configured host: %s\n", host.c_str());
     return 0;
 }
 
@@ -502,7 +493,6 @@ void VisionControls::mainProc() {
 
     // Handles jitter smoothing and transmission in its own thread
     VideoStreamer streamer(
-        m_StreamerCanRun,
         *m_TxAdapter,
         [this]() {
             std::lock_guard<std::mutex> lock(m_HostIPMutex);
