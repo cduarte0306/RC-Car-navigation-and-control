@@ -33,12 +33,15 @@ set(SOURCE
     Devices/network_interface/UdpServer.hpp
     Devices/RegisterMap.hpp
     Devices/RegisterMap.cpp
+    Devices/Gpio.cpp
+    Devices/Gpio.hpp
 )
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED gstreamer-1.0)
 pkg_check_modules(GSTAPP REQUIRED gstreamer-app-1.0)
 pkg_check_modules(GSTVIDEO REQUIRED gstreamer-video-1.0)
+pkg_check_modules(GPIOD REQUIRED libgpiod)
 
 add_executable(${PROJECT_NAME} ${SOURCE})
 
