@@ -29,6 +29,9 @@ MotorController::MotorController(int moduleID_, std::string name) : Base(moduleI
     } catch (const std::exception& e) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize PeripheralCtrl and motor control: %s\r\n", e.what());
     }
+
+    // Open GPIO for enabling motor direction
+    m_GpioEnable = Device::Gpio::create(31); // Physical header pin 33, GPIO1_31
 }
 
 MotorController::~MotorController() {
@@ -137,7 +140,10 @@ int MotorController::setMotorSpeed_(int speed) {
     }
 
     if (speed < 0) {
+        m_GpioEnable->gpioWrite(0); // Set direction GPIO high for reverse
         speed *= -2;
+    } else {
+        m_GpioEnable->gpioWrite(1); // Set direction GPIO low for forward
     }
 
     if (speed < 3) {

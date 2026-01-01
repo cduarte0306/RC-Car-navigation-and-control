@@ -33,12 +33,17 @@ set(SOURCE
     Devices/network_interface/UdpServer.hpp
     Devices/RegisterMap.hpp
     Devices/RegisterMap.cpp
+    Devices/Gpio.cpp
+    Devices/Gpio.hpp
 )
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED gstreamer-1.0)
 pkg_check_modules(GSTAPP REQUIRED gstreamer-app-1.0)
 pkg_check_modules(GSTVIDEO REQUIRED gstreamer-video-1.0)
+pkg_check_modules(GPIOD REQUIRED libgpiod)
+
+find_library(GPIOD_LIBRARY gpiod)
 
 add_executable(${PROJECT_NAME} ${SOURCE})
 
@@ -51,6 +56,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src/Modules
     ${OPENCV_INCLUDE_DIRS}
 )
+
+target_link_libraries(${PROJECT_NAME} PRIVATE ${GPIOD_LIBRARY})
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
