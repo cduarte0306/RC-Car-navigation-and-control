@@ -19,6 +19,8 @@ set(SOURCE
     Modules/RcVisionControl.hpp
     Modules/RcCarTelemetry.cpp
     Modules/RcCarTelemetry.hpp
+    Modules/RcUpdater.cpp
+    Modules/RcUpdater.hpp
     app/VideoFrame.cpp
     app/VideoFrame.hpp
     app/VideoStreamer.cpp

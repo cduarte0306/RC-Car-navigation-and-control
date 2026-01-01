@@ -29,7 +29,8 @@ enum DeviceType {
     TELEMETRY_MODULE,
     CAMERA_CONTROLLER,
     VIDEO_STREAMER,
-    CLI_INTERFACE
+    CLI_INTERFACE,
+    UPDATER_MODULE
 };
 
 struct MotorCommand {
@@ -186,6 +187,10 @@ public:
             TlmAdapter->bind(m_boundAdapters[moduleName].get());
         }
 
+        if (UdpaterAdapter) {
+            UdpaterAdapter->bind(m_boundAdapters[moduleName].get());
+        }
+
         return 0;
     }
 
@@ -202,6 +207,8 @@ public:
             CommandAdapter = std::make_unique<Adapter::CommandAdapter>();
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
             TlmAdapter = std::make_unique<Adapter::TlmAdapter>();
+        } else if constexpr (std::is_same<U, Adapter::UpdaterAdapter>::value) {
+            UdpaterAdapter = std::make_unique<Adapter::UpdaterAdapter>();
         } else {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
             static_assert(!std::is_same<U, U>::value, "createAdapter: unsupported adapter type");
@@ -220,6 +227,8 @@ public:
             return std::move(CommsAdapter);
         } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
             return std::move(CommandAdapter);
+        } else if constexpr (std::is_same<U, Adapter::UpdaterAdapter>::value) {
+            return std::move(UdpaterAdapter);
         } else {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
             return nullptr;
@@ -256,6 +265,8 @@ public:
             CommandAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
             TlmAdapter->bind(adapter);
+        } else if constexpr (std::is_same<U, Adapter::UpdaterAdapter>::value) {
+            UdpaterAdapter->bind(adapter);
         } else {
             return -1;
         }
@@ -365,6 +376,7 @@ protected:
     std::unique_ptr<Adapter::CommandAdapter > CommandAdapter = nullptr;
     std::unique_ptr<Adapter::CommsAdapter   > CommsAdapter   = nullptr;
     std::unique_ptr<Adapter::TlmAdapter     > TlmAdapter     = nullptr;
+    std::unique_ptr<Adapter::UpdaterAdapter > UdpaterAdapter = nullptr;
 
     static boost::asio::io_context io_context;
     std::mutex mutex;

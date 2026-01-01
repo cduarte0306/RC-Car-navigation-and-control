@@ -16,7 +16,8 @@ namespace Adapter {
         CommandAdapterID,
         MotorAdapterID, 
         CameraAdapterID,
-        TlmAdapterID
+        TlmAdapterID,
+        UpdaterAdapterID
     };
 
     class AdapterBase {
@@ -543,6 +544,35 @@ namespace Adapter {
             (void)sourceName;
             (void)data;
             (void)length;
+            return -1;
+        }
+    };
+
+    class UpdaterAdapter : public AdapterBase {
+    public:
+        UpdaterAdapter(std::string parentName_="") : AdapterBase(UpdaterAdapterID, parentName_) {}
+        ~UpdaterAdapter() {}
+
+    protected:
+        std::function<int(const std::vector<uint8_t>& firmwareData, size_t length, size_t offset)> m_DownloadDataCmd = nullptr;
+
+        virtual int bind_(AdapterBase* Adapter) final {
+            bindInterface(static_cast<UpdaterAdapter*>(Adapter));
+            return 0;
+        }
+
+        void bindInterface(UpdaterAdapter* adapter) {
+            if (!adapter) return;
+            
+            this->m_DownloadDataCmd = [adapter](const std::vector<uint8_t>& firmwareData, size_t length, size_t offset) -> int {
+                return adapter->downloadFirmwareData_(firmwareData, length, offset);
+            };
+        }
+
+        int downloadFirmwareData_(const std::vector<uint8_t>& firmwareData, size_t length, size_t offset) {
+            (void)firmwareData;
+            (void)length;
+            (void)offset;
             return -1;
         }
     };

@@ -16,6 +16,7 @@
 #include "Modules/RcCommandAndControl.hpp"
 #include "Modules/RcVisionControl.hpp"
 #include "Modules/RcCarTelemetry.hpp"
+#include "Modules/RcUpdater.hpp"
 
 
 int main(int argc, char* argv[]) {
@@ -28,33 +29,36 @@ int main(int argc, char* argv[]) {
     std::unique_ptr<Modules::AppCLI           > cli               = std::make_unique<Modules::AppCLI>(Modules::CLI_INTERFACE, "AppCli");
     std::unique_ptr<Modules::VisionControls   > rcVision          = std::make_unique<Modules::VisionControls>(Modules::CAMERA_CONTROLLER, "CamController");
     std::unique_ptr<Modules::RcCarTelemetry   > rcTelemetry       = std::make_unique<Modules::RcCarTelemetry>(Modules::TELEMETRY_MODULE, "TelemetryModule");
+    std::unique_ptr<Modules::Updater          > rcUpdater         = std::make_unique<Modules::Updater>(Modules::UPDATER_MODULE, "UpdaterModule");
 
     // Create adapters
     motorController->createAdapter<Adapter::TlmAdapter>();
-
     commandController->createAdapter<Adapter::MotorAdapter>();
     commandController->createAdapter<Adapter::CameraAdapter>();
     commandController->createAdapter<Adapter::CommsAdapter>();
-
+    commandController->createAdapter<Adapter::CommandAdapter>();
+    commandController->createAdapter<Adapter::UpdaterAdapter>();
+    
     rcVision->createAdapter<Adapter::MotorAdapter>();
     rcVision->createAdapter<Adapter::CommsAdapter>();
     rcVision->createAdapter<Adapter::CommandAdapter>();
     rcVision->createAdapter<Adapter::TlmAdapter>();
-
     cli->createAdapter<Adapter::MotorAdapter>();
-
     rcTelemetry->createAdapter<Adapter::CommsAdapter>();
+    rcUpdater->createAdapter<Adapter::CommsAdapter>();
 
     // Bind modules
     motorController->moduleBind<Adapter::TlmAdapter>(rcTelemetry->getInputAdapter());
     commandController->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
     commandController->moduleBind<Adapter::CameraAdapter>(rcVision->getInputAdapter());
     commandController->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
+    commandController->moduleBind<Adapter::UpdaterAdapter>(rcUpdater->getInputAdapter());
     cli->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
     rcVision->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     rcVision->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
     rcVision->moduleBind<Adapter::TlmAdapter>(commandController->getInputAdapter());
     rcTelemetry->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
+    rcUpdater->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
 
     // Preliminary initialization
     motorController->init();
@@ -63,6 +67,7 @@ int main(int argc, char* argv[]) {
     rcVision->init();
     rcTelemetry->init();
     cli->init();
+    rcUpdater->init();
 
     // Start each module
     motorController->trigger();
@@ -71,6 +76,7 @@ int main(int argc, char* argv[]) {
     rcVision->trigger();
     rcTelemetry->trigger();
     cli->trigger();
+    rcUpdater->trigger();
 
     // Connect modules to one another
     Modules::Base::joinThreads();
