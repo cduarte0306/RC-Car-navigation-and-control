@@ -43,6 +43,8 @@ pkg_check_modules(GSTAPP REQUIRED gstreamer-app-1.0)
 pkg_check_modules(GSTVIDEO REQUIRED gstreamer-video-1.0)
 pkg_check_modules(GPIOD REQUIRED libgpiod)
 
+find_library(GPIOD_LIBRARY gpiod)
+
 add_executable(${PROJECT_NAME} ${SOURCE})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -54,6 +56,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src/Modules
     ${OPENCV_INCLUDE_DIRS}
 )
+
+target_link_libraries(${PROJECT_NAME} PRIVATE ${GPIOD_LIBRARY})
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
