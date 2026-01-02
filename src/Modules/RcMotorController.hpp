@@ -8,6 +8,7 @@
 #include "Devices/Pwm.hpp"
 #include "Devices/DeviceBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
+#include "Devices/Gpio.hpp"
 
 
 namespace Modules {
@@ -93,6 +94,12 @@ protected:
      * 
      */
     std::unique_ptr<Device::PeripheralCtrl> peripheralDriver = nullptr;
+
+    /**
+     * @brief GPIO to enable/disable motor controller
+     * 
+     */
+    Device::Gpio* m_GpioEnable = nullptr;
 
     /**
      * @brief Direction control PWM
