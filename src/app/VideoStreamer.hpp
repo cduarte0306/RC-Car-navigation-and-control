@@ -62,6 +62,16 @@ public:
     void pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair);
 
     /**
+     * @brief Enqueue a stereo frame for transmission (frame is cloned).
+     * 
+     * @param frame Input superimposed stereo frame
+     * @param xGyro Gyro X-axis
+     * @param yGyro Gyro Y-axis
+     * @param zGyro Gyro Z-axis
+     */
+    void pushFrame(const cv::Mat& frame, int xGyro, int yGyro, int zGyro);
+
+    /**
      * @brief Decode a received packet into its components.
      * 
      * @param pbuf Pointer to the packet buffer.
@@ -77,19 +87,6 @@ public:
     static int decodePacket(const char* pbuf, size_t len, uint8_t& numSegments, uint8_t& segmentID, uint32_t& totalLength, uint16_t& payloadLen, uint64_t& seqId, std::vector<uint8_t>& payload);
 
 private:
-    void runMono();
-    void runStereo();
-
-    int encodeQuality;
-    Adapter::CommsAdapter::NetworkAdapter& m_TxAdapter;
-    std::function<std::string()> m_DestIpProvider;
-    std::string m_DestIp;
-    Msg::CircularBuffer<cv::Mat> m_Buffer;
-    Msg::CircularBuffer<std::pair<cv::Mat, cv::Mat>> m_BufferStereo;
-    std::atomic<bool> m_Running{false};
-    std::thread m_ThreadMono;
-    std::thread m_ThreadStereo;
-
     // Packetization helpers (packed to avoid padding inflating packet size)
     static constexpr long long MaxUDPLen = 65507;
     #pragma pack(push, 1)
@@ -99,11 +96,10 @@ private:
         uint8_t  numSegments;
         uint32_t totalLength;
         uint16_t length;
-
     };
 
     struct FragmentHeader {
-        uint8_t  frameType;  // 0 = mono, 1 = stereo
+        uint8_t  frameType;  // 0 = mono, 1 = stereo, 2 = stereo-mono
         uint8_t  frameSide;  // 0 = left, 1 = right
     };
     #pragma pack(pop)
@@ -116,11 +112,25 @@ private:
         struct Metadata metadata;
         uint8_t payload[MaxPayloadSize];
     };
+
+    typedef struct __attribute__((__packed__)) {
+        int16_t gx;  // Gyro X-axis
+        int16_t gy;  // Gyro Y-axis
+        int16_t gz;  // Gyro Z-axis
+    } stereoHeader_t;
+
     #pragma pack(pop)
+
+    typedef struct {
+        stereoHeader_t stereoHeader;
+        cv::Mat stereoFrame;
+    } stereoPayload;
 
     static_assert(sizeof(FragmentPayload) <= MaxUDPLen, "FragmentPayload exceeds UDP max payload");
 
-    uint32_t m_FrameID = 0;
+    void runMono();
+    void runStereo();
+    void runStereoMono();
 
     /**
      * @brief Transmit a single frame.
@@ -131,10 +141,47 @@ private:
     int transmitFrame(cv::Mat& frame, int frameType=0, int frameSide=0);
 
     /**
+     * @brief Transmit a stereo frame.
+     * 
+     * @param stereoFrame Reference to the stereo frame to transmit
+     * @return int 
+     */
+    int transmitFrame(stereoPayload& stereoFrame, int frameType=2);
+
+    /**
      * @brief Transmit a stereo frame pair.
      * 
      * @param framePair Reference to the stereo frame pair to transmit
      * @return int 
      */
     int prepFrame(const std::pair<cv::Mat, cv::Mat>& framePair);
+
+    int encodeQuality;
+    Adapter::CommsAdapter::NetworkAdapter& m_TxAdapter;
+    std::function<std::string()> m_DestIpProvider;
+    std::string m_DestIp;
+
+    uint32_t m_FrameID = 0;
+
+        /**
+     * @brief Buffer for mono frames (Usually simulation frames)
+     * 
+     */
+    Msg::CircularBuffer<cv::Mat> m_Buffer;
+
+    /**
+     * @brief Buffer for combined stereo frames
+     * 
+     */
+    Msg::CircularBuffer<stereoPayload> m_BufferStereoMono;
+
+    /**
+     * @brief Buffer for stereo frame pairs
+     * 
+     */
+    Msg::CircularBuffer<std::pair<cv::Mat, cv::Mat>> m_BufferStereo;
+    std::atomic<bool> m_Running{false};
+    std::thread m_ThreadMono;
+    std::thread m_ThreadStereo;
+    std::thread m_ThreadStereoMono;
 };

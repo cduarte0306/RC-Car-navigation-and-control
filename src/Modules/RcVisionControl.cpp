@@ -362,6 +362,24 @@ void VisionControls::processDepth(cv::Mat& frame) {
 
 
 /**
+ * @brief Process stereo and compiles a stereo frame pair
+ * 
+ * @param stereoFrame Input/output stereo frame pair
+ */
+void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair) {
+    using namespace std;
+    using namespace cv;
+    using namespace dnn;
+
+    cv::Mat& frameL = stereoFramePair.first;
+    cv::Mat& frameR = stereoFramePair.second;
+
+    // For testing purposes. We just superimpose the two frames into one
+    cv::addWeighted(frameL, 0.5, frameR, 0.5, 0.0, stereoFrame);
+}
+
+
+/**
  * @brief Process a frame (placeholder for future processing)
  * 
  * @param frame Input/output frame
@@ -453,11 +471,15 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             break;
 
         case CmdStreamMode: {
-            const char* modeStr = (cmd->data.u8 == StreamSim) ? "Simulation" : 
-                                  (cmd->data.u8 == StreamCamera) ? "Camera" : "Unknown";
-            logger->log(Logger::LOG_LVL_INFO, "Configuring stream mode to %s, cmd: %d\n", modeStr, cmd->data.u8);
+            if (cmd->data.u8 >= StreamModeMax) {
+                logger->log(Logger::LOG_LVL_WARN, "Invalid stream mode %d\n", cmd->data.u8);
+                return -1;
+            }
+
+            const char* modes[] = {"Camera", "Simulation", "CameraMono"};
+            logger->log(Logger::LOG_LVL_INFO, "Configuring stream mode to %s, cmd: %d\n", modes[cmd->data.u8], cmd->data.u8);
             m_StreamStats.streamInStatus = cmd->data.u8;
-            if (cmd->data.u8 == StreamCamera) {
+            if (cmd->data.u8 != StreamSim) {
                 m_VideoRecorder.resetPlayback();
             }
             break;
@@ -507,17 +529,26 @@ void VisionControls::mainProc() {
     cam.start(1280, 720, 30);
     cv::Mat frameL;
     cv::Mat frameR;
+    cv::Mat frameStereo;
 
     cv::Mat frameSim;
-    std::pair<cv::Mat, cv::Mat> stereoFrame;
+    cv::Ptr<cv::StereoBM> stereoBM = cv::StereoBM::create();
+    std::pair<cv::Mat, cv::Mat> stereoFramePair;
     int16_t xGyro, yGyro, zGyro;
     while (m_Running.load()) {
         switch(m_StreamStats.streamInStatus) {
+            case StreamCameraMono:
+                cam.read(frameL, frameR, xGyro, yGyro, zGyro);
+                stereoFramePair = std::make_pair(frameL, frameR);
+                processStereo(frameStereo, stereoFramePair);
+                streamer.pushFrame(frameStereo);
+                break;
+
             case StreamCamera:
                 cam.read(frameL, frameR, xGyro, yGyro, zGyro);
-                stereoFrame = std::make_pair(frameL, frameR);
-                streamer.pushFrame(stereoFrame);
-                break;  
+                stereoFramePair = std::make_pair(frameL, frameR);
+                streamer.pushFrame(stereoFramePair);
+                break;
 
             case StreamSim: {
                 // We draw a frame from the recording object

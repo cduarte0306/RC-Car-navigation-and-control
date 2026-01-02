@@ -57,8 +57,10 @@ protected:
 
 #pragma pack(pop)
     enum {
-        StreamCamera,
-        StreamSim
+        StreamCamera,       // normal camera mode
+        StreamSim,          // simulation camera mode
+        StreamCameraMono,   // Compiled stereo image mode
+        StreamModeMax       // max modes
     };
 
     // Camera module commands
@@ -71,7 +73,7 @@ protected:
         CmdClrVideoRec    // clear video recording buffer
     };
 
-    // Setting enums
+    // Camera process enums
     enum {
         CamModeNormal,
         CamModeDepth,
@@ -102,6 +104,9 @@ protected:
 
     // Frame processing handler
     void processFrame(cv::Mat& frame);
+
+    // Stereo frame processing handler
+    void processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair);
 
     // Stereo frame processing handler
     void processFrame(std::pair<cv::Mat, cv::Mat>& stereoFrame);
