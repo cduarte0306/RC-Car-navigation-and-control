@@ -423,7 +423,6 @@ void StereoCam::streamConsumer() {
     // Gyroscope for timestamping
     Device::GyroScope::GyroData gyroData;
     Device::GyroScope gyroScope_{"/dev/i2c-7"};
-    // gyroScope_.initialize();
 
     while (m_ThreadCanRun.load()) {
         if (m_ProducerLeftBuffer.isEmpty() || m_ProducerRightBuffer.isEmpty()) {
@@ -444,6 +443,9 @@ void StereoCam::streamConsumer() {
             FrameObject rightOut = right;
             m_ProducerLeftBuffer.pop();
             m_ProducerRightBuffer.pop();
+
+            // Get gyro data
+            gyroScope_.getData(gyroData.gx, gyroData.gy, gyroData.gz);
 
             // Read gyro and appen 
             m_StereoBuffer.push({{leftOut.frame, rightOut.frame}, gyroData});
