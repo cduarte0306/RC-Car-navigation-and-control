@@ -217,7 +217,16 @@ int VideoStreamer::transmitFrame(stereoPayload& stereoFrame, int frameType) {
     cv::imencode(".jpg", *encodeFrame, encoded, params);
     dataOut.resize(sizeof(stereoHeader_t) + encoded.size());
 
-    size_t totalSize      = encoded.size() + sizeof(stereoHeader_t);  // include gyroscope's data
+    // Append gyro header at the beginning
+    stereoHeader_t* headerPtr = reinterpret_cast<stereoHeader_t*>(dataOut.data());
+    headerPtr->gx = stereoFrame.stereoHeader.gx;
+    headerPtr->gy = stereoFrame.stereoHeader.gy;
+    headerPtr->gz = stereoFrame.stereoHeader.gz;
+
+    // Append encoded JPEG data after the header
+    std::memcpy(dataOut.data() + sizeof(stereoHeader_t), encoded.data(), encoded.size());
+
+    size_t totalSize      = dataOut.size();  // header + JPEG data
     size_t bytesRemaining = totalSize;
     size_t offset         = 0;
     uint32_t segmentIndex = 0;

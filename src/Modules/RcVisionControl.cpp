@@ -537,17 +537,17 @@ void VisionControls::mainProc() {
     int16_t xGyro, yGyro, zGyro;
     while (m_Running.load()) {
         switch(m_StreamStats.streamInStatus) {
-            case StreamCameraMono:
-                cam.read(frameL, frameR, xGyro, yGyro, zGyro);
-                stereoFramePair = std::make_pair(frameL, frameR);
-                processStereo(frameStereo, stereoFramePair);
-                streamer.pushFrame(frameStereo);
-                break;
-
-            case StreamCamera:
+            case StreamCameraPairs:
                 cam.read(frameL, frameR, xGyro, yGyro, zGyro);
                 stereoFramePair = std::make_pair(frameL, frameR);
                 streamer.pushFrame(stereoFramePair);
+                break;
+
+            case StreamStereoCameraMono:
+                cam.read(frameL, frameR, xGyro, yGyro, zGyro);
+                stereoFramePair = std::make_pair(frameL, frameR);
+                processStereo(frameStereo, stereoFramePair);
+                streamer.pushFrame(frameStereo, xGyro, yGyro, zGyro);
                 break;
 
             case StreamSim: {

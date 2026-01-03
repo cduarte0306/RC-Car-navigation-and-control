@@ -57,10 +57,10 @@ protected:
 
 #pragma pack(pop)
     enum {
-        StreamCamera,       // normal camera mode
-        StreamSim,          // simulation camera mode
-        StreamCameraMono,   // Compiled stereo image mode
-        StreamModeMax       // max modes
+        StreamCameraPairs,      // normal camera mode
+        StreamSim,              // simulation camera mode
+        StreamStereoCameraMono, // Compiled stereo image mode
+        StreamModeMax           // max modes
     };
 
     // Camera module commands
@@ -115,7 +115,7 @@ protected:
     void processDepth(cv::Mat& frame);
 
     struct StreamStatus {
-        std::atomic<uint8_t> streamInStatus{StreamCamera};
+        std::atomic<uint8_t> streamInStatus{StreamCameraPairs};
         int streamInCounter = 0;  // Stream IN watchdog counter
     } m_StreamStats;
 
