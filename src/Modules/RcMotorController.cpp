@@ -139,6 +139,10 @@ int MotorController::setMotorSpeed_(int speed) {
         return -1;
     }
 
+    if (speed < 5 && speed > -5) {
+        speed = 0; // Deadzone
+    }
+
     if (speed < 0) {
         m_GpioEnable->gpioWrite(0); // Set direction GPIO high for reverse
         speed = -speed;
@@ -146,13 +150,10 @@ int MotorController::setMotorSpeed_(int speed) {
         m_GpioEnable->gpioWrite(1); // Set direction GPIO low for forward
     }
 
-    if (speed < 3) {
-        speed = 0;
-    }
-
     // Convert to Duty cycle percentage (0-100). Analog stick input range is -127 to 127
     int dutyCycle = (static_cast<int>((static_cast<float>(speed) / 127.0f) * 100.0f));
     speed = std::min(100, std::max(0, dutyCycle));
+
     Logger* logger = Logger::getLoggerInst();
     int ret = this->m_PwmFwd->writeDutyCycle(speed);
     if (ret < 0) {
@@ -219,9 +220,17 @@ void MotorController::pollTlmData(void) {
         telemetryJson["accelerationX"] = psocData.accelerationX.f32;
         telemetryJson["accelerationY"] = psocData.accelerationY.f32;
         telemetryJson["accelerationZ"] = psocData.accelerationZ.f32;
-        telemetryJson["magneticX"   ]  = psocData.magneticX.f32;
-        telemetryJson["magneticY"   ]  = psocData.magneticY.f32;
-        telemetryJson["magneticZ"   ]  = psocData.magneticZ.f32;
+        telemetryJson["gyroX"        ] = psocData.gyroX.f32;
+        telemetryJson["gyroY"        ] = psocData.gyroY.f32;
+        telemetryJson["gyroZ"        ] = psocData.gyroZ.f32;
+        telemetryJson["magneticX"    ] = psocData.magneticX.f32;
+        telemetryJson["magneticY"    ] = psocData.magneticY.f32;
+        telemetryJson["magneticZ"    ] = psocData.magneticZ.f32;
+        telemetryJson["sensorFStatus"] = psocData.sensorFStatus.u8;
+        telemetryJson["sensorLStatus"] = psocData.sensorLStatus.u8;
+        telemetryJson["sensorRStatus"] = psocData.sensorRStatus.u8;
+        telemetryJson["imuStatus"    ] = psocData.imuStatus.u8;
+        telemetryJson["encoderStatus"] = psocData.encoderStatus.u8;
     }
 
     if (retVal.has_value()) {
