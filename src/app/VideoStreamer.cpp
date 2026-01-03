@@ -73,7 +73,7 @@ int VideoStreamer::decodePacket(const char* pbuf, size_t len, uint8_t& numSegmen
 }
 
 
-void VideoStreamer::pushFrame(const cv::Mat& frame,  int xGyro, int yGyro, int zGyro) {
+void VideoStreamer::pushFrame(const cv::Mat& frame,  int16_t xGyro, int16_t yGyro, int16_t zGyro) {
     if (!m_Running.load()) return;
     if (frame.empty()) return;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.

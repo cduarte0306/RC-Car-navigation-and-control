@@ -69,7 +69,7 @@ public:
      * @param yGyro Gyro Y-axis
      * @param zGyro Gyro Z-axis
      */
-    void pushFrame(const cv::Mat& frame, int xGyro, int yGyro, int zGyro);
+    void pushFrame(const cv::Mat& frame, int16_t xGyro, int16_t yGyro, int16_t zGyro);
 
     /**
      * @brief Decode a received packet into its components.
