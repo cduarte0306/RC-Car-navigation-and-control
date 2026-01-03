@@ -219,9 +219,17 @@ void MotorController::pollTlmData(void) {
         telemetryJson["accelerationX"] = psocData.accelerationX.f32;
         telemetryJson["accelerationY"] = psocData.accelerationY.f32;
         telemetryJson["accelerationZ"] = psocData.accelerationZ.f32;
-        telemetryJson["magneticX"   ]  = psocData.magneticX.f32;
-        telemetryJson["magneticY"   ]  = psocData.magneticY.f32;
-        telemetryJson["magneticZ"   ]  = psocData.magneticZ.f32;
+        telemetryJson["gyroX"        ] = psocData.gyroX.f32;
+        telemetryJson["gyroY"        ] = psocData.gyroY.f32;
+        telemetryJson["gyroZ"        ] = psocData.gyroZ.f32;
+        telemetryJson["magneticX"    ] = psocData.magneticX.f32;
+        telemetryJson["magneticY"    ] = psocData.magneticY.f32;
+        telemetryJson["magneticZ"    ] = psocData.magneticZ.f32;
+        telemetryJson["sensorFStatus"] = psocData.sensorFStatus.u8;
+        telemetryJson["sensorLStatus"] = psocData.sensorLStatus.u8;
+        telemetryJson["sensorRStatus"] = psocData.sensorRStatus.u8;
+        telemetryJson["imuStatus"    ] = psocData.imuStatus.u8;
+        telemetryJson["encoderStatus"] = psocData.encoderStatus.u8;
     }
 
     if (retVal.has_value()) {
