@@ -68,8 +68,11 @@ public:
      * @param xGyro Gyro X-axis
      * @param yGyro Gyro Y-axis
      * @param zGyro Gyro Z-axis
+     * @param xAccel Accel X-axis
+     * @param yAccel Accel Y-axis
+     * @param zAccel Accel Z-axis
      */
-    void pushFrame(const cv::Mat& frame, int16_t xGyro, int16_t yGyro, int16_t zGyro);
+    void pushFrame(const cv::Mat& frame, int16_t xGyro, int16_t yGyro, int16_t zGyro, int16_t xAccel, int16_t yAccel, int16_t zAccel);
 
     /**
      * @brief Decode a received packet into its components.
@@ -117,6 +120,9 @@ private:
         int16_t gx;  // Gyro X-axis
         int16_t gy;  // Gyro Y-axis
         int16_t gz;  // Gyro Z-axis
+        int16_t ax;  // Accel X-axis
+        int16_t ay;  // Accel Y-axis
+        int16_t az;  // Accel Z-axis
     } stereoHeader_t;
 
     #pragma pack(pop)

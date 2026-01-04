@@ -242,11 +242,19 @@ int StereoCam::close() {
     return 0;
 }
 
-int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t& yGyro, int16_t& zGyro) {
+
+int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t& yGyro, int16_t& zGyro, int16_t& xAccel, int16_t& yAccel, int16_t& zAccel) {
     if (!started_) return -1;
+
+    constexpr uint32_t timeoutMs = 1000;
+    auto startTime = std::chrono::steady_clock::now();
 
     // If you can, replace this with a blocking condition variable from your CircularBuffer.
     while (m_StereoBuffer.isEmpty()) {
+        auto elapsed = std::chrono::steady_clock::now() - startTime;
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() > timeoutMs) {
+            return -1;  // Timeout
+        }
         std::this_thread::sleep_for(std::chrono::microseconds(100));
         if (!m_ThreadCanRun.load()) return -1;
     }
@@ -262,6 +270,9 @@ int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t
     xGyro = gyroData.gx;
     yGyro = gyroData.gy;
     zGyro = gyroData.gz;
+    xAccel = gyroData.ax;
+    yAccel = gyroData.ay;
+    zAccel = gyroData.az;
     m_StereoBuffer.pop();
     return 0;
 }
@@ -445,7 +456,8 @@ void StereoCam::streamConsumer() {
             m_ProducerRightBuffer.pop();
 
             // Get gyro data
-            gyroScope_.getData(gyroData.gx, gyroData.gy, gyroData.gz);
+            gyroScope_.getData(gyroData.gx, gyroData.gy, gyroData.gz, 
+                               gyroData.ax, gyroData.ay, gyroData.az);
 
             // Read gyro and appen 
             m_StereoBuffer.push({{leftOut.frame, rightOut.frame}, gyroData});

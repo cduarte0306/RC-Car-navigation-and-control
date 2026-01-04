@@ -73,11 +73,11 @@ int VideoStreamer::decodePacket(const char* pbuf, size_t len, uint8_t& numSegmen
 }
 
 
-void VideoStreamer::pushFrame(const cv::Mat& frame,  int16_t xGyro, int16_t yGyro, int16_t zGyro) {
+void VideoStreamer::pushFrame(const cv::Mat& frame,  int16_t xGyro, int16_t yGyro, int16_t zGyro, int16_t xAccel, int16_t yAccel, int16_t zAccel) {
     if (!m_Running.load()) return;
     if (frame.empty()) return;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
-    m_BufferStereoMono.push({xGyro, yGyro, zGyro, frame});
+    m_BufferStereoMono.push({xGyro, yGyro, zGyro, xAccel, yAccel, zAccel, frame});
 }
 
 
@@ -222,6 +222,9 @@ int VideoStreamer::transmitFrame(stereoPayload& stereoFrame, int frameType) {
     headerPtr->gx = stereoFrame.stereoHeader.gx;
     headerPtr->gy = stereoFrame.stereoHeader.gy;
     headerPtr->gz = stereoFrame.stereoHeader.gz;
+    headerPtr->ax = stereoFrame.stereoHeader.ax;
+    headerPtr->ay = stereoFrame.stereoHeader.ay;
+    headerPtr->az = stereoFrame.stereoHeader.az;
 
     // Append encoded JPEG data after the header
     std::memcpy(dataOut.data() + sizeof(stereoHeader_t), encoded.data(), encoded.size());

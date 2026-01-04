@@ -46,9 +46,12 @@ public:
      * @param xGyro X-axis gyroscope data output
      * @param yGyro Y-axis gyroscope data output
      * @param zGyro Z-axis gyroscope data output
+     * @param xAccel X-axis accelerometer data output
+     * @param yAccel Y-axis accelerometer data output
+     * @param zAccel Z-axis accelerometer data output
      * @return int 
      */
-    int read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t& yGyro, int16_t& zGyro);
+    int read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t& yGyro, int16_t& zGyro, int16_t& xAccel, int16_t& yAccel, int16_t& zAccel);
 
 private:
     enum class CamIdx : uint8_t {

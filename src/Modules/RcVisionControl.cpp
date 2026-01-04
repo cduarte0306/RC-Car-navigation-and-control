@@ -531,23 +531,31 @@ void VisionControls::mainProc() {
     cv::Mat frameR;
     cv::Mat frameStereo;
 
+    int ret = -1;
     cv::Mat frameSim;
     cv::Ptr<cv::StereoBM> stereoBM = cv::StereoBM::create();
     std::pair<cv::Mat, cv::Mat> stereoFramePair;
+    int16_t xAccel, yAccel, zAccel;
     int16_t xGyro, yGyro, zGyro;
     while (m_Running.load()) {
         switch(m_StreamStats.streamInStatus) {
             case StreamCameraPairs:
-                cam.read(frameL, frameR, xGyro, yGyro, zGyro);
+                ret = cam.read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
+                if (ret != 0) {
+                    continue;
+                }
                 stereoFramePair = std::make_pair(frameL, frameR);
                 streamer.pushFrame(stereoFramePair);
                 break;
 
             case StreamStereoCameraMono:
-                cam.read(frameL, frameR, xGyro, yGyro, zGyro);
+                ret = cam.read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
+                if (ret != 0) {
+                    continue;
+                }
                 stereoFramePair = std::make_pair(frameL, frameR);
                 processStereo(frameStereo, stereoFramePair);
-                streamer.pushFrame(frameStereo, xGyro, yGyro, zGyro);
+                streamer.pushFrame(frameStereo, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
                 break;
 
             case StreamSim: {

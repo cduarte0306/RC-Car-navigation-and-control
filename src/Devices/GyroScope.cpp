@@ -236,13 +236,16 @@ int GyroScope::waitFrameSynchReady(int timeoutMs) {
 }
 
 
-int GyroScope::getData(int16_t& gx, int16_t& gy, int16_t& gz) {
+int GyroScope::getData(int16_t& gx, int16_t& gy, int16_t& gz, int16_t& ax, int16_t& ay, int16_t& az) {
     GyroData data;
     int result = readGyroData(data);
     if (result == 0) {
         gx = data.gx;
         gy = data.gy;
         gz = data.gz;
+        ax = data.ax;
+        ay = data.ay;
+        az = data.az;
     }
     return result;
 }
@@ -400,9 +403,16 @@ int GyroScope::readGyroData(GyroData& data) {
     if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_GYRO_XOUT_H, rawData, 6) != 0) {
         return -1;
     }
+
+    if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_ACCEL_XOUT_H, rawData, 6) != 0) {
+        return -1;
+    }
     data.gx = (static_cast<int16_t>(rawData[0]) << 8) | rawData[1];
     data.gy = (static_cast<int16_t>(rawData[2]) << 8) | rawData[3];
     data.gz = (static_cast<int16_t>(rawData[4]) << 8) | rawData[5];
+    data.ax = (static_cast<int16_t>(rawData[0]) << 8) | rawData[1];
+    data.ay = (static_cast<int16_t>(rawData[2]) << 8) | rawData[3];
+    data.az = (static_cast<int16_t>(rawData[4]) << 8) | rawData[5];
     return 0;
 }
 
@@ -431,6 +441,7 @@ void GyroScope::pollGyroData(void) {
         }
     }
 }
+
 
 int GyroScope::initializeInterrupt(const char* irqChip, unsigned int irqLineOffset) {
     Logger* logger = Logger::getLoggerInst();

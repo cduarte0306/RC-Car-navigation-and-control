@@ -28,6 +28,9 @@ public:
     ~GyroScope();
 
     struct GyroData {
+        int16_t ax;
+        int16_t ay;
+        int16_t az;
         int16_t gx;
         int16_t gy;
         int16_t gz;
@@ -48,9 +51,12 @@ public:
      * @param gx Reference to store X-axis gyro data
      * @param gy Reference to store Y-axis gyro data
      * @param gz Reference to store Z-axis gyro data
+     * @param ax Reference to store X-axis accel data
+     * @param ay Reference to store Y-axis accel data
+     * @param az Reference to store Z-axis accel data
      * @return int Status code
      */
-    int getData(int16_t& gx, int16_t& gy, int16_t& gz);
+    int getData(int16_t& gx, int16_t& gy, int16_t& gz, int16_t& ax, int16_t& ay, int16_t& az);
 private:
     /**
      * @brief Initialize the I2C communication
