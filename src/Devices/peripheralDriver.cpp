@@ -234,6 +234,24 @@ int PeripheralCtrl::readData(psocDataStruct& data) {
         return -1;
     }
 
+    ret = this->xfer(&data.gyroX, REG_GYRO_X);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read gyro X register.\r\n");
+        return -1;
+    }
+    
+    ret = this->xfer(&data.gyroY, REG_GYRO_Y);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read gyro Y register.\r\n");
+        return -1;
+    }
+
+    ret = this->xfer(&data.gyroZ, REG_GYRO_Z);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read gyro Z register.\r\n");
+        return -1;
+    }
+
     ret = this->xfer(&data.magneticX, MAG_X);
     if (!ret) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to read magnetic X register.\r\n");
@@ -249,6 +267,36 @@ int PeripheralCtrl::readData(psocDataStruct& data) {
     ret = this->xfer(&data.magneticZ, MAG_Z);;
     if (!ret) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to read magnetic Z register.\r\n");
+        return -1;
+    }
+
+    ret = this->xfer(&data.sensorFStatus, REG_SENSOR_F_STATUS);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read front sensor status register.\r\n");
+        return -1;
+    }
+
+    ret = this->xfer(&data.sensorLStatus, REG_SENSOR_L_STATUS);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read left sensor status register.\r\n");
+        return -1;
+    }
+
+    ret = this->xfer(&data.sensorRStatus, REG_SENSOR_R_STATUS);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read right sensor status register.\r\n");
+        return -1;
+    }
+
+    ret = this->xfer(&data.encoderStatus, REG_ENCODER_STATUS);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read encoder status register.\r\n");
+        return -1;
+    }
+
+    ret = this->xfer(&data.imuStatus, REG_IMU_STATUS);
+    if (!ret) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to read IMU status register.\r\n");
         return -1;
     }
 

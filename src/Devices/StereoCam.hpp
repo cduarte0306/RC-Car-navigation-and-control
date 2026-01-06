@@ -71,6 +71,9 @@ private:
       EGLStream::IFrameConsumer* iConsumer = nullptr;
       int* frameBufferFd;
       Msg::CircularBuffer<FrameObject>* producerBuffer = nullptr;
+      std::shared_ptr<std::condition_variable> startCamCv = nullptr;
+      std::shared_ptr<std::condition_variable> leftCamCv  = nullptr;
+      std::shared_ptr<std::condition_variable> rightCamCv = nullptr;
     };
 
     /**
@@ -82,6 +85,7 @@ private:
      */
     int open_(int index, int sensorId);
     int openCamera_(size_t index, uint32_t sensorId);
+    void closeCameraResources_(size_t index);
     int readCamera_(size_t index, cv::Mat& outBgr, uint64_t& outTimestampNs);
 
     /**
@@ -108,8 +112,8 @@ private:
      * @param idx 
      * @param producerBuffer 
      */
-    void streamProducer(CamIdx idx, Msg::CircularBuffer<FrameObject>& producerBuffer);
-    void streamConsumer(void);
+    void streamProducer(ThreadContext& ctx, Msg::CircularBuffer<FrameObject>& producerBuffer);
+    void streamConsumer(ThreadContext& ctx);
     static void* captureThreadEntry(void* userData);
     static void* synchThreadEntry(void* userData);
     
@@ -138,6 +142,7 @@ private:
     std::array<uint32_t, kNumCameras> bgrPitch_ = {0, 0};
     std::array<bool, kNumCameras> bgrMapped_ = {false, false};
     bool transformConfigured_ = false;
+    std::array<std::atomic<bool>, kNumCameras> cameraOpen_ = {false, false};
 
     std::array<ThreadContext, kNumCameras> threadCtx_;
 
@@ -152,9 +157,9 @@ private:
     Msg::CircularBuffer<std::pair<std::pair<cv::Mat, cv::Mat>, Device::GyroScope::GyroData>> m_StereoBuffer{4};
 
     std::mutex startMtx_;
-    std::condition_variable startCv_;
     bool start_ = false;
     std::atomic<bool> m_ThreadCanRun{true};
+    std::atomic<bool> m_ProducerThreadCanRun{true};
 };
 };
 
