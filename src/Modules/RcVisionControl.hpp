@@ -70,24 +70,29 @@ protected:
         CmdStopStream,    // stop video stream
         CmdStreamMode,    // start simulation video stream
         CmdSelCameraMode, // select camera mode
-        CmdClrVideoRec    // clear video recording buffer
+        CmdClrVideoRec,   // clear video recording buffer
+        CmdSetVideoName,  // set video recording filename
+        CmdSaveVideo      // save video recording to disks
     };
 
     // Camera process enums
     enum {
         CamModeNormal,
         CamModeDepth,
-        CamModeTraining
+        CamModeDisparity,
+        CamModeMax
     };
 
     struct CameraCommand {
         uint8_t command;
         val_type_t data;
+        uint32_t payloadLen;
     } __attribute__((__packed__));
 
     struct CameraSettings {
         int frameRate = 30;
         int mode      = CamModeNormal;
+        std::string videoName = "recording.MOV";
     } m_CamSettings;
 
     // Parent main proc override

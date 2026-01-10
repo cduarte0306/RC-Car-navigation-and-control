@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstring>
 #include <iostream>
 #include <thread>
 #include <unistd.h>  // close()
@@ -25,51 +24,17 @@ StereoCam::StereoCam(int deviceIDLeft, int deviceIDRight)
     : deviceIDLeft_(deviceIDLeft),
       deviceIDRight_(deviceIDRight) {}
 
-StereoCam::~StereoCam() {
-    close();
-
-    // Final shutdown is the destructor's responsibility: stop and join threads.
-    m_ThreadCanRun.store(false);
-    for (auto& ctx : threadCtx_) {
-        if (ctx.startCamCv) {
-            ctx.startCamCv->notify_all();
-        }
-    }
-    if (m_CamSynchronizer.isRunning()) {
-        m_CamSynchronizer.join();
-    }
-    if (m_Cam0CaptureThread_.isRunning()) {
-        m_Cam0CaptureThread_.join();
-    }
-    if (m_Cam1CaptureThread_.isRunning()) {
-        m_Cam1CaptureThread_.join();
-    }
-
-    for (size_t i = 0; i < kNumCameras; ++i) {
-        closeCameraResources_(i);
-    }
-
-    iProvider_ = nullptr;
-    provider_.reset();
-}
+StereoCam::~StereoCam() {}
 
 int StereoCam::start(uint32_t w, uint32_t h, uint32_t fps) {
     w_   = static_cast<uint32_t>(w);
     h_   = static_cast<uint32_t>(h);
     fps_ = static_cast<uint32_t>(fps);
 
-    // If the provider doesn't exist yet, create it once and keep it for the object's lifetime.
-    if (!provider_) {
-        provider_.reset(CameraProvider::create());
-        iProvider_ = interface_cast<ICameraProvider>(provider_);
-        if (!iProvider_) {
-            return -1;
-        }
-    } else if (!iProvider_) {
-        iProvider_ = interface_cast<ICameraProvider>(provider_);
-        if (!iProvider_) {
-            return -1;
-        }
+    provider_.reset(CameraProvider::create());
+    iProvider_ = interface_cast<ICameraProvider>(provider_);
+    if (!iProvider_) {
+        return -1;
     }
 
     // Ensure transform session params are configured (you had this only in open()).
@@ -85,7 +50,13 @@ int StereoCam::start(uint32_t w, uint32_t h, uint32_t fps) {
         transformConfigured_ = true;
     }
 
-    // Prepare thread contexts (threads may already be running from a previous start()).
+    // Reset start barrier for a new run
+    {
+        std::lock_guard<std::mutex> lk(startMtx_);
+        start_ = false;
+    }
+
+    // Prepare thread contexts
     threadCtx_[0].deviceIdx = deviceIDLeft_;
     threadCtx_[0].self = this;
     threadCtx_[0].camIndex = CamIdx::CamLeft;
@@ -100,53 +71,21 @@ int StereoCam::start(uint32_t w, uint32_t h, uint32_t fps) {
     threadCtx_[1].frameBufferFd = &frameBufferFds_[1];
     threadCtx_[1].producerBuffer = &m_ProducerRightBuffer;
 
-    const bool threadsRunning =
-        m_Cam0CaptureThread_.isRunning() ||
-        m_Cam1CaptureThread_.isRunning() ||
-        m_CamSynchronizer.isRunning();
-
-    // Start threads once; subsequent start() calls just re-enable capture.
-    if (!threadsRunning) {
-        // Create condition variables once for the lifetime of the running threads.
-        // (Threads bind references to these objects; do not replace them on subsequent start() calls.)
-        std::shared_ptr<std::condition_variable> leftCamCv = std::make_shared<std::condition_variable>();
-        std::shared_ptr<std::condition_variable> rightCamCv = std::make_shared<std::condition_variable>();
-        std::shared_ptr<std::condition_variable> startCamCv = std::make_shared<std::condition_variable>();
-        threadCtx_[0].leftCamCv  = leftCamCv;
-        threadCtx_[0].rightCamCv = rightCamCv;
-        threadCtx_[0].startCamCv = startCamCv;
-        threadCtx_[1].leftCamCv  = leftCamCv;
-        threadCtx_[1].rightCamCv = rightCamCv;
-        threadCtx_[1].startCamCv = startCamCv;
-
-        m_ThreadCanRun.store(true);
-        if (m_Cam0CaptureThread_.start(&StereoCam::captureThreadEntry, &threadCtx_[0], 1, true) != 0) {
-            throw std::runtime_error("Failed to start camera 0 capture thread");
-        }
-
-        if (m_Cam1CaptureThread_.start(&StereoCam::captureThreadEntry, &threadCtx_[1], 2, true) != 0) {
-            m_Cam0CaptureThread_.join();
-            throw std::runtime_error("Failed to start camera 1 capture thread");
-        }
-
-        // Synchronizer uses the shared condition variables; pass a valid ThreadContext.
-        if (m_CamSynchronizer.start(&StereoCam::synchThreadEntry, &threadCtx_[0], 3, true) != 0) {
-            m_Cam0CaptureThread_.join();
-            m_Cam1CaptureThread_.join();
-            throw std::runtime_error("Failed to start camera synchronizer thread");
-        }
+    if (m_Cam0CaptureThread_.start(&StereoCam::captureThreadEntry, &threadCtx_[0], 1, true) != 0) {
+        throw std::runtime_error("Failed to start camera 0 capture thread");
     }
 
-    // Enable capture and release barrier.
-    {
-        std::lock_guard<std::mutex> lk(startMtx_);
-        start_ = true;
+    if (m_Cam1CaptureThread_.start(&StereoCam::captureThreadEntry, &threadCtx_[1], 2, true) != 0) {
+        m_Cam0CaptureThread_.join();
+        throw std::runtime_error("Failed to start camera 1 capture thread");
     }
-    m_ProducerThreadCanRun.store(true);
-    started_ = true;
-    if (threadCtx_[0].startCamCv) {
-        threadCtx_[0].startCamCv->notify_all();
+
+    if (m_CamSynchronizer.start(&StereoCam::synchThreadEntry, this, 3, true) != 0) {
+        m_Cam0CaptureThread_.join();
+        m_Cam1CaptureThread_.join();
+        throw std::runtime_error("Failed to start camera synchronizer thread");
     }
+
     return 0;
 }
 
@@ -264,70 +203,42 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
 
     if (iSessions_[index]->repeat(requests_[index].get()) != STATUS_OK) return -1;
 
-    cameraOpen_[index].store(true);
+    started_ = true;
     return 0;
 }
 
-void StereoCam::closeCameraResources_(size_t i) {
-    if (i >= kNumCameras) return;
-
-    if (iSessions_[i]) {
-        iSessions_[i]->stopRepeat();
-        iSessions_[i]->waitForIdle();
-    }
-
-    if (bgrSurfaces_[i] && bgrMapped_[i]) {
-        NvBufSurfaceUnMap(bgrSurfaces_[i], 0, 0);
-        bgrMapped_[i] = false;
-        bgrMappedPtr_[i] = nullptr;
-        bgrPitch_[i] = 0;
-    }
-    if (bgrSurfaces_[i]) {
-        NvBufSurfaceDestroy(bgrSurfaces_[i]);
-        bgrSurfaces_[i] = nullptr;
-    }
-    if (frameSurfaces_[i]) {
-        NvBufSurfaceDestroy(frameSurfaces_[i]);
-        frameSurfaces_[i] = nullptr;
-    }
-    if (frameBufferFds_[i] >= 0) {
-        ::close(frameBufferFds_[i]);     // close DMABUF fd
-        frameBufferFds_[i] = -1;
-    }
-
-    iConsumers_[i] = nullptr;
-    iSessions_[i] = nullptr;
-    consumers_[i].reset();
-    requests_[i].reset();
-    streams_[i].reset();
-    sessions_[i].reset();
-    cameraOpen_[i].store(false);
-}
-
 int StereoCam::close() {
-    // close() only requests the camera streams to stop. Worker threads perform
-    // the Argus/NvBuf cleanup and then block until start() is called again.
-    started_ = false;
-    m_ProducerThreadCanRun.store(false);
-    {
-        std::lock_guard<std::mutex> lk(startMtx_);
-        start_ = false;
-    }
-    
-    for (auto& ctx : threadCtx_) {
-        if (ctx.startCamCv) {
-            ctx.startCamCv->notify_all();
+    for (size_t i = 0; i < kNumCameras; ++i) {
+        if (bgrSurfaces_[i] && bgrMapped_[i]) {
+            NvBufSurfaceUnMap(bgrSurfaces_[i], 0, 0);
+            bgrMapped_[i] = false;
+            bgrMappedPtr_[i] = nullptr;
+            bgrPitch_[i] = 0;
         }
+        if (bgrSurfaces_[i]) {
+            NvBufSurfaceDestroy(bgrSurfaces_[i]);
+            bgrSurfaces_[i] = nullptr;
+        }
+        if (frameSurfaces_[i]) {
+            NvBufSurfaceDestroy(frameSurfaces_[i]);
+            frameSurfaces_[i] = nullptr;
+        }
+        if (frameBufferFds_[i] >= 0) {
+            ::close(frameBufferFds_[i]);     // IMPORTANT: close DMABUF fd
+            frameBufferFds_[i] = -1;
+        }
+
+        iConsumers_[i] = nullptr;
+        iSessions_[i] = nullptr;
+        consumers_[i].reset();
+        requests_[i].reset();
+        streams_[i].reset();
+        sessions_[i].reset();
     }
 
-    // Best-effort wait for both camera pipelines to be released by the producers.
-    constexpr int kMaxWaitMs = 500;
-    for (int waited = 0; waited < kMaxWaitMs; waited += 10) {
-        if (!cameraOpen_[0].load() && !cameraOpen_[1].load()) {
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+    iProvider_ = nullptr;
+    provider_.reset();
+    started_ = false;
     return 0;
 }
 
@@ -371,10 +282,7 @@ int StereoCam::readCamera_(size_t index, cv::Mat& outBgr, uint64_t& outTimestamp
     if (index >= kNumCameras || !iConsumers_[index]) return -1;
 
     Status status = STATUS_OK;
-    // Use a finite timeout so shutdown can complete even if the stream stalls.
-    constexpr uint64_t kAcquireTimeoutNs = 100'000'000ULL; // 100 ms
-    UniqueObj<EGLStream::Frame> frame(iConsumers_[index]->acquireFrame(kAcquireTimeoutNs, &status));
-    if (status == STATUS_TIMEOUT) return 1;
+    UniqueObj<EGLStream::Frame> frame(iConsumers_[index]->acquireFrame(TIMEOUT_INFINITE, &status));
     if (!frame || status != STATUS_OK) return -1;
 
     IArgusCaptureMetadata *iArgusCaptureMetadata = interface_cast<IArgusCaptureMetadata>(frame);
@@ -382,6 +290,7 @@ int StereoCam::readCamera_(size_t index, cv::Mat& outBgr, uint64_t& outTimestamp
         CaptureMetadata *metadata = iArgusCaptureMetadata->getMetadata();
         ICaptureMetadata *iMetadata = interface_cast<ICaptureMetadata>(metadata);
         outTimestampNs = iMetadata->getSensorTimestamp();  // Gather sensor timestamp
+        // std::cout << "Camera " << index << " timestamp (ns): " << outTimestampNs << std::endl;
     } else {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
         "Failed to get IArgusCaptureMetadata interface for camera %zu\n",
@@ -474,169 +383,90 @@ int StereoCam::readCamera_(size_t index, cv::Mat& outBgr, uint64_t& outTimestamp
 }
 
 
-void StereoCam::streamProducer(ThreadContext& ctx, Msg::CircularBuffer<FrameObject>& producerBuffer) {
+void StereoCam::streamProducer(CamIdx idx, Msg::CircularBuffer<FrameObject>& producerBuffer) {
     // Small pool so we can reuse allocations without overwriting frames still queued.
-    CamIdx idx = ctx.camIndex;
     constexpr std::size_t kPoolSize = 6;
     std::array<cv::Mat, kPoolSize> framePool;
     std::size_t poolIdx = 0;
 
-    if (!ctx.startCamCv || !ctx.leftCamCv || !ctx.rightCamCv) {
-        throw std::runtime_error("StereoCam: condition variables not initialized");
-    }
-    std::condition_variable& startCv_   = *ctx.startCamCv;
-    std::condition_variable& leftCamCv  = *ctx.leftCamCv;
-    std::condition_variable& rightCamCv = *ctx.rightCamCv;
-
     uint64_t timestampNs = 0;
 
-    while(m_ThreadCanRun.load()) {        
-        // Start barrier: wait until consumer signals start_
-        {
-            std::unique_lock<std::mutex> lk(startMtx_);
-            startCv_.wait(lk, [this] {
-                return ((start_ && m_ProducerThreadCanRun.load()) || !m_ThreadCanRun.load());
-            });
-        }
-
-        if (!m_ThreadCanRun.load()) {
-            return;
-        }
+    // Start barrier: wait until consumer signals start_
+    {
+        std::unique_lock<std::mutex> lk(startMtx_);
+        startCv_.wait(lk, [this] { return start_ || !m_ThreadCanRun.load(); });
+    }
 
         if (openCamera_(static_cast<size_t>(idx), threadCtx_[static_cast<size_t>(idx)].deviceIdx) != 0) {
             throw std::runtime_error("Failed to open camera");
         }
 
-        while (m_ThreadCanRun.load() && m_ProducerThreadCanRun.load()) {
+        while (m_ThreadCanRun.load()) {
             cv::Mat& frameSlot = framePool[poolIdx];
             poolIdx = (poolIdx + 1) % kPoolSize;
 
-            const int rc = readCamera_(static_cast<size_t>(idx), frameSlot, timestampNs);
-            if (rc == 1) { // timeout; re-check stop flags
-                continue;
-            }
-            if (rc != 0) {
-                Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
-                                            "Failed to read frame from camera %d\n",
-                                            static_cast<int>(idx));
-                continue;
-            }
+            if (readCamera_(static_cast<size_t>(idx), frameSlot, timestampNs) != 0) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+                                         "Failed to read frame from camera %d\n",
+                                         static_cast<int>(idx));
+            continue;
+        }
 
-            FrameObject frameObj;
+        FrameObject frameObj;
             frameObj.frame = frameSlot;  // shallow copy; backing store is the pool slot
-            frameObj.timestampNs = timestampNs;
+        frameObj.timestampNs = timestampNs;
 
-            producerBuffer.push(frameObj);
-        }
-
-        // Close the camera resources when stopping capture (threads stay alive).
-        closeCameraResources_(static_cast<size_t>(idx));
-
-        if (idx == CamIdx::CamLeft) {
-            leftCamCv.notify_all();
-        } else {
-            rightCamCv.notify_all();
-        }
-
-        m_ProducerThreadCanRun.store(true);
+        producerBuffer.push(frameObj);
     }
 }
 
 
-void StereoCam::streamConsumer(ThreadContext& ctx) {
-    const uint64_t THRESH_NS = 5ULL * 1000 * 1000; // 5 ms
-    if (!ctx.startCamCv || !ctx.leftCamCv || !ctx.rightCamCv) {
-        throw std::runtime_error("StereoCam: condition variables not initialized");
-    }
-    std::condition_variable& startCv_ = *ctx.startCamCv;
-    std::condition_variable& leftCamCv  = *ctx.leftCamCv;
-    std::condition_variable& rightCamCv = *ctx.rightCamCv;
+void StereoCam::streamConsumer() {
+    const uint64_t THRESH_NS = 10ULL * 1000 * 1000; // 5 ms
 
+    // Release producers at (nearly) the same time
+    {
+        std::lock_guard<std::mutex> lk(startMtx_);
+        start_ = true;
+    }
+    startCv_.notify_all();
+    
     // Gyroscope for timestamping
     Device::GyroScope::GyroData gyroData;
     Device::GyroScope gyroScope_{"/dev/i2c-7"};
 
     while (m_ThreadCanRun.load()) {
-        // {
-        //     std::unique_lock<std::mutex> lk(startMtx_);
-        //     startCv_.wait(lk, [this] {
-        //         return ((start_ && m_ProducerThreadCanRun.load()) || !m_ThreadCanRun.load());
-        //     });
-        // }
+        if (m_ProducerLeftBuffer.isEmpty() || m_ProducerRightBuffer.isEmpty()) {
+            std::this_thread::sleep_for(std::chrono::microseconds(500));
+            continue;
+        }
 
-        // Fire the start signals to both cameras
-        startCv_.notify_all();
+        const FrameObject& left  = m_ProducerLeftBuffer.getHead();
+        const FrameObject& right = m_ProducerRightBuffer.getHead();
 
-        auto timeNow = std::chrono::steady_clock::now();
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
-                                    "StereoCam: Synchronizer started\n");
+        // Check timestamp alignment
+        int64_t timeDiff = static_cast<int64_t>(left.timestampNs) - static_cast<int64_t>(right.timestampNs);
 
-        while (m_ThreadCanRun.load() && m_ProducerThreadCanRun.load()) {
-            if (m_ProducerLeftBuffer.isEmpty() || m_ProducerRightBuffer.isEmpty()) {
-                std::this_thread::sleep_for(std::chrono::microseconds(500));
-                continue;
-            }
+        const uint64_t absDiff = static_cast<uint64_t>(timeDiff < 0 ? -timeDiff : timeDiff);
+        if (absDiff <= THRESH_NS) {
+            // Aligned: pop both and publish.
+            FrameObject leftOut = left;
+            FrameObject rightOut = right;
+            m_ProducerLeftBuffer.pop();
+            m_ProducerRightBuffer.pop();
 
-            const FrameObject& left  = m_ProducerLeftBuffer.getHead();
-            const FrameObject& right = m_ProducerRightBuffer.getHead();
+            // Get gyro data
+            gyroScope_.getData(gyroData.gx, gyroData.gy, gyroData.gz, 
+                               gyroData.ax, gyroData.ay, gyroData.az);
 
-            // Check timestamp alignment
-            int64_t timeDiff = static_cast<int64_t>(left.timestampNs) - static_cast<int64_t>(right.timestampNs);
-
-            const uint64_t absDiff = static_cast<uint64_t>(timeDiff < 0 ? -timeDiff : timeDiff);
-            if (absDiff <= THRESH_NS) {
-                // Aligned: pop both and publish.
-                FrameObject leftOut = left;
-                FrameObject rightOut = right;
+            // Read gyro and appen 
+            m_StereoBuffer.push({{leftOut.frame, rightOut.frame}, gyroData});
+        } else {
+            // Not aligned: drop the older frame (smaller timestamp) to catch up.
+            if (timeDiff < 0) {
                 m_ProducerLeftBuffer.pop();
-                m_ProducerRightBuffer.pop();
-
-                // Get gyro data
-                gyroScope_.getData(gyroData.gx, gyroData.gy, gyroData.gz,
-                                   gyroData.ax, gyroData.ay, gyroData.az);
-
-                m_StereoBuffer.push({{leftOut.frame, rightOut.frame}, gyroData});
-
-                // reset timestamp
-                timeNow = std::chrono::steady_clock::now();
             } else {
-                // Not aligned: drop the older frame (smaller timestamp) to catch up.
-                if (timeDiff < 0) {
-                    m_ProducerLeftBuffer.pop();
-                } else {
-                    m_ProducerRightBuffer.pop();
-                }
-
-                if (std::chrono::steady_clock::now() - timeNow > std::chrono::seconds(2)) {
-                    Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN,
-                                                "StereoCam: Unable to synchronize cameras within 2 seconds\n");
-                    // If we're taking too long, reset boths threads and re-open cameras.
-                    m_ProducerThreadCanRun.store(false);
-
-                    // Clear both buffers
-                    while (!m_ProducerLeftBuffer.isEmpty()) {
-                        m_ProducerLeftBuffer.pop();
-                    }
-                    while (!m_ProducerRightBuffer.isEmpty()) {
-                        m_ProducerRightBuffer.pop();
-                    }
-
-                    // Wait until both producers have stopped
-                    {
-                        std::unique_lock<std::mutex> lk(startMtx_);
-                        leftCamCv.wait(lk, [this] {
-                            return !cameraOpen_[0].load() || !m_ThreadCanRun.load();
-                        });
-                    }
-                    {
-                        std::unique_lock<std::mutex> lk(startMtx_);
-                        rightCamCv.wait(lk, [this] {
-                            return !cameraOpen_[1].load() || !m_ThreadCanRun.load();
-                        });
-                    }
-                    
-                    break;
-                }
+                m_ProducerRightBuffer.pop();
             }
         }
     }
@@ -647,16 +477,16 @@ void* StereoCam::captureThreadEntry(void* userData) {
     auto* ctx = static_cast<StereoCam::ThreadContext*>(userData);
     if (!ctx || !ctx->self) return nullptr;
 
-    ctx->self->streamProducer(*ctx, *ctx->producerBuffer);
+    ctx->self->streamProducer(ctx->camIndex, *ctx->producerBuffer);
     return nullptr;
 }
 
 
 void* StereoCam::synchThreadEntry(void* userData) {
-    auto* ctx = static_cast<StereoCam::ThreadContext*>(userData);
-    if (!ctx || !ctx->self) return nullptr;
+    auto* self = static_cast<StereoCam*>(userData);
+    if (!self) return nullptr;
 
-    ctx->self->streamConsumer(*ctx);
+    self->streamConsumer();
     return nullptr;
 }
 

@@ -90,6 +90,14 @@ namespace Msg {
             return buffer_[(tail_ + index) % capacity_].getData();
         }
 
+        T& peek(size_t index) {
+            std::lock_guard<std::mutex> lock(bufferMutex);
+            if (index >= size_) {
+                throw std::out_of_range("Index out of bounds.");
+            }
+            return buffer_[(tail_ + index) % capacity_].getData();
+        }
+
         // Returns item at head
         T& getHead() {
             std::lock_guard<std::mutex> lock(bufferMutex);

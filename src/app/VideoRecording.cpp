@@ -2,6 +2,10 @@
 
 #include <chrono>
 #include <algorithm>
+#include <string>
+#include <filesystem>
+#include "utils/logger.hpp"
+
 
 VideoRecording::VideoRecording() = default;
 
@@ -83,5 +87,48 @@ std::vector<VideoFrame> VideoRecording::segments() const {
 void VideoRecording::setMaxSegmentSize(std::size_t maxBytes) {
 	std::lock_guard<std::mutex> lock(mutex_);
 	m_maxSegmentBytes = maxBytes;
+}
+
+
+int VideoRecording::saveToFile(const std::string& filename) {
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (m_Video.empty()) {
+		return -1; // No video to save
+	}
+
+	if (!std::filesystem::exists(VideoStoragePath)) {
+		std::filesystem::create_directories(VideoStoragePath);
+	}
+
+	// Open file for writing in a separate thread to avoid blocking
+	std::thread storeThread = std::thread([this, filename]() {
+		std::string fullPath = std::string(VideoStoragePath) + filename;
+		FILE* file = fopen(fullPath.c_str(), "wb");
+		if (!file) {
+			Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to open file for writing: %s\n", fullPath.c_str());
+			return;
+		}
+
+		// Write each frame's bytes to the file
+		for (const VideoFrame& frame : m_Video) {
+			const std::vector<uint8_t> frameBytes = frame.bytes();
+			if (!frameBytes.empty()) {
+				size_t written = fwrite(frameBytes.data(), 1, frameBytes.size(), file);
+				if (written != frameBytes.size()) {
+					// Handle write error if needed
+					Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Error writing video frame to file: %s\n", fullPath.c_str());
+					fclose(file);
+					return;
+				}
+			}
+		}
+
+		Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Video recording saved to file: %s\n", fullPath.c_str());
+		fclose(file);
+	});
+
+	storeThread.detach();
+	
+	return 0; // Success
 }
 

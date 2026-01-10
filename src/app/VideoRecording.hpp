@@ -82,8 +82,14 @@ public:
      * @brief Configure maximum segment size before rotation.
      */
     void setMaxSegmentSize(std::size_t maxBytes);
+
+    /**
+     * @brief Save recorded video to file.
+     */
+    int saveToFile(const std::string& filename);
     
 private:
+    const char* VideoStoragePath = "/data/training-videos/";
     FrameRate frameRate_{FrameRate::_30Fps};  // Default to 30 FPS
     std::size_t m_currentFrame = 0;
     std::size_t m_maxSegmentBytes = 0;

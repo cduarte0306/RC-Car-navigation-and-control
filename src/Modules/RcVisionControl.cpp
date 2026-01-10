@@ -12,6 +12,12 @@
 #else
 #define RCVC_HAVE_CUDAIMGCODECS 0
 #endif
+#if __has_include(<opencv2/cudastereo.hpp>)
+#include <opencv2/cudastereo.hpp>
+#define RCVC_HAVE_CUDASTEREO 1
+#else
+#define RCVC_HAVE_CUDASTEREO 0
+#endif
 
 #include "Devices/StereoCam.hpp"
 
@@ -374,8 +380,52 @@ void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::
     cv::Mat& frameL = stereoFramePair.first;
     cv::Mat& frameR = stereoFramePair.second;
 
-    // For testing purposes. We just superimpose the two frames into one
-    cv::addWeighted(frameL, 0.5, frameR, 0.5, 0.0, stereoFrame);
+    switch (m_CamSettings.mode) {
+        case VisionControls::CamModeNormal:
+            // For testing purposes. We just superimpose the two frames into one
+            cv::addWeighted(frameL, 0.5, frameR, 0.5, 0.0, stereoFrame);
+            break;
+
+	        case VisionControls::CamModeDisparity:
+	            {
+	                cv::Mat grayL, grayR;
+	                cv::cvtColor(frameL, grayL, cv::COLOR_BGR2GRAY);
+	                cv::cvtColor(frameR, grayR, cv::COLOR_BGR2GRAY);
+#if RCVC_HAVE_CUDASTEREO
+	                static cv::Ptr<cv::cuda::StereoBM> stereoBM = cv::cuda::createStereoBM(96, 15);
+	                static cv::cuda::GpuMat d_left, d_right, d_disp;
+	                static cv::cuda::Stream stream;
+#else
+	                static cv::Ptr<cv::StereoBM> stereoBM = cv::StereoBM::create(96, 15);
+#endif
+	                cv::Mat disparity;
+#if RCVC_HAVE_CUDASTEREO
+	                // cv::cuda::* algorithms require cuda::GpuMat/HostMem. Passing cv::Mat triggers
+	                // InputArray::getGpuMat() and throws "getGpuMat is available only for cuda::GpuMat".
+	                if (cv::cuda::getCudaEnabledDeviceCount() > 0) {
+	                    d_left.upload(grayL, stream);
+	                    d_right.upload(grayR, stream);
+	                    stereoBM->compute(d_left, d_right, d_disp, stream);
+	                    d_disp.download(disparity, stream);
+	                    stream.waitForCompletion();
+	                } else {
+	                    // Fallback to CPU if CUDA isn't available at runtime.
+	                    cv::Ptr<cv::StereoBM> cpuBM = cv::StereoBM::create(96, 15);
+	                    cpuBM->compute(grayL, grayR, disparity);
+	                }
+#else
+	                stereoBM->compute(grayL, grayR, disparity);
+#endif
+	                // Normalize for visualization
+	                cv::Mat disp8U;
+	                disparity.convertTo(disp8U, CV_8U, 255.0 / (96 * 16.0));
+	                cv::applyColorMap(disp8U, stereoFrame, cv::COLORMAP_JET);
+	            }
+	            break;
+
+        default:
+            break;
+    }
 }
 
 
@@ -390,11 +440,11 @@ void VisionControls::processFrame(cv::Mat& frame) {
     using namespace dnn;
 
     switch (m_CamSettings.mode) {
-        case CamModeNormal:
+        case VisionControls::CamModeNormal:
             /* code */
             break;
         
-        case CamModeDepth: {
+        case VisionControls::CamModeDepth: {
             if (frame.channels() == 4) {
                 cv::Mat bgr;
                 cv::cvtColor(frame, bgr, cv::COLOR_BGRA2BGR);
@@ -403,6 +453,10 @@ void VisionControls::processFrame(cv::Mat& frame) {
             processDepth(frame);
             break;
         }
+
+        case VisionControls::CamModeDisparity:
+            
+            break;
 
         default:
             break;
@@ -437,6 +491,10 @@ void VisionControls::processFrame(std::pair<cv::Mat, cv::Mat>& stereoFrame) {
             break;
         }
 
+        case CamModeDisparity:
+            
+            break;
+
         default:
             break;
     }
@@ -453,6 +511,10 @@ void VisionControls::processFrame(std::pair<cv::Mat, cv::Mat>& stereoFrame) {
 int VisionControls::moduleCommand_(std::vector<char>& buffer) {
     // Currently no commands implemented
     CameraCommand* cmd = reinterpret_cast<CameraCommand*>(buffer.data());
+    if (!cmd) {
+        return -1;
+    }
+
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "VisionControls received command: %d\n", cmd->command);
 
@@ -493,6 +555,27 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             logger->log(Logger::LOG_LVL_INFO, "Clearing video recording buffer\n");
             m_StreamInFrame.reset();
             m_VideoRecorder.clear();
+            break;
+
+        case CmdSetVideoName: {
+            char* namePtr = reinterpret_cast<char*>(buffer.data() + sizeof(CameraCommand));
+            if (namePtr[cmd->payloadLen] != '\0' && strlen(namePtr) >= cmd->payloadLen) {
+                logger->log(Logger::LOG_LVL_ERROR, "Invalid video name\n");
+                return -1;
+            }
+
+            m_CamSettings.videoName = std::string(namePtr, cmd->payloadLen);
+            break;
+        }
+
+        case CmdSaveVideo:
+            logger->log(Logger::LOG_LVL_INFO, "Saving video recording to file: %s\n", m_CamSettings.videoName.c_str());
+            if (m_VideoRecorder.saveToFile(m_CamSettings.videoName) < 0) {
+                logger->log(Logger::LOG_LVL_WARN, "Failed to save video recording to file: %s\n", m_CamSettings.videoName.c_str());
+                return -1;
+            }
+
+            return 0;
             break;
 
         default:

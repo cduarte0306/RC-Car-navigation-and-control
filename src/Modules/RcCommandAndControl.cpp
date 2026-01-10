@@ -58,8 +58,8 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
     ClientReq_t* clientData = reinterpret_cast<ClientReq_t*>(buffer.data());
 
     // Validate declared lengths before accessing payload
-    const size_t declaredMsgLen = clientData->msg_length;
-    const size_t baseHeader = sizeof(clientData->sequence_id) + sizeof(clientData->msg_length);
+    const size_t declaredMsgLen = clientData->header.msg_length;
+    const size_t baseHeader = sizeof(clientData->header.sequence_id) + sizeof(clientData->header.msg_length);
     const size_t basePayload = sizeof(clientData->payload);
     const size_t minimumFrame = baseHeader + basePayload;
 
@@ -81,7 +81,8 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
         return;
     }
 
-    CommandController::reply_t reply;
+    CommandController::HostReply_t replyPacket{};
+    CommandController::reply_t reply{};
     size_t length = sizeof(reply);
 
     switch(clientData->payload.command) {
@@ -102,27 +103,30 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
             this->motorAdapter->steer(clientData->payload.data.i16); // Example: set steering angle
             break;
 
-        case CmdCameraSetMode: {
+        case CmdCameraModule: {
             reply.state = true;
             std::vector<char> payloadBuffer;
             if (extraLen > 0) {
                 payloadBuffer.insert(payloadBuffer.end(), buffer.begin() + extraOffset, buffer.begin() + extraOffset + extraLen);
             }
             int ret = this->CameraAdapter->moduleCommand(payloadBuffer);
-            reply.state = (ret >= 0);
+            reply.state = (ret == 0) ? true : false;
         } break;
 
         default:
             // Unknown command, set error state
             logger->log(Logger::LOG_LVL_WARN, "Unknown command :%d\r\n", clientData->payload.command);
-            reply.state = true; // Error state
+            reply.state = false; // Error state
             break;
     }
 
     // Build reply
+    replyPacket.header.sequence_id = clientData->header.sequence_id;
+    replyPacket.header.msg_length  = sizeof(reply);
+    replyPacket.reply              = reply;
     buffer.clear();
-    buffer.resize(sizeof(reply));
-    std::memcpy(buffer.data(), &reply, sizeof(reply));
+    buffer.resize(sizeof(replyPacket));
+    std::memcpy(buffer.data(), &replyPacket, sizeof(replyPacket));
 }
 
 
