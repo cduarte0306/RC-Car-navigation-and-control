@@ -38,7 +38,7 @@ protected:
 
     typedef struct __attribute__((__packed__))
     {
-        uint32_t   sequence_id;
+        uint16_t   sequence_id;
         uint16_t   msg_length;
     } MsgHeader_t;
 

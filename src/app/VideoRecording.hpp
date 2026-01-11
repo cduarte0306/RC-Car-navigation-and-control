@@ -12,6 +12,7 @@
 
 #include "app/VideoFrame.hpp"
 
+namespace Vision {
 /**
  * @brief Buffers encoded frames into size-limited segments on a background thread.
  */
@@ -84,11 +85,23 @@ public:
     void setMaxSegmentSize(std::size_t maxBytes);
 
     /**
+     * @brief List recorded video files in storage path.
+     */
+    std::vector<std::string> listRecordedFiles() const;
+
+    int loadFile(const std::string& filename);
+
+    /**
      * @brief Save recorded video to file.
      */
     int saveToFile(const std::string& filename);
     
 private:
+    typedef struct __attribute__((__packed__)) {
+        uint32_t length;
+        char* payload;
+    } VideoPacket;
+
     const char* VideoStoragePath = "/data/training-videos/";
     FrameRate frameRate_{FrameRate::_30Fps};  // Default to 30 FPS
     std::size_t m_currentFrame = 0;
@@ -96,5 +109,6 @@ private:
     std::vector<VideoFrame> m_Video;
     mutable std::mutex mutex_;
 };
+}  // namespace Vision
 
 #endif

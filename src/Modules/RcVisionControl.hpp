@@ -102,7 +102,7 @@ protected:
     virtual void OnTimer(void) override;
 
     // Frame transmission handler
-    void decodeJPEG(cv::Mat& frame, const VideoFrame& frameEntry);
+    void decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameEntry);
 
     // Receive frame handler
     void recvFrame(std::vector<char>& data);
@@ -158,10 +158,10 @@ protected:
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_RxAdapter{nullptr};
 
     // Video recorder
-    VideoRecording m_VideoRecorder;
+    Vision::VideoRecording m_VideoRecorder;
 
     // Incoming frame assembler
-    VideoFrame m_StreamInFrame;
+    Vision::VideoFrame m_StreamInFrame;
 
     // Frame ID
     uint32_t m_FrameID = 0;

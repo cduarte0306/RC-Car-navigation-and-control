@@ -1,7 +1,9 @@
 #include "app/VideoFrame.hpp"
 
-VideoFrame::VideoFrame(std::size_t id) : frameID_(id) {}
 
+namespace Vision {
+
+VideoFrame::VideoFrame(std::size_t id) : frameID_(id) {}
 
 void VideoFrame::setExpected(std::size_t expectedSegments, std::size_t expectedTotalLength) noexcept {
     expectedSegments_ = expectedSegments;
@@ -69,3 +71,5 @@ void VideoFrame::reset() {
     expectedTotalLength_ = 0;
     m_FrameSegMap.clear();
 }
+
+}  // namespace Vision

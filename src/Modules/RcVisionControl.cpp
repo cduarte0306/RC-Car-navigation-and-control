@@ -147,12 +147,21 @@ void VisionControls::recvFrame(std::vector<char>& data) {
     uint32_t totalLength  = 0;
     uint16_t payloadLen   = 0;
     uint64_t seqId        = 0;
-    int ret = VideoStreamer::decodePacket(pbuf, packetSize, const_cast<uint8_t&>(numSegments), const_cast<uint8_t&>(segmentID), const_cast<uint32_t&>(totalLength), const_cast<uint16_t&>(payloadLen), const_cast<uint64_t&>(seqId), segmentData);
+    Vision::VideoStreamer::VideoPacket packet;
+
+    int ret = Vision::VideoStreamer::decodePacket(pbuf, packetSize, packet);
     if (ret != 0) {
         logger->log(Logger::LOG_LVL_WARN, "Frame %llu decode packet error %d\n", static_cast<unsigned long long>(seqId), ret);
         m_StreamInFrame.reset();
         return;
     }
+
+    numSegments  = packet.getNumSegments();
+    segmentID    = packet.getSegmentID();
+    totalLength  = packet.getTotalLength();
+    payloadLen   = packet.getPayloadLen();
+    seqId        = packet.getSequenceID();
+    segmentData  = packet.getPayload();    
 
     // Basic header sanity
     if (numSegments == 0) {
@@ -214,11 +223,20 @@ void VisionControls::recvFrame(std::vector<char>& data) {
         }
         
         m_StreamInFrame.reset();
+    } else if (m_StreamInFrame.numSegments() > numSegments) {
+        // Should not happen due to earlier duplicate check
+        logger->log(Logger::LOG_LVL_WARN,
+                    "Frame %llu has excess segments (%zu / %u)\n",
+                    static_cast<unsigned long long>(seqId),
+                    m_StreamInFrame.numSegments(),
+                    numSegments);
+        m_StreamInFrame.reset();
+        return;
     }
 }
 
 
-void VisionControls::decodeJPEG(cv::Mat& frame, const VideoFrame& frameEntry) {
+void VisionControls::decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameEntry) {
     const auto& frameMap = frameEntry.getSegmentMap();
     const uint8_t numSegments = static_cast<uint8_t>(frameEntry.numSegments());
 
@@ -597,7 +615,7 @@ void VisionControls::mainProc() {
     Logger* logger = Logger::getLoggerInst();
 
     // Handles jitter smoothing and transmission in its own thread
-    VideoStreamer streamer(
+    Vision::VideoStreamer streamer(
         *m_TxAdapter,
         [this]() {
             std::lock_guard<std::mutex> lock(m_HostIPMutex);
@@ -606,7 +624,7 @@ void VisionControls::mainProc() {
         35,
         1);
     streamer.start();
-    m_VideoRecorder.setFrameRate(VideoRecording::FrameRate::_30Fps);
+    m_VideoRecorder.setFrameRate(Vision::VideoRecording::FrameRate::_30Fps);
 
     Devices::StereoCam cam(0, 1);
     cam.start(1280, 720, 30);
@@ -643,7 +661,7 @@ void VisionControls::mainProc() {
 
             case StreamSim: {
                 // We draw a frame from the recording object
-                VideoFrame simFrame = m_VideoRecorder.getNextFrame();
+                Vision::VideoFrame simFrame = m_VideoRecorder.getNextFrame();
                 if (simFrame.numSegments() == 0) {
                     // No frames available, wait a bit
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));

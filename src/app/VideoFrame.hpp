@@ -9,6 +9,7 @@
 #include <map>
 
 
+namespace Vision {
 /**
  * @brief Represents a single encoded video fragment that can be appended to and queried.
  */
@@ -120,5 +121,6 @@ private:
     std::size_t expectedTotalLength_{0};
     std::map<int, std::vector<uint8_t>> m_FrameSegMap;
 };
+}  // namespace Vision
 
 #endif

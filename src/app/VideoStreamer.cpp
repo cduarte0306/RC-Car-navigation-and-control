@@ -1,5 +1,6 @@
 #include "app/VideoStreamer.hpp"
 #include <cstring>
+#include <algorithm>
 
 #include <thread>
 #include "Devices/RegisterMap.hpp"
@@ -11,6 +12,7 @@
 #include "utils/logger.hpp"
 
 
+namespace Vision {
 VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
                             std::function<std::string()> destIpProvider,
                             int jpegQuality,
@@ -50,25 +52,39 @@ void VideoStreamer::stop() {
 }
 
 
-int VideoStreamer::decodePacket(const char* pbuf, size_t len, uint8_t& numSegments, uint8_t& segmentID, uint32_t& totalLength, uint16_t& payloadLen, uint64_t& seqId, std::vector<uint8_t>& payload) {
+int VideoStreamer::decodePacket(const char* pbuf, size_t len, VideoPacket& packet) {
     if (len < sizeof(FragmentHeader) + sizeof(Metadata)) {
         return -1;
     }
-    
-    // Placeholder implementation
-    struct FragmentPayload*  frameSegment = reinterpret_cast<struct FragmentPayload*>(const_cast<char*>(pbuf));
-    numSegments  = frameSegment->metadata.numSegments;
-    segmentID    = frameSegment->metadata.segmentID;
-    totalLength  = frameSegment->metadata.totalLength;
-    payloadLen   = frameSegment->metadata.length;
-    seqId        = frameSegment->metadata.sequenceID;
 
-    if (payloadLen > 0) {
-        payload.resize(payloadLen);
-        std::memcpy(payload.data(), frameSegment->payload, payloadLen);
-    } else {
-        payload.clear();
+    FragmentHeader hdr{};
+    Metadata meta{};
+    std::memcpy(&hdr, pbuf, sizeof(hdr));
+    std::memcpy(&meta, pbuf + sizeof(hdr), sizeof(meta));
+
+    const std::size_t payloadLen = meta.length;
+    const std::size_t headerLen = sizeof(hdr) + sizeof(meta);
+    if (len < headerLen + payloadLen) {
+        return -1;
     }
+
+    packet.setNumSegments(meta.numSegments);
+    packet.setSegmentID(meta.segmentID);
+    packet.setTotalLength(meta.totalLength);
+    packet.setLength(static_cast<uint32_t>(payloadLen));
+    packet.setPayloadLen(static_cast<uint64_t>(payloadLen));
+    packet.setSequenceID(meta.sequenceID);
+
+    const std::size_t nameLen = strnlen(meta.videoName, sizeof(meta.videoName));
+    try {
+        packet.setVideoName(std::string(meta.videoName, nameLen));
+    } catch (const std::invalid_argument&) {
+        return -1;
+    }
+
+    const uint8_t* payloadPtr = reinterpret_cast<const uint8_t*>(pbuf + headerLen);
+    packet.setPayload(std::vector<uint8_t>(payloadPtr, payloadPtr + payloadLen));
+
     return 0;
 }
 
@@ -237,8 +253,8 @@ int VideoStreamer::transmitFrame(stereoPayload& stereoFrame, int frameType) {
     // Number of segments
     uint8_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
 
-    FragmentPayload packet;
-    Metadata meta;
+    FragmentPayload packet{};
+    Metadata meta{};
 
     std::string destIp = m_DestIp;
     if (destIp.empty()) {
@@ -247,6 +263,7 @@ int VideoStreamer::transmitFrame(stereoPayload& stereoFrame, int frameType) {
 
     while (bytesRemaining > 0) {
         // Fill metadata
+        std::memset(meta.videoName, 0, sizeof(meta.videoName));
         meta.sequenceID  = m_FrameID;
         meta.totalLength = static_cast<uint32_t>(totalSize);
         meta.segmentID   = segmentIndex;
@@ -302,8 +319,8 @@ int VideoStreamer::transmitFrame(cv::Mat& frame, int frameType, int frameSide) {
     // Number of segments
     uint8_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
 
-    FragmentPayload packet;
-    Metadata meta;
+    FragmentPayload packet{};
+    Metadata meta{};
 
     std::string destIp = m_DestIp;
     if (destIp.empty()) {
@@ -312,6 +329,7 @@ int VideoStreamer::transmitFrame(cv::Mat& frame, int frameType, int frameSide) {
 
     while (bytesRemaining > 0) {
         // Fill metadata
+        std::memset(meta.videoName, 0, sizeof(meta.videoName));
         meta.sequenceID  = m_FrameID;
         meta.totalLength = static_cast<uint32_t>(totalSize);
         meta.segmentID   = segmentIndex;
@@ -361,3 +379,4 @@ int VideoStreamer::prepFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
     m_FrameID++;
     return 0;
 }
+} // namespace Vision
