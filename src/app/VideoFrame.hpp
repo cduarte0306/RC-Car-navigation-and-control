@@ -26,6 +26,19 @@ public:
 
     VideoFrame& operator=(const VideoFrame& other) noexcept = default;
 
+    std::vector<uint8_t>& operator [](int id) noexcept {
+        return m_FrameSegMap[id];
+    }
+
+    const std::vector<uint8_t>& operator [](int id) const noexcept {
+        static const std::vector<uint8_t> kEmpty;
+        auto it = m_FrameSegMap.find(id);
+        if (it == m_FrameSegMap.end()) {
+            return kEmpty;
+        }
+        return it->second;
+    }
+
     /**
      * @brief Construct a segment with a specific identifier.
      * @param id Segment identifier used when reassembling.
@@ -61,6 +74,8 @@ public:
      * @brief Append a byte vector to segment 0.
      */
     void append(const std::vector<uint8_t>& buffer);
+
+    void setFrameBytes(const std::vector<uint8_t>& bytes);
 
     /**
      * @brief Get the segment map.

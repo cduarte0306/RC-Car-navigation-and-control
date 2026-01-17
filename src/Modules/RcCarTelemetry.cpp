@@ -42,6 +42,9 @@ int RcCarTelemetry::registerTelemetrySource_(const std::string& sourceName) {
     if (sourceName.empty()) {
         return -1;
     }
+
+    Logger* logger = Logger::getLoggerInst();
+    logger->log(Logger::LOG_LVL_INFO, "Registered telemetry source: %s\r\n", sourceName.c_str());
     m_registeredSources.insert(sourceName);
     return 0;
 }

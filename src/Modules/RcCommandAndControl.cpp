@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <cstring>
+#include <limits>
 
 #include "utils/logger.hpp"
 #include "Devices/RegisterMap.hpp"
@@ -81,6 +82,7 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
         return;
     }
 
+    std::vector<char> replyPayloadPacket;
     CommandController::HostReply_t replyPacket{};
     CommandController::reply_t reply{};
     size_t length = sizeof(reply);
@@ -105,12 +107,13 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
 
         case CmdCameraModule: {
             reply.state = true;
-            std::vector<char> payloadBuffer;
             if (extraLen > 0) {
-                payloadBuffer.insert(payloadBuffer.end(), buffer.begin() + extraOffset, buffer.begin() + extraOffset + extraLen);
+                replyPayloadPacket.insert(replyPayloadPacket.end(), buffer.begin() + extraOffset, buffer.begin() + extraOffset + extraLen);
+                int ret = this->CameraAdapter->moduleCommand(replyPayloadPacket);
+                reply.state = (ret == 0) ? true : false;
+            } else {
+                reply.state = false;
             }
-            int ret = this->CameraAdapter->moduleCommand(payloadBuffer);
-            reply.state = (ret == 0) ? true : false;
         } break;
 
         default:
@@ -121,12 +124,23 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
     }
 
     // Build reply
+    if (replyPayloadPacket.size() > (std::numeric_limits<uint16_t>::max() - sizeof(reply))) {
+        logger->log(Logger::LOG_LVL_WARN,
+                    "Reply payload too large (%zu bytes), dropping\n",
+                    replyPayloadPacket.size());
+        replyPayloadPacket.clear();
+    }
     replyPacket.header.sequence_id = clientData->header.sequence_id;
-    replyPacket.header.msg_length  = sizeof(reply);
+    reply.payloadLen               = static_cast<uint32_t>(replyPayloadPacket.size());
+    replyPacket.header.msg_length  = static_cast<uint16_t>(sizeof(reply) + replyPayloadPacket.size());
     replyPacket.reply              = reply;
     buffer.clear();
-    buffer.resize(sizeof(replyPacket));
+    buffer.resize(sizeof(replyPacket) + replyPayloadPacket.size());
+
     std::memcpy(buffer.data(), &replyPacket, sizeof(replyPacket));
+    if (!replyPayloadPacket.empty()) {
+        std::memcpy(buffer.data() + sizeof(replyPacket), replyPayloadPacket.data(), replyPayloadPacket.size());
+    }
 }
 
 

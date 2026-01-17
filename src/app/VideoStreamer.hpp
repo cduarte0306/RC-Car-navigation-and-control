@@ -316,7 +316,7 @@ private:
 
     uint32_t m_FrameID = 0;
 
-        /**
+    /**
      * @brief Buffer for mono frames (Usually simulation frames)
      * 
      */

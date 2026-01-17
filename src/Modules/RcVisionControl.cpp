@@ -20,7 +20,9 @@
 #endif
 
 #include "Devices/StereoCam.hpp"
+#include <nlohmann/json.hpp>
 
+#include <sstream>
 #include <opencv2/cudaimgproc.hpp>
 #include <gst/gst.h>
 #include <sstream>
@@ -105,6 +107,10 @@ int VisionControls::init(void) {
         *m_RxAdapter,
         std::bind(&VisionControls::recvFrame, this, std::placeholders::_1),
         false);
+
+    // Load video into recording
+    // m_VideoRecorder.loadFile();
+
     return 0;
 }
 
@@ -154,6 +160,10 @@ void VisionControls::recvFrame(std::vector<char>& data) {
         logger->log(Logger::LOG_LVL_WARN, "Frame %llu decode packet error %d\n", static_cast<unsigned long long>(seqId), ret);
         m_StreamInFrame.reset();
         return;
+    }
+
+    if (!packet.getVideoName().empty()) {
+        m_LastIncomingVideoName = packet.getVideoName();
     }
 
     numSegments  = packet.getNumSegments();
@@ -219,7 +229,16 @@ void VisionControls::recvFrame(std::vector<char>& data) {
         }
 
         if (!assembled.empty()) {
-            m_VideoRecorder.pushFrame(m_StreamInFrame);
+            cv::Mat cvFrame;
+            decodeJPEG(cvFrame, m_StreamInFrame);
+            if (cvFrame.empty()) {
+                logger->log(Logger::LOG_LVL_WARN,
+                            "Frame %llu failed to decode JPEG\n",
+                            static_cast<unsigned long long>(m_StreamInFrame.frameID()));
+                m_StreamInFrame.reset();
+                return;
+            }
+            m_VideoRecorder.pushFrame(cvFrame);
         }
         
         m_StreamInFrame.reset();
@@ -406,9 +425,29 @@ void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::
 
 	        case VisionControls::CamModeDisparity:
 	            {
+	                // Ensure grayscale inputs are correct (StereoCam frames can be BGRA).
 	                cv::Mat grayL, grayR;
-	                cv::cvtColor(frameL, grayL, cv::COLOR_BGR2GRAY);
-	                cv::cvtColor(frameR, grayR, cv::COLOR_BGR2GRAY);
+	                cv::Mat bgrL, bgrR;
+	                if (frameL.channels() == 4) {
+	                    cv::cvtColor(frameL, bgrL, cv::COLOR_BGRA2BGR);
+	                } else {
+	                    bgrL = frameL;
+	                }
+	                if (frameR.channels() == 4) {
+	                    cv::cvtColor(frameR, bgrR, cv::COLOR_BGRA2BGR);
+	                } else {
+	                    bgrR = frameR;
+	                }
+	                if (bgrL.channels() == 1) {
+	                    grayL = bgrL;
+	                } else {
+	                    cv::cvtColor(bgrL, grayL, cv::COLOR_BGR2GRAY);
+	                }
+	                if (bgrR.channels() == 1) {
+	                    grayR = bgrR;
+	                } else {
+	                    cv::cvtColor(bgrR, grayR, cv::COLOR_BGR2GRAY);
+	                }
 #if RCVC_HAVE_CUDASTEREO
 	                static cv::Ptr<cv::cuda::StereoBM> stereoBM = cv::cuda::createStereoBM(96, 15);
 	                static cv::cuda::GpuMat d_left, d_right, d_disp;
@@ -434,10 +473,28 @@ void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::
 #else
 	                stereoBM->compute(grayL, grayR, disparity);
 #endif
-	                // Normalize for visualization
+	                // Normalize for visualization.
+	                // StereoBM outputs fixed-point disparity (typically scaled by 16). If most values
+	                // are <= 0 (common when not rectified), the colormap will look mostly blue.
+	                cv::Mat disp32f;
+	                disparity.convertTo(disp32f, CV_32F, 1.0 / 16.0);
+	                cv::max(disp32f, 0.0f, disp32f);
+
 	                cv::Mat disp8U;
-	                disparity.convertTo(disp8U, CV_8U, 255.0 / (96 * 16.0));
+	                cv::normalize(disp32f, disp8U, 0, 255, cv::NORM_MINMAX, CV_8U);
 	                cv::applyColorMap(disp8U, stereoFrame, cv::COLORMAP_JET);
+
+	                // Lightweight periodic debug to catch "all blue" (near-zero disparity) quickly.
+	                static auto lastLog = std::chrono::steady_clock::now();
+	                const auto now = std::chrono::steady_clock::now();
+	                if (now - lastLog > std::chrono::seconds(2)) {
+	                    double minVal = 0.0, maxVal = 0.0;
+	                    cv::minMaxLoc(disp32f, &minVal, &maxVal);
+	                    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
+	                                                "Stereo disparity range: min=%.2f max=%.2f (post-clamp)\n",
+	                                                minVal, maxVal);
+	                    lastLog = now;
+	                }
 	            }
 	            break;
 
@@ -533,6 +590,7 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
         return -1;
     }
 
+    std::vector<char> responseBuffer;
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "VisionControls received command: %d\n", cmd->command);
 
@@ -573,31 +631,86 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             logger->log(Logger::LOG_LVL_INFO, "Clearing video recording buffer\n");
             m_StreamInFrame.reset();
             m_VideoRecorder.clear();
+            m_LastIncomingVideoName.clear();
             break;
 
-        case CmdSetVideoName: {
-            char* namePtr = reinterpret_cast<char*>(buffer.data() + sizeof(CameraCommand));
-            if (namePtr[cmd->payloadLen] != '\0' && strlen(namePtr) >= cmd->payloadLen) {
-                logger->log(Logger::LOG_LVL_ERROR, "Invalid video name\n");
-                return -1;
+        case CmdSaveVideo: {
+            std::string nameToSave = m_CamSettings.videoName;
+            // If no explicit name was ever set, prefer the incoming metadata name (downloaded file).
+            if (nameToSave == "recording.MOV" && !m_LastIncomingVideoName.empty()) {
+                nameToSave = m_LastIncomingVideoName;
             }
 
-            m_CamSettings.videoName = std::string(namePtr, cmd->payloadLen);
-            break;
-        }
-
-        case CmdSaveVideo:
-            logger->log(Logger::LOG_LVL_INFO, "Saving video recording to file: %s\n", m_CamSettings.videoName.c_str());
-            if (m_VideoRecorder.saveToFile(m_CamSettings.videoName) < 0) {
-                logger->log(Logger::LOG_LVL_WARN, "Failed to save video recording to file: %s\n", m_CamSettings.videoName.c_str());
+            logger->log(Logger::LOG_LVL_INFO, "Saving video recording to file: %s\n", nameToSave.c_str());
+            if (m_VideoRecorder.saveToFile(nameToSave) < 0) {
+                logger->log(Logger::LOG_LVL_WARN, "Failed to save video recording to file: %s\n", nameToSave.c_str());
                 return -1;
             }
 
             return 0;
             break;
+        }
+
+        case CmdReadStoredVideos: {
+            logger->log(Logger::LOG_LVL_INFO, "Loading stored videos from disk\n");
+            std::vector<std::string> videoFiles = m_VideoRecorder.listRecordedFiles();
+            std::stringstream ss;
+            for (const auto& file : videoFiles) {
+                std::cout << "Found video file: " << file << std::endl;
+                ss << file << ";";
+            }
+            nlohmann::json jsonResponse;
+            std::cout << "Videos: " << ss.str() << std::endl;
+            jsonResponse["loaded-video"] = m_VideoRecorder.getLoadedVideoName();
+            jsonResponse["video-list"] = ss.str();
+            responseBuffer.resize(jsonResponse.dump().size());
+            std::strncpy(responseBuffer.data(), jsonResponse.dump().c_str(), jsonResponse.dump().size());            
+            break;
+        }
+
+        case CmdLoadSelectedVideo: {
+            char* namePtr = reinterpret_cast<char*>(buffer.data() + sizeof(VisionControls::CameraCommand));
+            if (namePtr[cmd->payloadLen] != '\0' && strlen(namePtr) >= cmd->payloadLen) {
+                logger->log(Logger::LOG_LVL_ERROR, "Invalid video name\n");
+                return -1;
+            }
+
+            int ret = m_VideoRecorder.loadFile(std::string(namePtr));
+            if (ret < 0) {
+                logger->log(Logger::LOG_LVL_ERROR, "Failed to load video: %s\n", namePtr);
+                return -1;
+            }
+            
+            logger->log(Logger::LOG_LVL_INFO, "Loading selected video from disk: %s\n", std::string(namePtr, cmd->payloadLen).c_str());
+            return 0;
+        }
+
+        case CmdDeleteVideo: {
+            char* namePtr = reinterpret_cast<char*>(buffer.data() + sizeof(VisionControls::CameraCommand));
+            if (namePtr[cmd->payloadLen] != '\0' && strlen(namePtr) >= cmd->payloadLen) {
+                logger->log(Logger::LOG_LVL_ERROR, "Invalid video name\n");
+                return -1;
+            }
+
+            int ret = m_VideoRecorder.deleteVideo(std::string(namePtr));
+            if (ret < 0) {
+                logger->log(Logger::LOG_LVL_ERROR, "Failed to delete video: %s\n", namePtr);
+                return -1;
+            }
+
+            logger->log(Logger::LOG_LVL_INFO, "Deleted video from disk: %s\n", std::string(namePtr, cmd->payloadLen).c_str());
+            return 0;
+            break;
+        }
 
         default:
             break;
+    }
+
+    if (!responseBuffer.empty()) {
+        buffer = responseBuffer;
+    } else {
+        buffer.clear();
     }
     return 0;
 }
@@ -627,7 +740,7 @@ void VisionControls::mainProc() {
     m_VideoRecorder.setFrameRate(Vision::VideoRecording::FrameRate::_30Fps);
 
     Devices::StereoCam cam(0, 1);
-    cam.start(1280, 720, 30);
+    cam.start(1920, 1080, 30);
     cv::Mat frameL;
     cv::Mat frameR;
     cv::Mat frameStereo;
@@ -661,17 +774,13 @@ void VisionControls::mainProc() {
 
             case StreamSim: {
                 // We draw a frame from the recording object
-                Vision::VideoFrame simFrame = m_VideoRecorder.getNextFrame();
-                if (simFrame.numSegments() == 0) {
+                cv::Mat simFrame = m_VideoRecorder.getNextFrame();
+                if (simFrame.empty()) {
                     // No frames available, wait a bit
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     continue;
                 }
-                decodeJPEG(frameSim, simFrame);
-                if (frameSim.empty()) {
-                    logger->log(Logger::LOG_LVL_WARN, "Could not decode JPEG from simulation frame\n");
-                    continue;
-                }
+                frameSim = simFrame;
                 processFrame(frameSim);
                 streamer.pushFrame(frameSim);
                 break;

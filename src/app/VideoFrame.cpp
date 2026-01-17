@@ -33,6 +33,11 @@ void VideoFrame::append(const std::vector<uint8_t>& buffer) {
 }
 
 
+void VideoFrame::setFrameBytes(const std::vector<uint8_t>& bytes) {
+    
+}
+
+
 std::size_t VideoFrame::id() const noexcept {
     return frameID_;
 }

@@ -65,14 +65,16 @@ protected:
 
     // Camera module commands
     enum {
-        CmdSetFrameRate,  // set camera frame rate
-        CmdStartStream,   // start video stream
-        CmdStopStream,    // stop video stream
-        CmdStreamMode,    // start simulation video stream
-        CmdSelCameraMode, // select camera mode
-        CmdClrVideoRec,   // clear video recording buffer
-        CmdSetVideoName,  // set video recording filename
-        CmdSaveVideo      // save video recording to disks
+        CmdSetFrameRate,      // set camera frame rate
+        CmdStartStream,       // start video stream
+        CmdStopStream,        // stop video stream
+        CmdStreamMode,        // start simulation video stream
+        CmdSelCameraMode,     // select camera mode
+        CmdClrVideoRec,       // clear video recording buffer
+        CmdSaveVideo,         // save video recording to disks
+        CmdReadStoredVideos,  // Read stored videos from disk
+        CmdLoadSelectedVideo, // load selected video from disk
+        CmdDeleteVideo        // Delete video
     };
 
     // Camera process enums
@@ -165,6 +167,9 @@ protected:
 
     // Frame ID
     uint32_t m_FrameID = 0;
+
+    // Name of the currently-downloaded (sim) video, derived from incoming packet metadata.
+    std::string m_LastIncomingVideoName;
 
     // DNN model
     cv::dnn::Net m_DnnNetDepth;

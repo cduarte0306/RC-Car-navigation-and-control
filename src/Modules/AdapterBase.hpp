@@ -54,8 +54,7 @@ namespace Adapter {
                 return -1;
             }
 
-            moduleWriteCmdVector(buffer);
-            return 0;
+            return moduleWriteCmdVector(buffer);
         }
 
         /**
