@@ -1,4 +1,4 @@
-#include "app/VideoStreamer.hpp"
+#include "app/video/VideoStreamer.hpp"
 #include <cstring>
 #include <algorithm>
 

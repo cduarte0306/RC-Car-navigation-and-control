@@ -1,7 +1,7 @@
 #include "RcVisionControl.hpp"
 #include "RcMessageLib.hpp"
-#include "app/VideoStreamer.hpp"
-#include "app/VideoFrame.hpp"
+#include "app/video/VideoStreamer.hpp"
+#include "app/video/VideoFrame.hpp"
 #include "utils/logger.hpp"
 #include <opencv2/opencv.hpp>
 #include <opencv2/dnn.hpp>

@@ -19,12 +19,14 @@ set(SOURCE
     Modules/RcVisionControl.hpp
     Modules/RcCarTelemetry.cpp
     Modules/RcCarTelemetry.hpp
-    app/VideoFrame.cpp
-    app/VideoFrame.hpp
-    app/VideoStreamer.cpp
-    app/VideoStreamer.hpp
-    app/VideoRecording.cpp
-    app/VideoRecording.hpp
+    app/video/VideoFrame.cpp
+    app/video/VideoFrame.hpp
+    app/video/VideoStreamer.cpp
+    app/video/VideoStreamer.hpp
+    app/video/VideoRecording.cpp
+    app/video/VideoRecording.hpp
+    app/video/VideoStereoCalibration.cpp
+    app/video/VideoStereoCalibration.hpp
     Devices/peripheralDriver.hpp
     Devices/peripheralDriver.cpp
     Devices/Pwm.cpp

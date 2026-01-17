@@ -12,7 +12,8 @@
 #include "Devices/network_interface/UdpServer.hpp"
 #include "Devices/GyroScope.hpp"
 
-#include "app/VideoRecording.hpp"
+#include "app/video/VideoRecording.hpp"
+#include "app/video/VideoStereoCalibration.hpp"
 
 
 namespace Modules {
@@ -161,6 +162,9 @@ protected:
 
     // Video recorder
     Vision::VideoRecording m_VideoRecorder;
+    
+    // Video calibration
+    Vision::VideoStereoCalib m_VideoCalib;
 
     // Incoming frame assembler
     Vision::VideoFrame m_StreamInFrame;
