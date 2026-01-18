@@ -303,108 +303,6 @@ void VisionControls::decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameE
 
 
 /**
- * @brief Process depth frame using DNN
- * 
- * @param frame Input/output frame
- */
-void VisionControls::processDepth(cv::Mat& frame) {
-    auto getOutputsNames = [](const cv::dnn::Net& net) {
-        std::vector<std::string> names;
-        std::vector<int32_t> out_layers = net.getUnconnectedOutLayers();
-        std::vector<std::string> layers_names = net.getLayerNames();
-        names.resize(out_layers.size());
-        for (size_t i = 0; i < out_layers.size(); ++i) {
-            names[i] = layers_names[out_layers[i] - 1];
-        }
-        return names;
-    };
-
-    static bool logMissingModel = false;
-    if (m_DnnNetDepth.empty()) {
-        if (!logMissingModel) {
-            Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "CamModeDepth selected but DNN model is not loaded\n");
-            logMissingModel = true;
-        }
-        return;
-    }
-
-    if (frame.empty()) {
-        return;
-    }
-
-    // Pick input size based on model name hint: small => 256, otherwise 384
-    constexpr int kDepthInputLarge = 384;
-    constexpr int kDepthInputSmall = 256;
-    const bool isSmall = std::string(MODEL_PATH).find("small") != std::string::npos;
-    const int kDepthInput = isSmall ? kDepthInputSmall : kDepthInputLarge;
-
-    cv::Mat resized;
-    cv::resize(frame, resized, cv::Size(kDepthInput, kDepthInput));
-
-    // MiDaS-style preprocessing: scale 1/255, RGB order, mean subtraction
-    const cv::Scalar mean(123.675, 116.28, 103.53);
-    cv::Mat blob = cv::dnn::blobFromImage(resized, 1.0f / 255.0f, cv::Size(kDepthInput, kDepthInput), mean, true, false);
-
-    m_DnnNetDepth.setInput(blob);
-
-    cv::Mat output;
-    try {
-        output = m_DnnNetDepth.forward(getOutputsNames(m_DnnNetDepth)[0]);
-    } catch (const cv::Exception& e) {
-        Logger::getLoggerInst()->log(
-            Logger::LOG_LVL_ERROR,
-            "DNN forward failed: %s (blob shape: NCHW=%d,%d,%d,%d)\n",
-            e.what(),
-            blob.size[0], blob.size[1], blob.size[2], blob.size[3]);
-        return;
-    }
-
-    if (output.empty()) {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "DNN forward returned empty output\n");
-        return;
-    }
-
-    cv::Mat depth;
-    if (output.dims == 4 && output.size[1] == 1) {
-        const int outH = output.size[2];
-        const int outW = output.size[3];
-        depth = cv::Mat(outH, outW, CV_32F, output.ptr<float>());
-    } else if (output.dims == 3) {
-        const int outH = output.size[1];
-        const int outW = output.size[2];
-        const std::vector<int32_t> sz = { outH, outW };
-        depth = cv::Mat(static_cast<int32_t>(sz.size()), sz.data(), CV_32F, output.ptr<float>());
-    } else {
-        static bool loggedUnexpected = false;
-        if (!loggedUnexpected) {
-            Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Unexpected DNN output dims=%d\n", output.dims);
-            loggedUnexpected = true;
-        }
-        return;
-    }
-
-    cv::Mat depthResized;
-    cv::resize(depth, depthResized, frame.size());
-
-    double minVal = 0.0, maxVal = 0.0;
-    cv::minMaxLoc(depthResized, &minVal, &maxVal);
-    const double range = maxVal - minVal;
-
-    cv::Mat depthNorm;
-    if (std::abs(range) < 1e-6) {
-        depthNorm = cv::Mat::zeros(depthResized.size(), CV_8U);
-    } else {
-        depthResized.convertTo(depthNorm, CV_8U, 255.0 / range, -minVal * 255.0 / range);
-    }
-
-    cv::Mat depthColor;
-    cv::applyColorMap(depthNorm, depthColor, cv::COLORMAP_MAGMA);
-
-    cv::addWeighted(depthColor, 0.6, frame, 0.4, 0.0, frame);
-}
-
-
-/**
  * @brief Process stereo and compiles a stereo frame pair
  * 
  * @param stereoFrame Input/output stereo frame pair
@@ -423,80 +321,80 @@ void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::
             cv::addWeighted(frameL, 0.5, frameR, 0.5, 0.0, stereoFrame);
             break;
 
-	        case VisionControls::CamModeDisparity:
-	            {
-	                // Ensure grayscale inputs are correct (StereoCam frames can be BGRA).
-	                cv::Mat grayL, grayR;
-	                cv::Mat bgrL, bgrR;
-	                if (frameL.channels() == 4) {
-	                    cv::cvtColor(frameL, bgrL, cv::COLOR_BGRA2BGR);
-	                } else {
-	                    bgrL = frameL;
-	                }
-	                if (frameR.channels() == 4) {
-	                    cv::cvtColor(frameR, bgrR, cv::COLOR_BGRA2BGR);
-	                } else {
-	                    bgrR = frameR;
-	                }
-	                if (bgrL.channels() == 1) {
-	                    grayL = bgrL;
-	                } else {
-	                    cv::cvtColor(bgrL, grayL, cv::COLOR_BGR2GRAY);
-	                }
-	                if (bgrR.channels() == 1) {
-	                    grayR = bgrR;
-	                } else {
-	                    cv::cvtColor(bgrR, grayR, cv::COLOR_BGR2GRAY);
-	                }
+        case VisionControls::CamModeDisparity:
+            {
+                // Ensure grayscale inputs are correct (StereoCam frames can be BGRA).
+                cv::Mat grayL, grayR;
+                cv::Mat bgrL, bgrR;
+                if (frameL.channels() == 4) {
+                    cv::cvtColor(frameL, bgrL, cv::COLOR_BGRA2BGR);
+                } else {
+                    bgrL = frameL;
+                }
+                if (frameR.channels() == 4) {
+                    cv::cvtColor(frameR, bgrR, cv::COLOR_BGRA2BGR);
+                } else {
+                    bgrR = frameR;
+                }
+                if (bgrL.channels() == 1) {
+                    grayL = bgrL;
+                } else {
+                    cv::cvtColor(bgrL, grayL, cv::COLOR_BGR2GRAY);
+                }
+                if (bgrR.channels() == 1) {
+                    grayR = bgrR;
+                } else {
+                    cv::cvtColor(bgrR, grayR, cv::COLOR_BGR2GRAY);
+                }
 #if RCVC_HAVE_CUDASTEREO
-	                static cv::Ptr<cv::cuda::StereoBM> stereoBM = cv::cuda::createStereoBM(96, 15);
-	                static cv::cuda::GpuMat d_left, d_right, d_disp;
-	                static cv::cuda::Stream stream;
+                static cv::Ptr<cv::cuda::StereoBM> stereoBM = cv::cuda::createStereoBM(96, 15);
+                static cv::cuda::GpuMat d_left, d_right, d_disp;
+                static cv::cuda::Stream stream;
 #else
-	                static cv::Ptr<cv::StereoBM> stereoBM = cv::StereoBM::create(96, 15);
+                static cv::Ptr<cv::StereoBM> stereoBM = cv::StereoBM::create(96, 15);
 #endif
-	                cv::Mat disparity;
+                cv::Mat disparity;
 #if RCVC_HAVE_CUDASTEREO
-	                // cv::cuda::* algorithms require cuda::GpuMat/HostMem. Passing cv::Mat triggers
-	                // InputArray::getGpuMat() and throws "getGpuMat is available only for cuda::GpuMat".
-	                if (cv::cuda::getCudaEnabledDeviceCount() > 0) {
-	                    d_left.upload(grayL, stream);
-	                    d_right.upload(grayR, stream);
-	                    stereoBM->compute(d_left, d_right, d_disp, stream);
-	                    d_disp.download(disparity, stream);
-	                    stream.waitForCompletion();
-	                } else {
-	                    // Fallback to CPU if CUDA isn't available at runtime.
-	                    cv::Ptr<cv::StereoBM> cpuBM = cv::StereoBM::create(96, 15);
-	                    cpuBM->compute(grayL, grayR, disparity);
-	                }
+                // cv::cuda::* algorithms require cuda::GpuMat/HostMem. Passing cv::Mat triggers
+                // InputArray::getGpuMat() and throws "getGpuMat is available only for cuda::GpuMat".
+                if (cv::cuda::getCudaEnabledDeviceCount() > 0) {
+                    d_left.upload(grayL, stream);
+                    d_right.upload(grayR, stream);
+                    stereoBM->compute(d_left, d_right, d_disp, stream);
+                    d_disp.download(disparity, stream);
+                    stream.waitForCompletion();
+                } else {
+                    // Fallback to CPU if CUDA isn't available at runtime.
+                    cv::Ptr<cv::StereoBM> cpuBM = cv::StereoBM::create(96, 15);
+                    cpuBM->compute(grayL, grayR, disparity);
+                }
 #else
-	                stereoBM->compute(grayL, grayR, disparity);
+                stereoBM->compute(grayL, grayR, disparity);
 #endif
-	                // Normalize for visualization.
-	                // StereoBM outputs fixed-point disparity (typically scaled by 16). If most values
-	                // are <= 0 (common when not rectified), the colormap will look mostly blue.
-	                cv::Mat disp32f;
-	                disparity.convertTo(disp32f, CV_32F, 1.0 / 16.0);
-	                cv::max(disp32f, 0.0f, disp32f);
+                // Normalize for visualization.
+                // StereoBM outputs fixed-point disparity (typically scaled by 16). If most values
+                // are <= 0 (common when not rectified), the colormap will look mostly blue.
+                cv::Mat disp32f;
+                disparity.convertTo(disp32f, CV_32F, 1.0 / 16.0);
+                cv::max(disp32f, 0.0f, disp32f);
 
-	                cv::Mat disp8U;
-	                cv::normalize(disp32f, disp8U, 0, 255, cv::NORM_MINMAX, CV_8U);
-	                cv::applyColorMap(disp8U, stereoFrame, cv::COLORMAP_JET);
+                cv::Mat disp8U;
+                cv::normalize(disp32f, disp8U, 0, 255, cv::NORM_MINMAX, CV_8U);
+                cv::applyColorMap(disp8U, stereoFrame, cv::COLORMAP_JET);
 
-	                // Lightweight periodic debug to catch "all blue" (near-zero disparity) quickly.
-	                static auto lastLog = std::chrono::steady_clock::now();
-	                const auto now = std::chrono::steady_clock::now();
-	                if (now - lastLog > std::chrono::seconds(2)) {
-	                    double minVal = 0.0, maxVal = 0.0;
-	                    cv::minMaxLoc(disp32f, &minVal, &maxVal);
-	                    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
-	                                                "Stereo disparity range: min=%.2f max=%.2f (post-clamp)\n",
-	                                                minVal, maxVal);
-	                    lastLog = now;
-	                }
-	            }
-	            break;
+                // Lightweight periodic debug to catch "all blue" (near-zero disparity) quickly.
+                static auto lastLog = std::chrono::steady_clock::now();
+                const auto now = std::chrono::steady_clock::now();
+                if (now - lastLog > std::chrono::seconds(2)) {
+                    double minVal = 0.0, maxVal = 0.0;
+                    cv::minMaxLoc(disp32f, &minVal, &maxVal);
+                    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
+                                                "Stereo disparity range: min=%.2f max=%.2f (post-clamp)\n",
+                                                minVal, maxVal);
+                    lastLog = now;
+                }
+            }
+            break;
 
         default:
             break;
@@ -518,16 +416,6 @@ void VisionControls::processFrame(cv::Mat& frame) {
         case VisionControls::CamModeNormal:
             /* code */
             break;
-        
-        case VisionControls::CamModeDepth: {
-            if (frame.channels() == 4) {
-                cv::Mat bgr;
-                cv::cvtColor(frame, bgr, cv::COLOR_BGRA2BGR);
-                frame = bgr;
-            }
-            processDepth(frame);
-            break;
-        }
 
         case VisionControls::CamModeDisparity:
             
@@ -543,31 +431,18 @@ void VisionControls::processFrame(cv::Mat& frame) {
  * 
  * @param frame Input/output frame pair
  */
-void VisionControls::processFrame(std::pair<cv::Mat, cv::Mat>& stereoFrame) {
+void VisionControls::processFramePair(std::pair<cv::Mat, cv::Mat>& stereoFrame) {
     using namespace std;
     using namespace cv;
     using namespace dnn;
 
-    cv::Mat& frameL = stereoFrame.first;
+    cv::Mat& frameL  = stereoFrame.first;
     cv::Mat& frameR = stereoFrame.second;
 
     switch (m_CamSettings.mode) {
         case CamModeNormal:
             /* code */
-            break;
-        
-        case CamModeDepth: {
-            if (frameL.channels() == 4) {
-                cv::Mat bgr;
-                cv::cvtColor(frameL, bgr, cv::COLOR_BGRA2BGR);
-                frameL = bgr;
-            }
-            processDepth(frameL);
-            break;
-        }
-
-        case CamModeDisparity:
-            
+            // m_VideoCalib.DoCalibration(frameL, frameR);
             break;
 
         default:
@@ -622,10 +497,12 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             }
             break;
         }
-        case CmdSelCameraMode:
+        case CmdSelCameraMode: {
+            const char* camModes[] = {"Normal", "Disparity", "Calibration"};
             logger->log(Logger::LOG_LVL_INFO, "Setting camera mode to %d\n", cmd->data.u8);
             m_CamSettings.mode = cmd->data.u8;
             break;
+        }
 
         case CmdClrVideoRec:
             logger->log(Logger::LOG_LVL_INFO, "Clearing video recording buffer\n");
@@ -703,8 +580,25 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             break;
         }
 
-        default:
+        case CmdCalibrationSetState:
             break;
+
+        case CmdCalibrationWrtParams: {
+            char* calibrationParams = reinterpret_cast<char*>(buffer.data() + sizeof(VisionControls::CameraCommand));
+            calibrationParams[cmd->payloadLen] = '\0';
+            logger->log(Logger::LOG_LVL_INFO, "Received parameters: %s\n", calibrationParams);
+
+            int ret = m_VideoCalib.configureFromJson(std::string(calibrationParams));
+            if (ret < 0) {
+                logger->log(Logger::LOG_LVL_ERROR, "Failed to configure calibration parameters from JSON\n");
+                return -1;
+            }
+            break;
+        }
+
+        default:
+            logger->log(Logger::LOG_LVL_ERROR, "Remote command not recognized: %d\n", cmd->command);
+            return -1;
     }
 
     if (!responseBuffer.empty()) {
@@ -758,7 +652,9 @@ void VisionControls::mainProc() {
                 if (ret != 0) {
                     continue;
                 }
+
                 stereoFramePair = std::make_pair(frameL, frameR);
+                processFramePair(stereoFramePair);
                 streamer.pushFrame(stereoFramePair);
                 break;
 

@@ -3,6 +3,9 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <opencv2/opencv.hpp>
+#include <vector>
+
 
 namespace Vision {
 class VideoStereoCalib {
@@ -13,6 +16,56 @@ public:
     ~VideoStereoCalib() = default;
 
     int storeCalibrationProfile(const char* profileName);
+
+    void resetCalibrationSession();
+    std::size_t numCollectedSamples() const;
+    bool isCalibrated() const;
+    double lastRmsError() const;
+
+    /**
+     * @brief Configure calibration settings from a JSON string received from the remote UI.
+     *
+     * Expected fields (others ignored):
+     * - target.pattern.cols / rows
+     * - target.square_size.value / units ("mm" or "m")
+     * - capture.required_samples
+     * - output_view.show_overlays
+     * - profile_name
+     *
+     * @return int 0 on success, negative on failure.
+     */
+    int configureFromJson(const std::string& jsonStr);
+
+    /**
+     * @brief Run one calibration step using the latest configured settings (from configureFromJson()).
+     *
+     * This performs live detection every call, collects samples when detected, and runs calibration
+     * once the configured sample count is reached.
+     */
+    int DoCalibration(cv::Mat& leftBgr, cv::Mat& rightBgr);
+
+    /**
+     * @brief Perform video calibration
+     * 
+     * @param frameL Left stereo frame
+     * @param frameR Right stereo frame
+     * @return int Error code
+     */
+    int DetectChessBoard(cv::Mat& leftBgr, cv::Mat& rightBgr, cv::Size boardSize);
+
+    /**
+     * @brief Calibrates stereo camera
+     * 
+     * @param leftBgr Left frame
+     * @param rightBgr Right frame
+     * @return int Error code
+     */
+    int DoCalibration(cv::Mat& leftBgr,
+                      cv::Mat& rightBgr,
+                      cv::Size boardSize,
+                      double squareSize,
+                      std::size_t targetSamples = 25,
+                      bool drawOverlay = true);
 
 private:
     /**
@@ -86,6 +139,14 @@ private:
      */
     CalibrationProfileSettings profileSettings_{};
 
+    struct CalibrationRequest {
+        std::string profileName{"default"};
+        cv::Size boardSize{9, 6};
+        double squareSizeMeters{0.0};
+        std::size_t requiredSamples{25};
+        bool showOverlays{true};
+    } calibReq_{};
+
     static constexpr const char* DefaultProfileJson = R"json(
 {
   "version": 1,
@@ -112,6 +173,13 @@ private:
   }
 }
 )json";
+
+    std::vector<std::vector<cv::Point2f>> m_ImagePointsL;
+    std::vector<std::vector<cv::Point2f>> m_ImagePointsR;
+    std::vector<std::vector<cv::Point3f>> m_ObjectPoints;
+    cv::Size m_ImageSize;
+    bool m_Calibrated{false};
+    double m_LastRmsError{0.0};
 };
 }
 

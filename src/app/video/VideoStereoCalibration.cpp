@@ -3,15 +3,214 @@
 
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <optional>
 #include <nlohmann/json.hpp>
 
 
 namespace Vision {
+namespace {
+
+static cv::Mat toGray(const cv::Mat& bgrOrBgraOrGray) {
+    cv::Mat gray;
+    if (bgrOrBgraOrGray.empty()) return gray;
+    if (bgrOrBgraOrGray.channels() == 1) {
+        gray = bgrOrBgraOrGray;
+    } else if (bgrOrBgraOrGray.channels() == 4) {
+        cv::cvtColor(bgrOrBgraOrGray, gray, cv::COLOR_BGRA2GRAY);
+    } else {
+        cv::cvtColor(bgrOrBgraOrGray, gray, cv::COLOR_BGR2GRAY);
+    }
+    return gray;
+}
+
+template <size_t N>
+static void writeRowMajor(const cv::Mat& m, std::array<double, N>& out) {
+    if (m.empty()) return;
+    const int rows = m.rows;
+    const int cols = m.cols;
+    if (rows * cols != static_cast<int>(N)) return;
+
+    cv::Mat as64;
+    if (m.type() == CV_64F) {
+        as64 = m;
+    } else {
+        m.convertTo(as64, CV_64F);
+    }
+
+    size_t k = 0;
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            out[k++] = as64.at<double>(r, c);
+        }
+    }
+}
+
+static std::vector<cv::Point3f> makeChessboardObjectPoints(cv::Size boardSize, double squareSize) {
+    std::vector<cv::Point3f> obj;
+    obj.reserve(static_cast<size_t>(boardSize.area()));
+    for (int y = 0; y < boardSize.height; ++y) {
+        for (int x = 0; x < boardSize.width; ++x) {
+            obj.emplace_back(static_cast<float>(x * squareSize),
+                             static_cast<float>(y * squareSize),
+                             0.0f);
+        }
+    }
+    return obj;
+}
+
+static void replaceAll(std::string& s, const std::string& from, const std::string& to) {
+    if (from.empty()) return;
+    std::string::size_type pos = 0;
+    while ((pos = s.find(from, pos)) != std::string::npos) {
+        s.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+}
+
+static std::optional<nlohmann::json> parseJsonLenient(std::string text) {
+    // 1) Try strict JSON parse first.
+    try {
+        return nlohmann::json::parse(text);
+    } catch (...) {
+    }
+
+    // 2) Attempt to normalize common "python dict" formatting:
+    //    - single quotes -> double quotes
+    //    - True/False -> true/false
+    //    - None -> null
+    replaceAll(text, "True", "true");
+    replaceAll(text, "False", "false");
+    replaceAll(text, "None", "null");
+    std::replace(text.begin(), text.end(), '\'', '"');
+
+    try {
+        return nlohmann::json::parse(text);
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+} // namespace
+
 VideoStereoCalib::VideoStereoCalib() {
     if (loadCalibrationProfile(calibStoragePath) != 0) {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Stereo calibration profile not loaded.\n");
     }
+}
+
+int VideoStereoCalib::configureFromJson(const std::string& jsonStr) {
+    const auto parsed = parseJsonLenient(jsonStr);
+    if (!parsed || !parsed->is_object()) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Calibration config is not valid JSON\n");
+        return -1;
+    }
+    const nlohmann::json& root = *parsed;
+
+    // profile_name
+    if (root.contains("profile_name") && root["profile_name"].is_string()) {
+        const std::string name = root["profile_name"].get<std::string>();
+        if (!name.empty()) {
+            calibReq_.profileName = name;
+        }
+    }
+
+    // output_view.show_overlays
+    if (root.contains("output_view") && root["output_view"].is_object()) {
+        const auto& view = root["output_view"];
+        if (view.contains("show_overlays") && view["show_overlays"].is_boolean()) {
+            calibReq_.showOverlays = view["show_overlays"].get<bool>();
+        }
+    }
+
+    // capture.required_samples
+    if (root.contains("capture") && root["capture"].is_object()) {
+        const auto& cap = root["capture"];
+        if (cap.contains("required_samples") && cap["required_samples"].is_number_integer()) {
+            const int v = cap["required_samples"].get<int>();
+            if (v > 0) calibReq_.requiredSamples = static_cast<std::size_t>(v);
+        } else if (cap.contains("required_samples") && cap["required_samples"].is_number_unsigned()) {
+            calibReq_.requiredSamples = static_cast<std::size_t>(cap["required_samples"].get<unsigned>());
+        }
+    }
+
+    // target.pattern.cols/rows, target.square_size.value/units
+    if (root.contains("target") && root["target"].is_object()) {
+        const auto& tgt = root["target"];
+
+        if (tgt.contains("pattern") && tgt["pattern"].is_object()) {
+            const auto& pat = tgt["pattern"];
+            int cols = calibReq_.boardSize.width;
+            int rows = calibReq_.boardSize.height;
+            if (pat.contains("cols") && pat["cols"].is_number_integer()) cols = pat["cols"].get<int>();
+            if (pat.contains("rows") && pat["rows"].is_number_integer()) rows = pat["rows"].get<int>();
+            if (cols > 0 && rows > 0) {
+                calibReq_.boardSize = cv::Size(cols, rows);
+            }
+        }
+
+        if (tgt.contains("square_size") && tgt["square_size"].is_object()) {
+            const auto& ss = tgt["square_size"];
+            double value = 0.0;
+            std::string units = "mm";
+            if (ss.contains("value") && ss["value"].is_number()) value = ss["value"].get<double>();
+            if (ss.contains("units") && ss["units"].is_string()) units = ss["units"].get<std::string>();
+
+            if (value > 0.0) {
+                if (units == "mm" || units == "millimeter" || units == "millimeters") {
+                    calibReq_.squareSizeMeters = value / 1000.0;
+                } else if (units == "m" || units == "meter" || units == "meters") {
+                    calibReq_.squareSizeMeters = value;
+                } else if (units == "cm" || units == "centimeter" || units == "centimeters") {
+                    calibReq_.squareSizeMeters = value / 100.0;
+                } else {
+                    Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN,
+                                                 "Unknown square_size.units '%s', assuming mm\n",
+                                                 units.c_str());
+                    calibReq_.squareSizeMeters = value / 1000.0;
+                }
+            }
+        }
+    }
+
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
+                                 "Calibration config: profile='%s' board=%dx%d square=%.6fm samples=%zu overlays=%d\n",
+                                 calibReq_.profileName.c_str(),
+                                 calibReq_.boardSize.width,
+                                 calibReq_.boardSize.height,
+                                 calibReq_.squareSizeMeters,
+                                 calibReq_.requiredSamples,
+                                 calibReq_.showOverlays ? 1 : 0);
+    return 0;
+}
+
+int VideoStereoCalib::DoCalibration(cv::Mat& leftBgr, cv::Mat& rightBgr) {
+    return DoCalibration(leftBgr,
+                         rightBgr,
+                         calibReq_.boardSize,
+                         calibReq_.squareSizeMeters,
+                         calibReq_.requiredSamples,
+                         calibReq_.showOverlays);
+}
+
+void VideoStereoCalib::resetCalibrationSession() {
+    m_ImagePointsL.clear();
+    m_ImagePointsR.clear();
+    m_ObjectPoints.clear();
+    m_ImageSize = {};
+    m_Calibrated = false;
+    m_LastRmsError = 0.0;
+}
+
+std::size_t VideoStereoCalib::numCollectedSamples() const {
+    return m_ImagePointsL.size();
+}
+
+bool VideoStereoCalib::isCalibrated() const {
+    return m_Calibrated;
+}
+
+double VideoStereoCalib::lastRmsError() const {
+    return m_LastRmsError;
 }
 
 
@@ -314,4 +513,156 @@ int VideoStereoCalib::storeCalibrationProfile(const char* profileName) {
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Stored calibration profile: %s\n", profileName);
     return 0;
 }
+
+int VideoStereoCalib::DetectChessBoard(cv::Mat& leftBgr, cv::Mat& rightBgr, cv::Size boardSize) {
+    if (leftBgr.empty() || rightBgr.empty()) {
+        return -1;
+    }
+    
+    cv::Mat leftGray = toGray(leftBgr);
+    cv::Mat rightGray = toGray(rightBgr);
+    std::vector<cv::Point2f> cornersL, cornersR;
+
+    bool foundL = cv::findChessboardCorners(leftGray, boardSize, cornersL);
+    bool foundR = cv::findChessboardCorners(rightGray, boardSize, cornersR);
+
+    // Draw the chessboard corners
+    cv::drawChessboardCorners(leftBgr, boardSize, cornersL, foundL);
+    cv::drawChessboardCorners(rightBgr, boardSize, cornersR, foundR);
+
+    const std::string status = (foundL && foundR) ? "CALIB: OK" : "CALIB: NO DETECTION";
+    cv::putText(leftBgr, status, {20, 40}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {0,255,0}, 2);
+    cv::putText(rightBgr, status, {20, 40}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {0,255,0}, 2);
+
+    return 0;
+}
+
+int VideoStereoCalib::DoCalibration(cv::Mat& leftBgr,
+                                    cv::Mat& rightBgr,
+                                    cv::Size boardSize,
+                                    double squareSize,
+                                    std::size_t targetSamples,
+                                    bool drawOverlay) {
+    if (leftBgr.empty() || rightBgr.empty()) {
+        return -1;
+    }
+    if (leftBgr.size() != rightBgr.size()) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Stereo frames have different sizes (L=%dx%d R=%dx%d)\n",
+                                     leftBgr.cols, leftBgr.rows, rightBgr.cols, rightBgr.rows);
+        return -1;
+    }
+    if (boardSize.width <= 0 || boardSize.height <= 0) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Invalid chessboard size (%d x %d)\n",
+                                     boardSize.width, boardSize.height);
+        return -1;
+    }
+    if (!(squareSize > 0.0)) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Invalid square size: %f\n", squareSize);
+        return -1;
+    }
+    if (targetSamples < 5) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "targetSamples too small: %zu\n", targetSamples);
+        return -1;
+    }
+
+    if (m_Calibrated) {
+        return 0;
+    }
+
+    cv::Mat leftGray = toGray(leftBgr);
+    cv::Mat rightGray = toGray(rightBgr);
+
+    std::vector<cv::Point2f> cornersL, cornersR;
+    const int flags = cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE;
+    bool foundL = cv::findChessboardCorners(leftGray, boardSize, cornersL, flags);
+    bool foundR = cv::findChessboardCorners(rightGray, boardSize, cornersR, flags);
+
+    if (foundL) {
+        cv::cornerSubPix(leftGray, cornersL, {11, 11}, {-1, -1},
+                         {cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.01});
+    }
+    if (foundR) {
+        cv::cornerSubPix(rightGray, cornersR, {11, 11}, {-1, -1},
+                         {cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.01});
+    }
+
+    if (drawOverlay) {
+        cv::drawChessboardCorners(leftBgr, boardSize, cornersL, foundL);
+        cv::drawChessboardCorners(rightBgr, boardSize, cornersR, foundR);
+
+        const std::string status = (foundL && foundR) ? "CALIB: OK" : "CALIB: NO DETECTION";
+        const std::string count = "Samples: " + std::to_string(m_ImagePointsL.size()) + "/" + std::to_string(targetSamples);
+        cv::putText(leftBgr, status, {20, 40}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {0, 255, 0}, 2);
+        cv::putText(leftBgr, count, {20, 80}, cv::FONT_HERSHEY_SIMPLEX, 0.9, {0, 255, 0}, 2);
+        cv::putText(rightBgr, status, {20, 40}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {0, 255, 0}, 2);
+        cv::putText(rightBgr, count, {20, 80}, cv::FONT_HERSHEY_SIMPLEX, 0.9, {0, 255, 0}, 2);
+    }
+
+    if (!(foundL && foundR)) {
+        return 1; // processed frame, no sample captured
+    }
+
+    // Capture sample.
+    if (m_ImagePointsL.empty()) {
+        m_ImageSize = leftBgr.size();
+    }
+    if (leftBgr.size() != m_ImageSize) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Frame size changed during calibration; resetting session\n");
+        resetCalibrationSession();
+        m_ImageSize = leftBgr.size();
+    }
+
+    m_ImagePointsL.push_back(cornersL);
+    m_ImagePointsR.push_back(cornersR);
+    m_ObjectPoints.push_back(makeChessboardObjectPoints(boardSize, squareSize));
+
+    if (m_ImagePointsL.size() < targetSamples) {
+        return 1; // still collecting
+    }
+
+    // Compute calibration.
+    cv::Mat K1 = cv::initCameraMatrix2D(m_ObjectPoints, m_ImagePointsL, m_ImageSize, 0);
+    cv::Mat K2 = cv::initCameraMatrix2D(m_ObjectPoints, m_ImagePointsR, m_ImageSize, 0);
+    cv::Mat D1 = cv::Mat::zeros(5, 1, CV_64F);
+    cv::Mat D2 = cv::Mat::zeros(5, 1, CV_64F);
+    cv::Mat R, T, E, F;
+
+    const int calibFlags = cv::CALIB_USE_INTRINSIC_GUESS;
+    const cv::TermCriteria criteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 100, 1e-6);
+    m_LastRmsError = cv::stereoCalibrate(m_ObjectPoints,
+                                        m_ImagePointsL,
+                                        m_ImagePointsR,
+                                        K1, D1, K2, D2,
+                                        m_ImageSize,
+                                        R, T, E, F,
+                                        calibFlags,
+                                        criteria);
+
+    cv::Mat R1, R2, P1, P2, Q;
+    cv::stereoRectify(K1, D1, K2, D2, m_ImageSize, R, T, R1, R2, P1, P2, Q, cv::CALIB_ZERO_DISPARITY, -1, m_ImageSize);
+
+    profileSettings_.imageWidth = static_cast<uint32_t>(m_ImageSize.width);
+    profileSettings_.imageHeight = static_cast<uint32_t>(m_ImageSize.height);
+
+    writeRowMajor(K1, profileSettings_.K_left);
+    writeRowMajor(D1.reshape(1, 1), profileSettings_.D_left);
+    writeRowMajor(K2, profileSettings_.K_right);
+    writeRowMajor(D2.reshape(1, 1), profileSettings_.D_right);
+    writeRowMajor(R, profileSettings_.R);
+    writeRowMajor(T.reshape(1, 1), profileSettings_.T);
+    writeRowMajor(R1, profileSettings_.R1);
+    writeRowMajor(R2, profileSettings_.R2);
+    writeRowMajor(P1, profileSettings_.P1);
+    writeRowMajor(P2, profileSettings_.P2);
+    writeRowMajor(Q, profileSettings_.Q);
+
+    m_Calibrated = true;
+
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
+                                 "Stereo calibration complete: samples=%zu rms=%.6f\n",
+                                 m_ObjectPoints.size(),
+                                 m_LastRmsError);
+    return 0;
+}
+
 }

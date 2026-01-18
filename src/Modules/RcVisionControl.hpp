@@ -66,22 +66,23 @@ protected:
 
     // Camera module commands
     enum {
-        CmdSetFrameRate,      // set camera frame rate
-        CmdStartStream,       // start video stream
-        CmdStopStream,        // stop video stream
-        CmdStreamMode,        // start simulation video stream
-        CmdSelCameraMode,     // select camera mode
-        CmdClrVideoRec,       // clear video recording buffer
-        CmdSaveVideo,         // save video recording to disks
-        CmdReadStoredVideos,  // Read stored videos from disk
-        CmdLoadSelectedVideo, // load selected video from disk
-        CmdDeleteVideo        // Delete video
+        CmdSetFrameRate,                // set camera frame rate
+        CmdStartStream,                 // start video stream
+        CmdStopStream,                  // stop video stream
+        CmdStreamMode,                  // start simulation video stream
+        CmdSelCameraMode,               // select camera mode
+        CmdClrVideoRec,                 // clear video recording buffer
+        CmdSaveVideo,                   // save video recording to disks
+        CmdReadStoredVideos,            // Read stored videos from disk
+        CmdLoadSelectedVideo,           // load selected video from disk
+        CmdDeleteVideo,                 // Delete video
+        CmdCalibrationSetState,         // Start video calibration
+        CmdCalibrationWrtParams,        // Sets calibration paramters
     };
 
     // Camera process enums
     enum {
         CamModeNormal,
-        CamModeDepth,
         CamModeDisparity,
         CamModeMax
     };
@@ -96,6 +97,7 @@ protected:
         int frameRate = 30;
         int mode      = CamModeNormal;
         std::string videoName = "recording.MOV";
+        cv::Size chessboardSize{9, 6}; // inner corners (cols, rows)
     } m_CamSettings;
 
     // Parent main proc override
@@ -117,10 +119,7 @@ protected:
     void processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair);
 
     // Stereo frame processing handler
-    void processFrame(std::pair<cv::Mat, cv::Mat>& stereoFrame);
-
-    // Depth processing handler
-    void processDepth(cv::Mat& frame);
+    void processFramePair(std::pair<cv::Mat, cv::Mat>& stereoFrame);
 
     struct StreamStatus {
         std::atomic<uint8_t> streamInStatus{StreamCameraPairs};
