@@ -2,10 +2,12 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <opencv2/opencv.hpp>
 #include <vector>
 
+#include <nlohmann/json.hpp>
 
 namespace Vision {
 class VideoStereoCalib {
@@ -15,12 +17,20 @@ public:
     VideoStereoCalib& operator=(const VideoStereoCalib&) = delete;
     ~VideoStereoCalib() = default;
 
-    int storeCalibrationProfile(const char* profileName);
+    int storeCalibrationProfile();
 
     void resetCalibrationSession();
     std::size_t numCollectedSamples() const;
     bool isCalibrated() const;
     double lastRmsError() const;
+
+    /**
+     * @brief Convert a disparity value (pixels) to depth (meters).
+     *
+     * Requires a calibrated/loaded rectification profile with valid P2.
+     * Disparity must be > 0.
+     */
+    std::optional<double> depthMetersFromDisparity(double disparityPx) const;
 
     /**
      * @brief Configure calibration settings from a JSON string received from the remote UI.
@@ -30,8 +40,6 @@ public:
      * - target.square_size.value / units ("mm" or "m")
      * - capture.required_samples
      * - output_view.show_overlays
-     * - profile_name
-     *
      * @return int 0 on success, negative on failure.
      */
     int configureFromJson(const std::string& jsonStr);
@@ -66,6 +74,23 @@ public:
                       double squareSize,
                       std::size_t targetSamples = 25,
                       bool drawOverlay = true);
+
+    /**
+     * @brief Rectify stereo frames
+     * 
+     * @param leftIn Input left frame
+     * @param rightIn Input right frame
+     * @param leftRect Output rectified left frame
+     * @param rightRect Output rectified right frame
+     */
+    void rectify(const cv::Mat& leftIn, const cv::Mat& rightIn,
+                 cv::Mat& leftRect, cv::Mat& rightRect) const;
+
+    /**
+     * @brief Get the current calibration as a JSON object
+     * @return nlohmann::json Current calibration
+     */
+    nlohmann::json& getCurrentCalibrationStats();
 
 private:
     /**
@@ -140,7 +165,6 @@ private:
     CalibrationProfileSettings profileSettings_{};
 
     struct CalibrationRequest {
-        std::string profileName{"default"};
         cv::Size boardSize{9, 6};
         double squareSizeMeters{0.0};
         std::size_t requiredSamples{25};
@@ -174,12 +198,20 @@ private:
 }
 )json";
 
+    cv::Mat map1L, map2L, map1R, map2R;
+    cv::Size m_RectifySize{};
+    bool m_HaveRectifyMaps{false};
+
     std::vector<std::vector<cv::Point2f>> m_ImagePointsL;
     std::vector<std::vector<cv::Point2f>> m_ImagePointsR;
     std::vector<std::vector<cv::Point3f>> m_ObjectPoints;
     cv::Size m_ImageSize;
     bool m_Calibrated{false};
     double m_LastRmsError{0.0};
+
+    nlohmann::json m_CalibrationStatsBank;
+
+    bool buildRectifyMaps_();
 };
 }
 

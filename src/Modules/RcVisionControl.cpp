@@ -24,7 +24,6 @@
 
 #include <sstream>
 #include <opencv2/cudaimgproc.hpp>
-#include <gst/gst.h>
 #include <sstream>
 #include <functional>
 #include <chrono>
@@ -33,15 +32,20 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 
 #define STREAM_PORT 5005
 
 #define MODEL_PATH  "/opt/rc-car/models/model-small.onnx"
 
 
+static cv::Ptr<cv::cuda::StereoBM> stereoBM = nullptr;
+static cv::cuda::GpuMat d_left, d_right, d_disp;
+static cv::cuda::Stream stream;
+
 namespace Modules {
 VisionControls::VisionControls(int moduleID, std::string name) :
-    Base(moduleID, name), Adapter::CameraAdapter(name){
+    Base(moduleID, name), Adapter::CameraAdapter(name) {
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Vision object initialized\r\n");
 
@@ -65,6 +69,9 @@ int VisionControls::init(void) {
         logger->log(Logger::LOG_LVL_WARN, "Failed to create vision network adapters\r\n");
         return -1;
     }
+
+    // Create the streamer only once the TX adapter exists; otherwise we'd bind a dangling reference.
+    m_VideoStreamer = std::make_unique<Vision::VideoStreamer>(*m_TxAdapter, 100);
 
     bool useCuda = false;
 
@@ -108,21 +115,21 @@ int VisionControls::init(void) {
         std::bind(&VisionControls::recvFrame, this, std::placeholders::_1),
         false);
 
-    // Load video into recording
-    // m_VideoRecorder.loadFile();
+    // Register telemetry port
+    int ret = this->TlmAdapter->registerTelemetrySource(this->getName());
+    if (ret < 0) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to register vision control as telemetry source\r\n");
+        return -1;
+    }
 
-    return 0;
-}
+    m_VideoStreamer->setJpegQuality(35);  // Default to maximum quality
+    m_VideoStreamer->setStreamFrameRate(Vision::VideoStreamer::FrameRate::_30Fps);
+    m_VideoStreamer->start();
+    
+    m_VideoRecorder.setFrameRate(Vision::VideoRecording::FrameRate::_30Fps);
+    stereoBM = cv::cuda::createStereoBM(96, 15);
 
-
-/**
- * @brief Configure the GStreamer pipeline
- * 
- * @param host Host IP address
- * @return int Error code
- */
-int VisionControls::configurePipeline_(const std::string& host) {
-    // Close if open
+    logger->log(Logger::LOG_LVL_INFO, "Vision control module initialized\r\n");
     return 0;
 }
 
@@ -315,89 +322,140 @@ void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::
     cv::Mat& frameL = stereoFramePair.first;
     cv::Mat& frameR = stereoFramePair.second;
 
-    switch (m_CamSettings.mode) {
-        case VisionControls::CamModeNormal:
-            // For testing purposes. We just superimpose the two frames into one
-            cv::addWeighted(frameL, 0.5, frameR, 0.5, 0.0, stereoFrame);
-            break;
+    // Build grayscale inputs robustly (StereoCam frames can be BGRA).
+    cv::Mat grayL, grayR;
+    if (frameL.channels() == 1) {
+        grayL = frameL;
+    } else if (frameL.channels() == 4) {
+        cv::cvtColor(frameL, grayL, cv::COLOR_BGRA2GRAY);
+    } else {
+        cv::cvtColor(frameL, grayL, cv::COLOR_BGR2GRAY);
+    }
 
-        case VisionControls::CamModeDisparity:
-            {
-                // Ensure grayscale inputs are correct (StereoCam frames can be BGRA).
-                cv::Mat grayL, grayR;
-                cv::Mat bgrL, bgrR;
-                if (frameL.channels() == 4) {
-                    cv::cvtColor(frameL, bgrL, cv::COLOR_BGRA2BGR);
-                } else {
-                    bgrL = frameL;
-                }
-                if (frameR.channels() == 4) {
-                    cv::cvtColor(frameR, bgrR, cv::COLOR_BGRA2BGR);
-                } else {
-                    bgrR = frameR;
-                }
-                if (bgrL.channels() == 1) {
-                    grayL = bgrL;
-                } else {
-                    cv::cvtColor(bgrL, grayL, cv::COLOR_BGR2GRAY);
-                }
-                if (bgrR.channels() == 1) {
-                    grayR = bgrR;
-                } else {
-                    cv::cvtColor(bgrR, grayR, cv::COLOR_BGR2GRAY);
-                }
-#if RCVC_HAVE_CUDASTEREO
-                static cv::Ptr<cv::cuda::StereoBM> stereoBM = cv::cuda::createStereoBM(96, 15);
-                static cv::cuda::GpuMat d_left, d_right, d_disp;
-                static cv::cuda::Stream stream;
-#else
-                static cv::Ptr<cv::StereoBM> stereoBM = cv::StereoBM::create(96, 15);
-#endif
-                cv::Mat disparity;
-#if RCVC_HAVE_CUDASTEREO
-                // cv::cuda::* algorithms require cuda::GpuMat/HostMem. Passing cv::Mat triggers
-                // InputArray::getGpuMat() and throws "getGpuMat is available only for cuda::GpuMat".
-                if (cv::cuda::getCudaEnabledDeviceCount() > 0) {
-                    d_left.upload(grayL, stream);
-                    d_right.upload(grayR, stream);
-                    stereoBM->compute(d_left, d_right, d_disp, stream);
-                    d_disp.download(disparity, stream);
-                    stream.waitForCompletion();
-                } else {
-                    // Fallback to CPU if CUDA isn't available at runtime.
-                    cv::Ptr<cv::StereoBM> cpuBM = cv::StereoBM::create(96, 15);
-                    cpuBM->compute(grayL, grayR, disparity);
-                }
-#else
-                stereoBM->compute(grayL, grayR, disparity);
-#endif
-                // Normalize for visualization.
-                // StereoBM outputs fixed-point disparity (typically scaled by 16). If most values
-                // are <= 0 (common when not rectified), the colormap will look mostly blue.
-                cv::Mat disp32f;
-                disparity.convertTo(disp32f, CV_32F, 1.0 / 16.0);
-                cv::max(disp32f, 0.0f, disp32f);
+    if (frameR.channels() == 1) {
+        grayR = frameR;
+    } else if (frameR.channels() == 4) {
+        cv::cvtColor(frameR, grayR, cv::COLOR_BGRA2GRAY);
+    } else {
+        cv::cvtColor(frameR, grayR, cv::COLOR_BGR2GRAY);
+    }
 
-                cv::Mat disp8U;
-                cv::normalize(disp32f, disp8U, 0, 255, cv::NORM_MINMAX, CV_8U);
-                cv::applyColorMap(disp8U, stereoFrame, cv::COLORMAP_JET);
+    // Apply calibration before disparity: undistort + rectify into rectified grayscale frames.
+    cv::Mat rectL, rectR;
+    m_VideoCalib.rectify(grayL, grayR, rectL, rectR);
 
-                // Lightweight periodic debug to catch "all blue" (near-zero disparity) quickly.
-                static auto lastLog = std::chrono::steady_clock::now();
-                const auto now = std::chrono::steady_clock::now();
-                if (now - lastLog > std::chrono::seconds(2)) {
-                    double minVal = 0.0, maxVal = 0.0;
-                    cv::minMaxLoc(disp32f, &minVal, &maxVal);
-                    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
-                                                "Stereo disparity range: min=%.2f max=%.2f (post-clamp)\n",
-                                                minVal, maxVal);
-                    lastLog = now;
-                }
+    cv::Mat disparity;
+    // cv::cuda::* algorithms require cuda::GpuMat/HostMem. Passing cv::Mat triggers
+    // InputArray::getGpuMat() and throws "getGpuMat is available only for cuda::GpuMat".
+    d_left.upload(rectL, stream);
+    d_right.upload(rectR, stream);
+    stereoBM->compute(d_left, d_right, d_disp, stream);
+    d_disp.download(disparity, stream);
+    stream.waitForCompletion();
+
+    // Normalize for visualization.
+    // StereoBM outputs fixed-point disparity (typically scaled by 16). If most values
+    // are <= 0 (common when not rectified), the colormap will look mostly blue.
+    cv::Mat disp32f;
+    disparity.convertTo(disp32f, CV_32F, 1.0 / 16.0);
+    cv::max(disp32f, 0.0f, disp32f);
+
+    // Estimate distance at the image center using the rectified projection (meters).
+    std::string depthText = "Z: --";
+    {
+        const int cx = disp32f.cols / 2;
+        const int cy = disp32f.rows / 2;
+        const int half = 5; // 11x11 window
+        const int x0 = std::max(0, cx - half);
+        const int y0 = std::max(0, cy - half);
+        const int x1 = std::min(disp32f.cols - 1, cx + half);
+        const int y1 = std::min(disp32f.rows - 1, cy + half);
+
+        std::vector<float> vals;
+        vals.reserve(static_cast<size_t>((x1 - x0 + 1) * (y1 - y0 + 1)));
+        for (int y = y0; y <= y1; ++y) {
+            const float* row = disp32f.ptr<float>(y);
+            for (int x = x0; x <= x1; ++x) {
+                const float d = row[x];
+                if (d > 0.5f && std::isfinite(d)) vals.push_back(d);
             }
-            break;
+        }
+        if (!vals.empty()) {
+            const size_t mid = vals.size() / 2;
+            std::nth_element(vals.begin(), vals.begin() + mid, vals.end());
+            const double dispPx = static_cast<double>(vals[mid]);
+            if (auto z = m_VideoCalib.depthMetersFromDisparity(dispPx)) {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "Z: %.2f m", *z);
+                depthText = buf;
+            }
+        }
+    }
 
-        default:
-            break;
+    // Normalize for display using only valid pixels (otherwise the sea of zeros crushes contrast).
+    // Also use percentile clipping so a handful of outliers/speckles don't force most surfaces
+    // into dark blue.
+    cv::Mat disp8U(disp32f.size(), CV_8U, cv::Scalar(0));
+    cv::Mat validMask = disp32f > 0.0f;
+    const int validCount = cv::countNonZero(validMask);
+    if (validCount > 0) {
+        std::vector<float> validVals;
+        validVals.reserve(static_cast<size_t>(validCount));
+        for (int y = 0; y < disp32f.rows; ++y) {
+            const float* row = disp32f.ptr<float>(y);
+            for (int x = 0; x < disp32f.cols; ++x) {
+                const float d = row[x];
+                if (d > 0.0f && std::isfinite(d)) validVals.push_back(d);
+            }
+        }
+
+        if (validVals.size() >= 16) {
+            const auto nth = [&](double p) -> float {
+                const size_t idx = static_cast<size_t>(p * static_cast<double>(validVals.size() - 1));
+                std::nth_element(validVals.begin(), validVals.begin() + idx, validVals.end());
+                return validVals[idx];
+            };
+
+            // Clip to a robust range to avoid outliers dominating the colormap.
+            const float lo = nth(0.05);   // 5th percentile
+            const float hi = nth(0.95);   // 95th percentile
+            if (hi > lo) {
+                cv::Mat clipped;
+                cv::min(cv::max(disp32f, lo), hi, clipped);
+
+                const double scale = 255.0 / static_cast<double>(hi - lo);
+                const double shift = -static_cast<double>(lo) * scale;
+                cv::Mat scaled;
+                clipped.convertTo(scaled, CV_8U, scale, shift);
+                scaled.copyTo(disp8U, validMask);
+            }
+        } else {
+            // Fall back to min/max when we don't have enough valid pixels.
+            double vmin = 0.0, vmax = 0.0;
+            cv::minMaxLoc(disp32f, &vmin, &vmax, nullptr, nullptr, validMask);
+            if (vmax > vmin) {
+                const double scale = 255.0 / (vmax - vmin);
+                const double shift = -vmin * scale;
+                cv::Mat scaled;
+                disp32f.convertTo(scaled, CV_8U, scale, shift);
+                scaled.copyTo(disp8U, validMask);
+            }
+        }
+    }
+    cv::applyColorMap(disp8U, stereoFrame, cv::COLORMAP_JET);
+
+    cv::putText(stereoFrame, depthText, {10, 60}, cv::FONT_HERSHEY_SIMPLEX, 0.8, {255, 255, 255}, 2, cv::LINE_AA);
+
+    // Lightweight periodic debug to catch "all blue" (near-zero disparity) quickly.
+    static auto lastLog = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    if (now - lastLog > std::chrono::seconds(2)) {
+        double minVal = 0.0, maxVal = 0.0;
+        cv::minMaxLoc(disp32f, &minVal, &maxVal);
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG,
+                                    "Stereo disparity range: min=%.2f max=%.2f (post-clamp)\n",
+                                    minVal, maxVal);
+        lastLog = now;
     }
 }
 
@@ -427,30 +485,6 @@ void VisionControls::processFrame(cv::Mat& frame) {
 }
 
 
-/** * @brief Process a stereo frame pair (placeholder for future processing)
- * 
- * @param frame Input/output frame pair
- */
-void VisionControls::processFramePair(std::pair<cv::Mat, cv::Mat>& stereoFrame) {
-    using namespace std;
-    using namespace cv;
-    using namespace dnn;
-
-    cv::Mat& frameL  = stereoFrame.first;
-    cv::Mat& frameR = stereoFrame.second;
-
-    switch (m_CamSettings.mode) {
-        case CamModeNormal:
-            /* code */
-            // m_VideoCalib.DoCalibration(frameL, frameR);
-            break;
-
-        default:
-            break;
-    }
-}
-
-
 /**
  * @brief Module command handler
  * 
@@ -471,47 +505,62 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
 
     switch (cmd->command) 
     {
-        case CmdSetFrameRate:
+        case VisionControls::CmdSetFrameRate:
             /* code */
             break;
 
-        case CmdStartStream:
+        case VisionControls::CmdStartStream:
             /* code */
             break;
 
-        case CmdStopStream:
+        case VisionControls::CmdStopStream:
             /* code */
             break;
 
-        case CmdStreamMode: {
-            if (cmd->data.u8 >= StreamModeMax) {
-                logger->log(Logger::LOG_LVL_WARN, "Invalid stream mode %d\n", cmd->data.u8);
+        case VisionControls::CmdSelCameraStream: {
+            m_CamSettings.streamSelection.store(cmd->data.u8);
+
+            if (cmd->data.u8 == VisionControls::StreamCameraSource) {
+                m_VideoRecorder.resetPlayback();
+                logger->log(Logger::LOG_LVL_INFO, "Selecting normal camera mode\n");
+                char* selModeJson = reinterpret_cast<char*>(buffer.data() + sizeof(VisionControls::CameraCommand));
+                selModeJson[cmd->payloadLen] = '\0';
+                nlohmann::json jsonParams;
+                try {
+                    jsonParams = nlohmann::json::parse(std::string(selModeJson));
+                } catch (nlohmann::json::parse_error& e) {
+                    logger->log(Logger::LOG_LVL_ERROR, "Failed to parse camera stream selection JSON: %s\n", e.what());
+                    return -1;
+                }
+
+                if (jsonParams.contains("calibration-mode")) {
+                    m_CamSettings.calibrationMode = jsonParams["calibration-mode"].get<bool>();
+                }
+
+                if (m_CamSettings.calibrationMode.load()) {
+                    logger->log(Logger::LOG_LVL_INFO, "Camera calibration mode enabled\n");
+                } else {
+                    logger->log(Logger::LOG_LVL_INFO, "Camera calibration mode disabled\n");
+                }
+                return 0;
+            } else if (cmd->data.u8 == VisionControls::StreamSimSource) {
+                logger->log(Logger::LOG_LVL_INFO, "Selecting training mode\n");
+            } else {
+                logger->log(Logger::LOG_LVL_ERROR, "Invalid camera stream selection: %d\n", cmd->data.u8);
                 return -1;
             }
 
-            const char* modes[] = {"Camera", "Simulation", "CameraMono"};
-            logger->log(Logger::LOG_LVL_INFO, "Configuring stream mode to %s, cmd: %d\n", modes[cmd->data.u8], cmd->data.u8);
-            m_StreamStats.streamInStatus = cmd->data.u8;
-            if (cmd->data.u8 != StreamSim) {
-                m_VideoRecorder.resetPlayback();
-            }
-            break;
-        }
-        case CmdSelCameraMode: {
-            const char* camModes[] = {"Normal", "Disparity", "Calibration"};
-            logger->log(Logger::LOG_LVL_INFO, "Setting camera mode to %d\n", cmd->data.u8);
-            m_CamSettings.mode = cmd->data.u8;
             break;
         }
 
-        case CmdClrVideoRec:
+        case VisionControls::CmdClrVideoRec:
             logger->log(Logger::LOG_LVL_INFO, "Clearing video recording buffer\n");
             m_StreamInFrame.reset();
             m_VideoRecorder.clear();
             m_LastIncomingVideoName.clear();
             break;
 
-        case CmdSaveVideo: {
+        case VisionControls::CmdSaveVideo: {
             std::string nameToSave = m_CamSettings.videoName;
             // If no explicit name was ever set, prefer the incoming metadata name (downloaded file).
             if (nameToSave == "recording.MOV" && !m_LastIncomingVideoName.empty()) {
@@ -528,7 +577,7 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             break;
         }
 
-        case CmdReadStoredVideos: {
+        case VisionControls::CmdReadStoredVideos: {
             logger->log(Logger::LOG_LVL_INFO, "Loading stored videos from disk\n");
             std::vector<std::string> videoFiles = m_VideoRecorder.listRecordedFiles();
             std::stringstream ss;
@@ -545,7 +594,7 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             break;
         }
 
-        case CmdLoadSelectedVideo: {
+        case VisionControls::CmdLoadSelectedVideo: {
             char* namePtr = reinterpret_cast<char*>(buffer.data() + sizeof(VisionControls::CameraCommand));
             if (namePtr[cmd->payloadLen] != '\0' && strlen(namePtr) >= cmd->payloadLen) {
                 logger->log(Logger::LOG_LVL_ERROR, "Invalid video name\n");
@@ -562,7 +611,7 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             return 0;
         }
 
-        case CmdDeleteVideo: {
+        case VisionControls::CmdDeleteVideo: {
             char* namePtr = reinterpret_cast<char*>(buffer.data() + sizeof(VisionControls::CameraCommand));
             if (namePtr[cmd->payloadLen] != '\0' && strlen(namePtr) >= cmd->payloadLen) {
                 logger->log(Logger::LOG_LVL_ERROR, "Invalid video name\n");
@@ -580,10 +629,10 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             break;
         }
 
-        case CmdCalibrationSetState:
+        case VisionControls::CmdCalibrationSetState:
             break;
 
-        case CmdCalibrationWrtParams: {
+        case VisionControls::CmdCalibrationWrtParams: {
             char* calibrationParams = reinterpret_cast<char*>(buffer.data() + sizeof(VisionControls::CameraCommand));
             calibrationParams[cmd->payloadLen] = '\0';
             logger->log(Logger::LOG_LVL_INFO, "Received parameters: %s\n", calibrationParams);
@@ -591,6 +640,22 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             int ret = m_VideoCalib.configureFromJson(std::string(calibrationParams));
             if (ret < 0) {
                 logger->log(Logger::LOG_LVL_ERROR, "Failed to configure calibration parameters from JSON\n");
+                return -1;
+            }
+            break;
+        }
+
+        case VisionControls::CmdCalibrationReset: {
+            logger->log(Logger::LOG_LVL_INFO, "Resetting calibration parameters to default\n");
+            m_VideoCalib.resetCalibrationSession();
+            break;
+        }
+
+        case VisionControls::CmdCalibrationSave: {
+            logger->log(Logger::LOG_LVL_INFO, "Saving calibration parameters to disk\n");
+            int ret = m_VideoCalib.storeCalibrationProfile();
+            if (ret < 0) {
+                logger->log(Logger::LOG_LVL_ERROR, "Failed to save calibration parameters to disk\n");
                 return -1;
             }
             break;
@@ -615,23 +680,20 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
  * 
  */
 void VisionControls::OnTimer(void) {
+    if (m_CamSettings.calibrationMode.load()) {
+        nlohmann::json calibStats = m_VideoCalib.getCurrentCalibrationStats();
+        std::string statsStr = calibStats.dump();
+        this->TlmAdapter->publishTelemetry(
+            this->getName(),
+            reinterpret_cast<const uint8_t*>(statsStr.c_str()),
+            statsStr.size());
+        return;
+    }
 }
 
 
 void VisionControls::mainProc() {
     Logger* logger = Logger::getLoggerInst();
-
-    // Handles jitter smoothing and transmission in its own thread
-    Vision::VideoStreamer streamer(
-        *m_TxAdapter,
-        [this]() {
-            std::lock_guard<std::mutex> lock(m_HostIPMutex);
-            return m_HostIP;
-        },
-        35,
-        1);
-    streamer.start();
-    m_VideoRecorder.setFrameRate(Vision::VideoRecording::FrameRate::_30Fps);
 
     Devices::StereoCam cam(0, 1);
     cam.start(1920, 1080, 30);
@@ -641,34 +703,28 @@ void VisionControls::mainProc() {
 
     int ret = -1;
     cv::Mat frameSim;
-    cv::Ptr<cv::StereoBM> stereoBM = cv::StereoBM::create();
     std::pair<cv::Mat, cv::Mat> stereoFramePair;
     int16_t xAccel, yAccel, zAccel;
     int16_t xGyro, yGyro, zGyro;
     while (m_Running.load()) {
-        switch(m_StreamStats.streamInStatus) {
-            case StreamCameraPairs:
+        switch(m_CamSettings.streamSelection.load()) {
+            case StreamCameraSource:
                 ret = cam.read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
                 if (ret != 0) {
                     continue;
                 }
 
                 stereoFramePair = std::make_pair(frameL, frameR);
-                processFramePair(stereoFramePair);
-                streamer.pushFrame(stereoFramePair);
-                break;
-
-            case StreamStereoCameraMono:
-                ret = cam.read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
-                if (ret != 0) {
-                    continue;
+                if (m_CamSettings.calibrationMode.load()) {
+                    m_VideoCalib.DoCalibration(frameL, frameR);
+                    m_VideoStreamer->pushFrame(stereoFramePair);
+                } else {
+                    processStereo(frameStereo, stereoFramePair);
+                    m_VideoStreamer->pushFrame(frameStereo, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
                 }
-                stereoFramePair = std::make_pair(frameL, frameR);
-                processStereo(frameStereo, stereoFramePair);
-                streamer.pushFrame(frameStereo, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
                 break;
 
-            case StreamSim: {
+            case StreamSimSource: {
                 // We draw a frame from the recording object
                 cv::Mat simFrame = m_VideoRecorder.getNextFrame();
                 if (simFrame.empty()) {
@@ -678,7 +734,7 @@ void VisionControls::mainProc() {
                 }
                 frameSim = simFrame;
                 processFrame(frameSim);
-                streamer.pushFrame(frameSim);
+                m_VideoStreamer->pushFrame(frameSim);
                 break;
             }
 

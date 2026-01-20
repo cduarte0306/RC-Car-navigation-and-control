@@ -14,6 +14,7 @@
 
 #include "app/video/VideoRecording.hpp"
 #include "app/video/VideoStereoCalibration.hpp"
+#include "app/video/VideoStreamer.hpp"
 
 
 namespace Modules {
@@ -35,8 +36,6 @@ public:
     // virtual int moduleCommand_(char* pbuf, size_t len) override;
 
     virtual int moduleCommand_(std::vector<char>& buffer) override;
-
-    virtual int configurePipeline_(const std::string& host) override;
     
 protected:
 #pragma pack(push, 1)
@@ -58,26 +57,26 @@ protected:
 
 #pragma pack(pop)
     enum {
-        StreamCameraPairs,      // normal camera mode
-        StreamSim,              // simulation camera mode
-        StreamStereoCameraMono, // Compiled stereo image mode
-        StreamModeMax           // max modes
+        StreamCameraSource,  // normal camera mode
+        StreamSimSource,     // simulation camera mode
+        StreamMaxSources
     };
 
     // Camera module commands
     enum {
-        CmdSetFrameRate,                // set camera frame rate
-        CmdStartStream,                 // start video stream
-        CmdStopStream,                  // stop video stream
-        CmdStreamMode,                  // start simulation video stream
-        CmdSelCameraMode,               // select camera mode
-        CmdClrVideoRec,                 // clear video recording buffer
-        CmdSaveVideo,                   // save video recording to disks
-        CmdReadStoredVideos,            // Read stored videos from disk
-        CmdLoadSelectedVideo,           // load selected video from disk
-        CmdDeleteVideo,                 // Delete video
-        CmdCalibrationSetState,         // Start video calibration
-        CmdCalibrationWrtParams,        // Sets calibration paramters
+        CmdSetFrameRate,          // set camera frame rate
+        CmdStartStream,           // start video stream
+        CmdStopStream,            // stop video stream
+        CmdSelCameraStream,       // select camera stream (Normal or training)
+        CmdClrVideoRec,           // clear video recording buffer
+        CmdSaveVideo,             // save video recording to disks
+        CmdReadStoredVideos,      // Read stored videos from disk
+        CmdLoadSelectedVideo,     // load selected video from disk
+        CmdDeleteVideo,           // Delete video
+        CmdCalibrationSetState,   // Start video calibration
+        CmdCalibrationWrtParams,  // Sets calibration paramters
+        CmdCalibrationReset,      // Reset calibration
+        CmdCalibrationSave,       // Save calibration to disk
     };
 
     // Camera process enums
@@ -96,6 +95,8 @@ protected:
     struct CameraSettings {
         int frameRate = 30;
         int mode      = CamModeNormal;
+        std::atomic<uint8_t> streamSelection{StreamCameraSource};
+        std::atomic<bool> calibrationMode{false};
         std::string videoName = "recording.MOV";
         cv::Size chessboardSize{9, 6}; // inner corners (cols, rows)
     } m_CamSettings;
@@ -121,8 +122,11 @@ protected:
     // Stereo frame processing handler
     void processFramePair(std::pair<cv::Mat, cv::Mat>& stereoFrame);
 
+    // Camera source stream handler
+    // void processCameraSource(Devices::StereoCam& cam);
+
     struct StreamStatus {
-        std::atomic<uint8_t> streamInStatus{StreamCameraPairs};
+        std::atomic<uint8_t> streamInStatus{StreamCameraSource};
         int streamInCounter = 0;  // Stream IN watchdog counter
     } m_StreamStats;
 
@@ -161,6 +165,8 @@ protected:
 
     // Video recorder
     Vision::VideoRecording m_VideoRecorder;
+
+    std::unique_ptr<Vision::VideoStreamer> m_VideoStreamer{nullptr};
     
     // Video calibration
     Vision::VideoStereoCalib m_VideoCalib;

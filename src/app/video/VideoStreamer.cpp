@@ -14,13 +14,10 @@
 
 namespace Vision {
 VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
-                            std::function<std::string()> destIpProvider,
-                            int jpegQuality,
                             std::size_t bufferCapacity)
-      : encodeQuality(jpegQuality),
-        m_TxAdapter(txAdapter),
-        m_DestIpProvider(std::move(destIpProvider)),
-        m_Buffer(bufferCapacity), m_BufferStereo(bufferCapacity),
+      : m_TxAdapter(txAdapter),
+        m_Buffer(bufferCapacity), 
+        m_BufferStereo(bufferCapacity),
         m_BufferStereoMono(bufferCapacity) {}
 
 
@@ -31,11 +28,15 @@ VideoStreamer::~VideoStreamer() {
 
 void VideoStreamer::start() {
     if (m_Running.exchange(true)) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "VideoStreamer already running.\n");
         return;  // already running
     }
+
     m_ThreadMono = std::thread(&VideoStreamer::runMono, this);
     m_ThreadStereo = std::thread(&VideoStreamer::runStereo, this);
     m_ThreadStereoMono = std::thread(&VideoStreamer::runStereoMono, this);
+
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer started.\n");
 }
 
 
@@ -49,6 +50,40 @@ void VideoStreamer::stop() {
     if (m_ThreadStereo.joinable()) {
         m_ThreadStereo.join();
     }
+    if (m_ThreadStereoMono.joinable()) {
+        m_ThreadStereoMono.join();
+    }
+
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer stopped.\n");
+}
+
+
+int VideoStreamer::setJpegQuality(int quality) {
+    if (quality < 1 || quality > 100) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "JPEG quality must be between 1 and 100.\n");
+        return -1;
+    }
+    encodeQuality = quality;
+    return 0;
+}
+
+
+int VideoStreamer::setStreamFrameRate(FrameRate fps) {
+    switch (fps) {
+        case FrameRate::_15Fps:
+            frameIntervalMs = 66;
+            break;
+        case FrameRate::_30Fps:
+            frameIntervalMs = 33;
+            break;
+        case FrameRate::_60Fps:
+            frameIntervalMs = 16;
+            break;
+        default:
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Unsupported frame rate.\n");
+            return -1;
+    }
+    return 0;
 }
 
 

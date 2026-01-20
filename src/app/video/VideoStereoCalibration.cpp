@@ -98,6 +98,45 @@ VideoStereoCalib::VideoStereoCalib() {
     }
 }
 
+bool VideoStereoCalib::buildRectifyMaps_() {
+    if (profileSettings_.imageWidth == 0 || profileSettings_.imageHeight == 0) {
+        return false;
+    }
+
+    m_RectifySize = cv::Size(static_cast<int>(profileSettings_.imageWidth),
+                             static_cast<int>(profileSettings_.imageHeight));
+
+    // Construct cv::Mat headers over the stored arrays.
+    cv::Mat K1(3, 3, CV_64F, profileSettings_.K_left.data());
+    cv::Mat D1(1, static_cast<int>(CalibrationProfileSettings::DSize), CV_64F, profileSettings_.D_left.data());
+    cv::Mat K2(3, 3, CV_64F, profileSettings_.K_right.data());
+    cv::Mat D2(1, static_cast<int>(CalibrationProfileSettings::DSize), CV_64F, profileSettings_.D_right.data());
+
+    cv::Mat R1(3, 3, CV_64F, profileSettings_.R1.data());
+    cv::Mat R2(3, 3, CV_64F, profileSettings_.R2.data());
+
+    cv::Mat P1full(3, 4, CV_64F, profileSettings_.P1.data());
+    cv::Mat P2full(3, 4, CV_64F, profileSettings_.P2.data());
+    // initUndistortRectifyMap expects a 3x3 "new camera matrix"; use the left 3x3 of P1/P2.
+    cv::Mat P1 = P1full(cv::Rect(0, 0, 3, 3));
+    cv::Mat P2 = P2full(cv::Rect(0, 0, 3, 3));
+
+    try {
+        cv::initUndistortRectifyMap(K1, D1, R1, P1, m_RectifySize, CV_16SC2, map1L, map2L);
+        cv::initUndistortRectifyMap(K2, D2, R2, P2, m_RectifySize, CV_16SC2, map1R, map2R);
+    } catch (const cv::Exception& e) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to build rectify maps: %s\n", e.what());
+        map1L.release();
+        map2L.release();
+        map1R.release();
+        map2R.release();
+        m_RectifySize = {};
+        return false;
+    }
+
+    return !map1L.empty() && !map2L.empty() && !map1R.empty() && !map2R.empty();
+}
+
 int VideoStereoCalib::configureFromJson(const std::string& jsonStr) {
     const auto parsed = parseJsonLenient(jsonStr);
     if (!parsed || !parsed->is_object()) {
@@ -105,14 +144,6 @@ int VideoStereoCalib::configureFromJson(const std::string& jsonStr) {
         return -1;
     }
     const nlohmann::json& root = *parsed;
-
-    // profile_name
-    if (root.contains("profile_name") && root["profile_name"].is_string()) {
-        const std::string name = root["profile_name"].get<std::string>();
-        if (!name.empty()) {
-            calibReq_.profileName = name;
-        }
-    }
 
     // output_view.show_overlays
     if (root.contains("output_view") && root["output_view"].is_object()) {
@@ -173,8 +204,7 @@ int VideoStereoCalib::configureFromJson(const std::string& jsonStr) {
     }
 
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
-                                 "Calibration config: profile='%s' board=%dx%d square=%.6fm samples=%zu overlays=%d\n",
-                                 calibReq_.profileName.c_str(),
+                                 "Calibration config: board=%dx%d square=%.6fm samples=%zu overlays=%d\n",
                                  calibReq_.boardSize.width,
                                  calibReq_.boardSize.height,
                                  calibReq_.squareSizeMeters,
@@ -211,6 +241,17 @@ bool VideoStereoCalib::isCalibrated() const {
 
 double VideoStereoCalib::lastRmsError() const {
     return m_LastRmsError;
+}
+
+std::optional<double> VideoStereoCalib::depthMetersFromDisparity(double disparityPx) const {
+    if (!(disparityPx > 0.0)) return std::nullopt;
+    // In OpenCV stereoRectify, P2(0,3) = Tx where Tx = -f * B (in pixel units).
+    // Depth Z = (f*B)/d = (-Tx)/d. Units follow the units used during calibration (we use meters).
+    const double Tx = profileSettings_.P2[3];
+    if (Tx == 0.0) return std::nullopt;
+    const double z = (-Tx) / disparityPx;
+    if (!(z > 0.0) || !std::isfinite(z)) return std::nullopt;
+    return z;
 }
 
 
@@ -277,11 +318,7 @@ int VideoStereoCalib::loadCalibrationProfile(const char* path) {
         }
 
         nlohmann::json defaultProfile = nlohmann::json::parse(std::string(DefaultProfileJson));
-        config["active-profile-name"] = "default";
-        config["profiles"] = nlohmann::json::object();
-        config["profiles"]["default"] = defaultProfile;
-
-        out << config.dump(2);
+        out << defaultProfile.dump(2);
         out.flush();
         Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
                                      "Created default calibration profile: %s\n",
@@ -306,34 +343,39 @@ int VideoStereoCalib::loadCalibrationProfile(const char* path) {
         return -1;
     }
 
-    if (!config.is_object()) {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
-                                     "Calibration profile container is not a JSON object: %s\n",
-                                     profilePath.string().c_str());
-        return -1;
+    // Current format: the file itself is a single profile object.
+    // Backward compatibility: if the file has a "profiles" object, pick a reasonable entry and migrate.
+    nlohmann::json profile;
+    if (config.is_object() && config.contains("profiles") && config["profiles"].is_object()) {
+        const auto& profilesObj = config["profiles"];
+        if (profilesObj.contains("default")) {
+            profile = profilesObj["default"];
+        } else if (!profilesObj.empty()) {
+            // Pick the first profile entry.
+            profile = profilesObj.begin().value();
+        } else {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+                                         "Calibration profile file has empty 'profiles' object: %s\n",
+                                         profilePath.string().c_str());
+            return -1;
+        }
+
+        // Migrate on disk to single-profile format (best-effort).
+        try {
+            std::ofstream out(profilePath, std::ios::out | std::ios::trunc);
+            if (out.is_open()) {
+                out << profile.dump(2);
+                out.flush();
+            }
+        } catch (...) {
+        }
+    } else {
+        profile = config;
     }
 
-    if (!config.contains("active-profile-name") || !config["active-profile-name"].is_string()) {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
-                                     "Calibration profile missing 'active-profile-name': %s\n",
-                                     profilePath.string().c_str());
-        return -1;
-    }
-    const std::string activeName = config["active-profile-name"].get<std::string>();
-
-    if (!config.contains("profiles") || !config["profiles"].is_object() || !config["profiles"].contains(activeName)) {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
-                                     "Calibration profile missing active profile '%s': %s\n",
-                                     activeName.c_str(),
-                                     profilePath.string().c_str());
-        return -1;
-    }
-
-    const nlohmann::json& profile = config["profiles"][activeName];
     if (!profile.is_object()) {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
-                                     "Active profile '%s' is not a JSON object: %s\n",
-                                     activeName.c_str(),
+                                     "Calibration profile is not a JSON object: %s\n",
                                      profilePath.string().c_str());
         return -1;
     }
@@ -401,21 +443,17 @@ int VideoStereoCalib::loadCalibrationProfile(const char* path) {
         }
     }
 
+    m_HaveRectifyMaps = buildRectifyMaps_();
+
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
-                                 "Loaded stereo calibration profile '%s' (%ux%u)\n",
-                                 activeName.c_str(),
+                                 "Loaded stereo calibration profile (%ux%u)\n",
                                  profileSettings_.imageWidth,
                                  profileSettings_.imageHeight);
 
     return 0;
 }
 
-int VideoStereoCalib::storeCalibrationProfile(const char* profileName) {
-    if (!profileName || profileName[0] == '\0') {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Invalid profile name\n");
-        return -1;
-    }
-
+int VideoStereoCalib::storeCalibrationProfile() {
     auto arr3 = [](const std::array<double, 3>& a) {
         return nlohmann::json::array({a[0], a[1], a[2]});
     };
@@ -478,28 +516,6 @@ int VideoStereoCalib::storeCalibrationProfile(const char* profileName) {
         }
     }
 
-    nlohmann::json config;
-    if (std::filesystem::exists(profilePath)) {
-        std::ifstream in(profilePath);
-        if (in.is_open()) {
-            try {
-                in >> config;
-            } catch (...) {
-                config = nlohmann::json::object();
-            }
-        }
-    }
-
-    if (!config.is_object()) {
-        config = nlohmann::json::object();
-    }
-    if (!config.contains("profiles") || !config["profiles"].is_object()) {
-        config["profiles"] = nlohmann::json::object();
-    }
-
-    config["profiles"][profileName] = profile;
-    config["active-profile-name"] = std::string(profileName);
-
     std::ofstream out(profilePath, std::ios::out | std::ios::trunc);
     if (!out.is_open()) {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
@@ -507,10 +523,10 @@ int VideoStereoCalib::storeCalibrationProfile(const char* profileName) {
                                      profilePath.string().c_str());
         return -1;
     }
-    out << config.dump(2);
+    out << profile.dump(2);
     out.flush();
 
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Stored calibration profile: %s\n", profileName);
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Stored calibration profile\n");
     return 0;
 }
 
@@ -536,6 +552,32 @@ int VideoStereoCalib::DetectChessBoard(cv::Mat& leftBgr, cv::Mat& rightBgr, cv::
 
     return 0;
 }
+
+nlohmann::json& VideoStereoCalib::getCurrentCalibrationStats() {
+    return m_CalibrationStatsBank;
+}
+
+void VideoStereoCalib::rectify(const cv::Mat& leftIn, const cv::Mat& rightIn,
+                 cv::Mat& leftRect, cv::Mat& rightRect) const {
+    if (!m_HaveRectifyMaps || map1L.empty() || map2L.empty() || map1R.empty() || map2R.empty()) {
+        leftRect = leftIn;
+        rightRect = rightIn;
+        return;
+    }
+    if (leftIn.empty() || rightIn.empty()) {
+        leftRect = leftIn;
+        rightRect = rightIn;
+        return;
+    }
+    if (leftIn.size() != m_RectifySize || rightIn.size() != m_RectifySize) {
+        leftRect = leftIn;
+        rightRect = rightIn;
+        return;
+    }
+
+    cv::remap(leftIn, leftRect, map1L, map2L, cv::INTER_LINEAR);
+    cv::remap(rightIn, rightRect, map1R, map2R, cv::INTER_LINEAR);
+} 
 
 int VideoStereoCalib::DoCalibration(cv::Mat& leftBgr,
                                     cv::Mat& rightBgr,
@@ -596,6 +638,10 @@ int VideoStereoCalib::DoCalibration(cv::Mat& leftBgr,
         cv::putText(leftBgr, count, {20, 80}, cv::FONT_HERSHEY_SIMPLEX, 0.9, {0, 255, 0}, 2);
         cv::putText(rightBgr, status, {20, 40}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {0, 255, 0}, 2);
         cv::putText(rightBgr, count, {20, 80}, cv::FONT_HERSHEY_SIMPLEX, 0.9, {0, 255, 0}, 2);
+
+        // Set calibration stats
+        m_CalibrationStatsBank["count"                 ] = count;
+        m_CalibrationStatsBank["status"                ] = status;
     }
 
     if (!(foundL && foundR)) {
@@ -657,6 +703,18 @@ int VideoStereoCalib::DoCalibration(cv::Mat& leftBgr,
     writeRowMajor(Q, profileSettings_.Q);
 
     m_Calibrated = true;
+    m_HaveRectifyMaps = buildRectifyMaps_();
+    
+    m_CalibrationStatsBank["board_width"           ] = boardSize.width;
+    m_CalibrationStatsBank["board_height"          ] = boardSize.height;
+    m_CalibrationStatsBank["square_size_meters"    ] = squareSize;
+    m_CalibrationStatsBank["found_left"            ] = foundL;
+    m_CalibrationStatsBank["found_right"           ] = foundR;
+    m_CalibrationStatsBank["num_collected_samples" ] = m_ImagePointsL.size();
+    m_CalibrationStatsBank["rms_error"             ] = m_LastRmsError;
+    m_CalibrationStatsBank["image_width"           ] = m_ImageSize.width;
+    m_CalibrationStatsBank["image_height"          ] = m_ImageSize.height;
+    m_CalibrationStatsBank["calibrated"            ] = m_Calibrated;
 
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
                                  "Stereo calibration complete: samples=%zu rms=%.6f\n",

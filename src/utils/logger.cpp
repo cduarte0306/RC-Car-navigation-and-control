@@ -63,6 +63,10 @@ void Logger::log(int logLvl, const char* format, ...) {
             level = LOG_ERR;
             prepend = ERR_PREPEND;
             break;
+
+        case Logger::LOG_LVL_DEBUG:
+            return;
+            break;
         
         default:
             break;
