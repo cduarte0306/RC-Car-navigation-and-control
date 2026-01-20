@@ -122,7 +122,7 @@ int VisionControls::init(void) {
         return -1;
     }
 
-    m_VideoStreamer->setJpegQuality(35);  // Default to maximum quality
+    m_VideoStreamer->setJpegQuality(50);  // Default to maximum quality
     m_VideoStreamer->setStreamFrameRate(Vision::VideoStreamer::FrameRate::_30Fps);
     m_VideoStreamer->start();
     
