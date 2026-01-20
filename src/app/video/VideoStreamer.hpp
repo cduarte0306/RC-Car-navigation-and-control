@@ -18,6 +18,12 @@ namespace Vision {
 class VideoStreamer {
     public:
 
+    enum class FrameRate : uint8_t {
+        _15Fps = 66, // 15 frames per second
+        _30Fps = 33, // 30 frames per second
+        _60Fps = 16  // 60 frames per second
+    };
+
     class VideoPacket {
     public:
         VideoPacket() = default;
@@ -166,7 +172,7 @@ class VideoStreamer {
         
     };
 public:
-    /**
+        /**
      * @brief Construct a streamer.
      * @param txAdapter outbound network adapter used to send packets.
      * @param destIpProvider callable returning the current destination IP (thread-safe in caller).
@@ -178,6 +184,15 @@ public:
                   int jpegQuality = 35,
                   std::size_t bufferCapacity = 100);
 
+    /**
+     * @brief Construct a streamer.
+     * @param txAdapter outbound network adapter used to send packets.
+     * @param destIpProvider callable returning the current destination IP (thread-safe in caller).
+     * @param jpegQuality JPEG quality [0-100]; defaults to 35.
+     * @param bufferCapacity number of frames buffered for jitter smoothing.
+     */
+    VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
+                  std::size_t bufferCapacity = 100);
 
     /**
      * @brief Destructor; stops and joins the worker if running.
@@ -195,12 +210,24 @@ public:
      */
     void start();
 
-
     /**
      * @brief Stop and join the streaming thread (idempotent).
      */
     void stop();
 
+    /**
+     * @brief Set the JPEG encoding quality.
+     * @param quality JPEG quality [0-100].
+     * @return int Status code.
+     */
+    int setJpegQuality(int quality);
+
+    /**
+     * @brief Set the streaming frame rates.
+     * @param fps Frames per second.
+     * @return int Status code.
+     */
+    int setStreamFrameRate(FrameRate fps);
 
     /**
      * @brief Enqueue a frame for transmission (frame is cloned).
@@ -309,9 +336,9 @@ private:
      */
     int prepFrame(const std::pair<cv::Mat, cv::Mat>& framePair);
 
+    int frameIntervalMs = 33;  // default ~30 FPS
     int encodeQuality;
     Adapter::CommsAdapter::NetworkAdapter& m_TxAdapter;
-    std::function<std::string()> m_DestIpProvider;
     std::string m_DestIp;
 
     uint32_t m_FrameID = 0;

@@ -35,6 +35,8 @@ int CommandController::init(void) {
         return -1;
     }
 
+    // Initialize host IP in register for broadcast
+    // RegisterMap::getInstance()->set(RegisterMap::RegisterKeys::HostIP, "255.255.255.255");
     return 0;
 }
 
@@ -165,7 +167,6 @@ void CommandController::mainProc() {
             // Process motor commands
             hostIP = this->CommsAdapter->getHostIP(*m_CommandNetAdapter);
             if (hostIP.length() && (hostIP != lastHost)) {
-                this->CameraAdapter->configurePipeline(hostIP);
                 regMap->set(RegisterMap::RegisterKeys::HostIP, hostIP);
                 lastHost = hostIP;
             }

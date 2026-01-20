@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <unordered_map>
 
-#include "app/VideoFrame.hpp"
+#include "app/video/VideoFrame.hpp"
 
 #include <opencv2/opencv.hpp>
 

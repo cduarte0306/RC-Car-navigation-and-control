@@ -31,6 +31,8 @@ int StereoCam::start(uint32_t w, uint32_t h, uint32_t fps) {
     h_   = static_cast<uint32_t>(h);
     fps_ = static_cast<uint32_t>(fps);
 
+    m_ThreadCanRun.store(true);
+
     provider_.reset(CameraProvider::create());
     iProvider_ = interface_cast<ICameraProvider>(provider_);
     if (!iProvider_) {
@@ -208,6 +210,26 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
 }
 
 int StereoCam::close() {
+    // Stop threads first; otherwise they may keep using surfaces we're about to destroy.
+    m_ThreadCanRun.store(false);
+    {
+        std::lock_guard<std::mutex> lk(startMtx_);
+        start_ = true; // release any producers waiting on the start barrier
+    }
+    startCv_.notify_all();
+
+    // Attempt to stop Argus capture loops to unblock acquireFrame().
+    for (size_t i = 0; i < kNumCameras; ++i) {
+        if (iSessions_[i]) {
+            (void)iSessions_[i]->stopRepeat();
+            (void)iSessions_[i]->waitForIdle();
+        }
+    }
+
+    (void)m_Cam0CaptureThread_.join();
+    (void)m_Cam1CaptureThread_.join();
+    (void)m_CamSynchronizer.join();
+
     for (size_t i = 0; i < kNumCameras; ++i) {
         if (bgrSurfaces_[i] && bgrMapped_[i]) {
             NvBufSurfaceUnMap(bgrSurfaces_[i], 0, 0);
@@ -376,6 +398,8 @@ int StereoCam::readCamera_(size_t index, cv::Mat& outBgr, uint64_t& outTimestamp
     const auto* src = static_cast<const uint8_t*>(bgrMappedPtr_[index]);
     const uint32_t pitch = bgrPitch_[index];
     const uint32_t rowBytes = w_ * 4;
+    if (!src) return -1;
+    if (pitch < rowBytes) return -1;
     for (uint32_t y = 0; y < h_; ++y) {
         std::memcpy(outBgr.ptr(static_cast<int>(y)), src + static_cast<std::size_t>(y) * pitch, rowBytes);
     }

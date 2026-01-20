@@ -1,4 +1,4 @@
-#include "app/VideoRecording.hpp"
+#include "app/video/VideoRecording.hpp"
 
 #include <chrono>
 #include <algorithm>
