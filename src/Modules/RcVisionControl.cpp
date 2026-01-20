@@ -360,91 +360,21 @@ void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::
     disparity.convertTo(disp32f, CV_32F, 1.0 / 16.0);
     cv::max(disp32f, 0.0f, disp32f);
 
-    // Estimate distance at the image center using the rectified projection (meters).
-    std::string depthText = "Z: --";
-    {
-        const int cx = disp32f.cols / 2;
-        const int cy = disp32f.rows / 2;
-        const int half = 5; // 11x11 window
-        const int x0 = std::max(0, cx - half);
-        const int y0 = std::max(0, cy - half);
-        const int x1 = std::min(disp32f.cols - 1, cx + half);
-        const int y1 = std::min(disp32f.rows - 1, cy + half);
-
-        std::vector<float> vals;
-        vals.reserve(static_cast<size_t>((x1 - x0 + 1) * (y1 - y0 + 1)));
-        for (int y = y0; y <= y1; ++y) {
-            const float* row = disp32f.ptr<float>(y);
-            for (int x = x0; x <= x1; ++x) {
-                const float d = row[x];
-                if (d > 0.5f && std::isfinite(d)) vals.push_back(d);
-            }
-        }
-        if (!vals.empty()) {
-            const size_t mid = vals.size() / 2;
-            std::nth_element(vals.begin(), vals.begin() + mid, vals.end());
-            const double dispPx = static_cast<double>(vals[mid]);
-            if (auto z = m_VideoCalib.depthMetersFromDisparity(dispPx)) {
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), "Z: %.2f m", *z);
-                depthText = buf;
-            }
-        }
-    }
-
-    // Normalize for display using only valid pixels (otherwise the sea of zeros crushes contrast).
-    // Also use percentile clipping so a handful of outliers/speckles don't force most surfaces
-    // into dark blue.
+    // Fast display normalization (avoid per-frame full-image scans / percentiles).
     cv::Mat disp8U(disp32f.size(), CV_8U, cv::Scalar(0));
     cv::Mat validMask = disp32f > 0.0f;
-    const int validCount = cv::countNonZero(validMask);
-    if (validCount > 0) {
-        std::vector<float> validVals;
-        validVals.reserve(static_cast<size_t>(validCount));
-        for (int y = 0; y < disp32f.rows; ++y) {
-            const float* row = disp32f.ptr<float>(y);
-            for (int x = 0; x < disp32f.cols; ++x) {
-                const float d = row[x];
-                if (d > 0.0f && std::isfinite(d)) validVals.push_back(d);
-            }
-        }
-
-        if (validVals.size() >= 16) {
-            const auto nth = [&](double p) -> float {
-                const size_t idx = static_cast<size_t>(p * static_cast<double>(validVals.size() - 1));
-                std::nth_element(validVals.begin(), validVals.begin() + idx, validVals.end());
-                return validVals[idx];
-            };
-
-            // Clip to a robust range to avoid outliers dominating the colormap.
-            const float lo = nth(0.05);   // 5th percentile
-            const float hi = nth(0.95);   // 95th percentile
-            if (hi > lo) {
-                cv::Mat clipped;
-                cv::min(cv::max(disp32f, lo), hi, clipped);
-
-                const double scale = 255.0 / static_cast<double>(hi - lo);
-                const double shift = -static_cast<double>(lo) * scale;
-                cv::Mat scaled;
-                clipped.convertTo(scaled, CV_8U, scale, shift);
-                scaled.copyTo(disp8U, validMask);
-            }
-        } else {
-            // Fall back to min/max when we don't have enough valid pixels.
-            double vmin = 0.0, vmax = 0.0;
-            cv::minMaxLoc(disp32f, &vmin, &vmax, nullptr, nullptr, validMask);
-            if (vmax > vmin) {
-                const double scale = 255.0 / (vmax - vmin);
-                const double shift = -vmin * scale;
-                cv::Mat scaled;
-                disp32f.convertTo(scaled, CV_8U, scale, shift);
-                scaled.copyTo(disp8U, validMask);
-            }
+    if (cv::countNonZero(validMask) > 0) {
+        double vmin = 0.0, vmax = 0.0;
+        cv::minMaxLoc(disp32f, &vmin, &vmax, nullptr, nullptr, validMask);
+        if (vmax > vmin) {
+            const double scale = 255.0 / (vmax - vmin);
+            const double shift = -vmin * scale;
+            cv::Mat scaled;
+            disp32f.convertTo(scaled, CV_8U, scale, shift);
+            scaled.copyTo(disp8U, validMask);
         }
     }
     cv::applyColorMap(disp8U, stereoFrame, cv::COLORMAP_JET);
-
-    cv::putText(stereoFrame, depthText, {10, 60}, cv::FONT_HERSHEY_SIMPLEX, 0.8, {255, 255, 255}, 2, cv::LINE_AA);
 
     // Lightweight periodic debug to catch "all blue" (near-zero disparity) quickly.
     static auto lastLog = std::chrono::steady_clock::now();
