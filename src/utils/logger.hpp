@@ -15,7 +15,8 @@ public:
     enum {
         LOG_LVL_INFO,
         LOG_LVL_WARN,
-        LOG_LVL_ERROR
+        LOG_LVL_ERROR,
+        LOG_LVL_DEBUG
     };
 
 private:

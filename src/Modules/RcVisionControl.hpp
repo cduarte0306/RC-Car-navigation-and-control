@@ -10,8 +10,11 @@
 #include <opencv2/dnn.hpp>
 #include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
+#include "Devices/GyroScope.hpp"
 
-#include "app/VideoRecording.hpp"
+#include "app/video/VideoRecording.hpp"
+#include "app/video/VideoStereoCalibration.hpp"
+#include "app/video/VideoStreamer.hpp"
 
 
 namespace Modules {
@@ -33,8 +36,6 @@ public:
     // virtual int moduleCommand_(char* pbuf, size_t len) override;
 
     virtual int moduleCommand_(std::vector<char>& buffer) override;
-
-    virtual int configurePipeline_(const std::string& host) override;
     
 protected:
 #pragma pack(push, 1)
@@ -56,35 +57,48 @@ protected:
 
 #pragma pack(pop)
     enum {
-        StreamCamera,
-        StreamSim
+        StreamCameraSource,  // normal camera mode
+        StreamSimSource,     // simulation camera mode
+        StreamMaxSources
     };
 
     // Camera module commands
     enum {
-        CmdSetFrameRate,  // set camera frame rate
-        CmdStartStream,   // start video stream
-        CmdStopStream,    // stop video stream
-        CmdStreamMode,    // start simulation video stream
-        CmdSelCameraMode, // select camera mode
-        CmdClrVideoRec    // clear video recording buffer
+        CmdSetFrameRate,          // set camera frame rate
+        CmdStartStream,           // start video stream
+        CmdStopStream,            // stop video stream
+        CmdSelCameraStream,       // select camera stream (Normal or training)
+        CmdClrVideoRec,           // clear video recording buffer
+        CmdSaveVideo,             // save video recording to disks
+        CmdReadStoredVideos,      // Read stored videos from disk
+        CmdLoadSelectedVideo,     // load selected video from disk
+        CmdDeleteVideo,           // Delete video
+        CmdCalibrationSetState,   // Start video calibration
+        CmdCalibrationWrtParams,  // Sets calibration paramters
+        CmdCalibrationReset,      // Reset calibration
+        CmdCalibrationSave,       // Save calibration to disk
     };
 
-    // Setting enums
+    // Camera process enums
     enum {
         CamModeNormal,
-        CamModeDepth,
-        CamModeTraining
+        CamModeDisparity,
+        CamModeMax
     };
 
     struct CameraCommand {
         uint8_t command;
         val_type_t data;
+        uint32_t payloadLen;
     } __attribute__((__packed__));
 
     struct CameraSettings {
         int frameRate = 30;
         int mode      = CamModeNormal;
+        std::atomic<uint8_t> streamSelection{StreamCameraSource};
+        std::atomic<bool> calibrationMode{false};
+        std::string videoName = "recording.MOV";
+        cv::Size chessboardSize{9, 6}; // inner corners (cols, rows)
     } m_CamSettings;
 
     // Parent main proc override
@@ -94,7 +108,7 @@ protected:
     virtual void OnTimer(void) override;
 
     // Frame transmission handler
-    void decodeJPEG(cv::Mat& frame, const VideoFrame& frameEntry);
+    void decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameEntry);
 
     // Receive frame handler
     void recvFrame(std::vector<char>& data);
@@ -102,11 +116,17 @@ protected:
     // Frame processing handler
     void processFrame(cv::Mat& frame);
 
-    // Depth processing handler
-    void processDepth(cv::Mat& frame);
+    // Stereo frame processing handler
+    void processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair);
+
+    // Stereo frame processing handler
+    void processFramePair(std::pair<cv::Mat, cv::Mat>& stereoFrame);
+
+    // Camera source stream handler
+    // void processCameraSource(Devices::StereoCam& cam);
 
     struct StreamStatus {
-        std::atomic<uint8_t> streamInStatus{StreamCamera};
+        std::atomic<uint8_t> streamInStatus{StreamCameraSource};
         int streamInCounter = 0;  // Stream IN watchdog counter
     } m_StreamStats;
 
@@ -144,13 +164,21 @@ protected:
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_RxAdapter{nullptr};
 
     // Video recorder
-    VideoRecording m_VideoRecorder;
+    Vision::VideoRecording m_VideoRecorder;
+
+    std::unique_ptr<Vision::VideoStreamer> m_VideoStreamer{nullptr};
+    
+    // Video calibration
+    Vision::VideoStereoCalib m_VideoCalib;
 
     // Incoming frame assembler
-    VideoFrame m_StreamInFrame;
+    Vision::VideoFrame m_StreamInFrame;
 
     // Frame ID
     uint32_t m_FrameID = 0;
+
+    // Name of the currently-downloaded (sim) video, derived from incoming packet metadata.
+    std::string m_LastIncomingVideoName;
 
     // DNN model
     cv::dnn::Net m_DnnNetDepth;

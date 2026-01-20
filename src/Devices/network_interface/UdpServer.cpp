@@ -89,6 +89,10 @@ void UdpServer::startReceive_(void) {
                     Logger* logger = Logger::getLoggerInst();
                     std::vector<char> dataReceived(m_RecvBuffer.begin(), m_RecvBuffer.begin() + bytes_recvd);
                     dataReceivedCallback(dataReceived);
+                    if (dataReceived.size() > m_RecvBuffer.size()) {
+                        m_RecvBuffer.resize(dataReceived.size());
+                    }
+                    std::copy(dataReceived.begin(), dataReceived.end(), m_RecvBuffer.begin());
                     m_HostIP = remoteEndpoint.address().to_string();
                     if (!m_HostFound) {
                         logger->log(Logger::LOG_LVL_INFO, "Host found: %s:%d\n", m_HostIP.c_str(), remoteEndpoint.port());
@@ -97,7 +101,7 @@ void UdpServer::startReceive_(void) {
                     // Reply with the receive buffer
                     if (m_AsyncTx) {
                         socket_.async_send_to(
-                            boost::asio::buffer(m_RecvBuffer.data(), bytes_recvd), remoteEndpoint,
+                            boost::asio::buffer(m_RecvBuffer.data(), dataReceived.size()), remoteEndpoint,
                             [&](const boost::system::error_code& ec, std::size_t bytes_sent) {
                                 if (ec) {
                                     logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s\r\n", ec.message().c_str());

@@ -9,6 +9,7 @@
 #include <map>
 
 
+namespace Vision {
 /**
  * @brief Represents a single encoded video fragment that can be appended to and queried.
  */
@@ -24,6 +25,19 @@ public:
     ~VideoFrame() = default;
 
     VideoFrame& operator=(const VideoFrame& other) noexcept = default;
+
+    std::vector<uint8_t>& operator [](int id) noexcept {
+        return m_FrameSegMap[id];
+    }
+
+    const std::vector<uint8_t>& operator [](int id) const noexcept {
+        static const std::vector<uint8_t> kEmpty;
+        auto it = m_FrameSegMap.find(id);
+        if (it == m_FrameSegMap.end()) {
+            return kEmpty;
+        }
+        return it->second;
+    }
 
     /**
      * @brief Construct a segment with a specific identifier.
@@ -61,6 +75,8 @@ public:
      */
     void append(const std::vector<uint8_t>& buffer);
 
+    void setFrameBytes(const std::vector<uint8_t>& bytes);
+
     /**
      * @brief Get the segment map.
      */
@@ -76,7 +92,7 @@ public:
      * @brief Get the segment identifier.
      */
     std::size_t id() const noexcept;
-
+    
     std::size_t frameID() const noexcept { return frameID_; }
 
     /**
@@ -120,5 +136,6 @@ private:
     std::size_t expectedTotalLength_{0};
     std::map<int, std::vector<uint8_t>> m_FrameSegMap;
 };
+}  // namespace Vision
 
 #endif

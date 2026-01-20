@@ -42,6 +42,9 @@ int RcCarTelemetry::registerTelemetrySource_(const std::string& sourceName) {
     if (sourceName.empty()) {
         return -1;
     }
+
+    Logger* logger = Logger::getLoggerInst();
+    logger->log(Logger::LOG_LVL_INFO, "Registered telemetry source: %s\r\n", sourceName.c_str());
     m_registeredSources.insert(sourceName);
     return 0;
 }
@@ -62,10 +65,12 @@ int RcCarTelemetry::publishTelemetry_(const std::string& sourceName, const uint8
 
     // Only allow known sources
     if (m_registeredSources.find(sourceName) == m_registeredSources.end()) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Telemetry publish from unregistered source: %s\r\n", sourceName.c_str());
         return -1;
     }
 
     if (!m_TxAdapter || !this->CommsAdapter) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Telemetry publish failed: Transmission adapter not initialized\r\n");
         return -1;
     }
 

@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
     cli->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
     rcVision->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     rcVision->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
-    rcVision->moduleBind<Adapter::TlmAdapter>(commandController->getInputAdapter());
+    rcVision->moduleBind<Adapter::TlmAdapter>(rcTelemetry->getInputAdapter());
     rcTelemetry->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
 
     // Preliminary initialization

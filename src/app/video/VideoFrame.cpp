@@ -1,7 +1,9 @@
-#include "app/VideoFrame.hpp"
+#include "app/video/VideoFrame.hpp"
+
+
+namespace Vision {
 
 VideoFrame::VideoFrame(std::size_t id) : frameID_(id) {}
-
 
 void VideoFrame::setExpected(std::size_t expectedSegments, std::size_t expectedTotalLength) noexcept {
     expectedSegments_ = expectedSegments;
@@ -28,6 +30,11 @@ void VideoFrame::append(int id, const std::vector<uint8_t>& buffer) {
 
 void VideoFrame::append(const std::vector<uint8_t>& buffer) {
     append(0, buffer);
+}
+
+
+void VideoFrame::setFrameBytes(const std::vector<uint8_t>& bytes) {
+    
 }
 
 
@@ -69,3 +76,5 @@ void VideoFrame::reset() {
     expectedTotalLength_ = 0;
     m_FrameSegMap.clear();
 }
+
+}  // namespace Vision

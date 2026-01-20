@@ -65,6 +65,14 @@ namespace Msg {
             size_--;
         }
 
+        // Clears the buffer completely
+        void flush() {
+            std::lock_guard<std::mutex> lock(bufferMutex);
+            head_ = 0;
+            tail_ = 0;
+            size_ = 0;
+        }
+
         // Returns a reference to the element at a specific index relative to the head
         // (0 is the oldest element, size-1 is the newest)
         T& operator[](size_t index) {
@@ -76,6 +84,14 @@ namespace Msg {
 
         // Const version of operator[]
         const T& operator[](size_t index) const {
+            if (index >= size_) {
+                throw std::out_of_range("Index out of bounds.");
+            }
+            return buffer_[(tail_ + index) % capacity_].getData();
+        }
+
+        T& peek(size_t index) {
+            std::lock_guard<std::mutex> lock(bufferMutex);
             if (index >= size_) {
                 throw std::out_of_range("Index out of bounds.");
             }

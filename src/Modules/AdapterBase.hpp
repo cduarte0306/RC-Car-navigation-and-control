@@ -54,8 +54,7 @@ namespace Adapter {
                 return -1;
             }
 
-            moduleWriteCmdVector(buffer);
-            return 0;
+            return moduleWriteCmdVector(buffer);
         }
 
         /**
@@ -192,16 +191,8 @@ namespace Adapter {
             return 0;
         }
 
-        virtual int configurePipeline(const std::string& host) {
-            if (!configurePipelineCommand) {
-                return -1;
-            }
-
-            return this->configurePipelineCommand(host);
-        }
     private:
         std::function<int(bool)>                    setCameraStateCommand    = nullptr;
-        std::function<int(const std::string& host)> configurePipelineCommand = nullptr;
 
         virtual int bind_(AdapterBase* Adapter) override {
             // Implementation for binding motor adapter
@@ -214,10 +205,6 @@ namespace Adapter {
             // bind this instance's implementation as a callable on the target adapter
             this->setCameraStateCommand = [adapter](bool state) -> int {
                 return adapter->setCameraState_(state);
-            };
-
-            this->configurePipelineCommand = [adapter](const std::string& host) -> int {
-                return adapter->configurePipeline_(host);
             };
 
             this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
