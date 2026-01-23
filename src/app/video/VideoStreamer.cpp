@@ -69,19 +69,25 @@ int VideoStreamer::setJpegQuality(int quality) {
 
 
 int VideoStreamer::setStreamFrameRate(FrameRate fps) {
+    const uint8_t rawFps = static_cast<uint8_t>(fps);
     switch (fps) {
         case FrameRate::_15Fps:
-            frameIntervalMs = 66;
+            frameIntervalMs.store(66);
             break;
         case FrameRate::_30Fps:
-            frameIntervalMs = 33;
+            frameIntervalMs.store(33);
             break;
         case FrameRate::_60Fps:
-            frameIntervalMs = 16;
+            frameIntervalMs.store(16);
             break;
         default:
-            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Unsupported frame rate.\n");
-            return -1;
+            // Allow callers to pass a raw FPS value (e.g. 5/15/30) via cast.
+            if (rawFps == 0 || rawFps > 120) {
+                Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Unsupported frame rate.\n");
+                return -1;
+            }
+            frameIntervalMs.store(static_cast<int>(1000 / rawFps));
+            return 0;
     }
     return 0;
 }
@@ -159,18 +165,22 @@ void VideoStreamer::runMono() {
 
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (mono) started. Host IP: %s\n", destIpReg->c_str());
 
-    auto lastTime = std::chrono::steady_clock::now();
     m_DestIp = *destIpReg;
 
     while (m_Running) {
         if (m_Buffer.isEmpty()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
             continue;
         }
 
+        VideoStreamer::throttleFps(frameIntervalMs.load());
+
         // For lowest latency, always transmit the newest frame.
-        cv::Mat frame = m_Buffer.getHead();
-        m_Buffer.pop();
+        cv::Mat frame;
+        do {
+            frame = m_Buffer.getHead();
+            m_Buffer.pop();
+        } while (!m_Buffer.isEmpty());
 
         if (frame.empty()) {
             continue;
@@ -197,13 +207,17 @@ void VideoStreamer::runStereo() {
 
     while (m_Running) {
         if (m_BufferStereo.isEmpty()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
             continue;
         }
 
+        VideoStreamer::throttleFps(frameIntervalMs.load());
+
         // For lowest latency, always transmit the newest stereo pair.
-        stereoFrames = m_BufferStereo.getHead();
-        m_BufferStereo.pop();
+        do {
+            stereoFrames = m_BufferStereo.getHead();
+            m_BufferStereo.pop();
+        } while (!m_BufferStereo.isEmpty());
 
         if (stereoFrames.first.empty() || stereoFrames.second.empty()) {
             continue;
@@ -229,13 +243,17 @@ void VideoStreamer::runStereoMono() {
 
     while (m_Running) {
         if (m_BufferStereoMono.isEmpty()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
             continue;
         }
 
+        VideoStreamer::throttleFps(frameIntervalMs.load());
+
         // For lowest latency, always transmit the newest frame.
-        stereoFrame = m_BufferStereoMono.getHead();
-        m_BufferStereoMono.pop();
+        do {
+            stereoFrame = m_BufferStereoMono.getHead();
+            m_BufferStereoMono.pop();
+        } while (!m_BufferStereoMono.isEmpty());
 
         if (stereoFrame.stereoFrame.empty()) {
             continue;

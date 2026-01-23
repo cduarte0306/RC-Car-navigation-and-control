@@ -70,6 +70,11 @@ public:
         return *this;
     }
 
+    void detach(void) {
+        internal_thread.detach();
+    }
+    
+
     // Optional: provide access to the underlying native handle if needed
     std::thread::native_handle_type native_handle() {
         return internal_thread.native_handle();

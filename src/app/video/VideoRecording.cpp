@@ -5,6 +5,7 @@
 #include <string>
 #include <cstring>
 #include <fstream>
+#include <thread>
 #include <filesystem>
 #include <unordered_map>
 #include "utils/logger.hpp"
@@ -16,12 +17,18 @@ VideoRecording::VideoRecording() {
 	// Load from filepath
 	const std::filesystem::path videoConfigPath = std::filesystem::path(VideoStoragePath) / "video-config.json";
 	std::ifstream fileIn(videoConfigPath);
+	std::thread loadThread;
+	
 	if (fileIn.is_open()) {
 		nlohmann::json videoLoadConfig;
 		fileIn >> videoLoadConfig;
 		if (videoLoadConfig.contains("path")) {
-			m_VideoPath = videoLoadConfig["path"].get<std::string>();;
-			loadFile(m_VideoPath);
+			m_VideoPath = videoLoadConfig["path"].get<std::string>();
+			loadThread = std::thread([this]() {
+				loadFile(m_VideoPath);	
+			});
+			
+			loadThread.detach();
 		}
 	}
 }

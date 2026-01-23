@@ -10,6 +10,7 @@
 #include <opencv2/dnn.hpp>
 #include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
+#include "Devices/StereoCam.hpp"
 #include "Devices/GyroScope.hpp"
 
 #include "app/video/VideoRecording.hpp"
@@ -64,10 +65,12 @@ protected:
 
     // Camera module commands
     enum {
-        CmdSetFrameRate,          // set camera frame rate
         CmdStartStream,           // start video stream
         CmdStopStream,            // stop video stream
         CmdSelCameraStream,       // select camera stream (Normal or training)
+        CmdSetFps,                // set streaming parameters (host IP, port, etc)
+        CmdSetQuality,            // Set the stream compresison quality
+        CmdRdParams,              // Command to read all configured parameteres
         CmdClrVideoRec,           // clear video recording buffer
         CmdSaveVideo,             // save video recording to disks
         CmdReadStoredVideos,      // Read stored videos from disk
@@ -167,6 +170,9 @@ protected:
     Vision::VideoRecording m_VideoRecorder;
 
     std::unique_ptr<Vision::VideoStreamer> m_VideoStreamer{nullptr};
+
+    // Stereo camera object
+    std::unique_ptr<Devices::StereoCam> m_Cam{nullptr};
     
     // Video calibration
     Vision::VideoStereoCalib m_VideoCalib;
