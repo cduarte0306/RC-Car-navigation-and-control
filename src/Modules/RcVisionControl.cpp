@@ -39,6 +39,8 @@
 #define MODEL_PATH  "/opt/rc-car/models/model-small.onnx"
 
 
+const char* StorageLocation = "/data/calibration-data/streaming-profile.json";
+
 static cv::Ptr<cv::cuda::StereoBM> stereoBM = nullptr;
 static cv::cuda::GpuMat d_left, d_right, d_disp;
 static cv::cuda::Stream stream;
@@ -50,6 +52,8 @@ VisionControls::VisionControls(int moduleID, std::string name) :
     logger->log(Logger::LOG_LVL_INFO, "Vision object initialized\r\n");
 
     setPeriod(1000);  // Set the timer thread to service ever second
+    
+    VisionControls::loadStreamingProfile(m_CamSettings);
 }
 
 
@@ -130,9 +134,119 @@ int VisionControls::init(void) {
     m_VideoStreamer->setStreamFrameRate(Vision::VideoStreamer::FrameRate::_30Fps);
     
     m_VideoRecorder.setFrameRate(Vision::VideoRecording::FrameRate::_30Fps);
-    stereoBM = cv::cuda::createStereoBM(96, 15);
+    stereoBM = cv::cuda::createStereoBM(m_CamSettings.numDisparities, m_CamSettings.numBlocks);
+    m_NumDisparities = 96;
 
     logger->log(Logger::LOG_LVL_INFO, "Vision control module initialized\r\n");
+    return 0;
+}
+
+
+int VisionControls::saveStreamingProfile(VisionControls::CameraSettings& settings) {
+    const std::filesystem::path profilePath(StorageLocation);
+    const std::filesystem::path parentDir = profilePath.has_parent_path() ? profilePath.parent_path() : std::filesystem::path{};
+
+    // If a previous version accidentally created a directory at the file path, move it aside.
+    if (std::filesystem::exists(profilePath) && std::filesystem::is_directory(profilePath)) {
+        std::error_code ec;
+        std::filesystem::path bak = profilePath;
+        bak += ".bakdir";
+        std::filesystem::rename(profilePath, bak, ec);
+        if (ec) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+                                         "Streaming profile path is a directory and could not be moved: %s\n",
+                                         StorageLocation);
+            return -1;
+        }
+    }
+
+    if (!parentDir.empty() && !std::filesystem::exists(parentDir)) {
+        std::error_code ec;
+        std::filesystem::create_directories(parentDir, ec);
+        if (ec) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+                                         "Failed to create streaming profile directory: %s\n",
+                                         parentDir.string().c_str());
+            return -1;
+        }
+    }
+
+    nlohmann::json profileSettings;
+    profileSettings["quality"     ] = settings.quality;
+    profileSettings["fps"         ] = settings.frameRate;
+    profileSettings["disparities" ] = settings.numDisparities;
+    profileSettings["numBlocks"   ] = settings.numBlocks;
+
+    std::ofstream out(profilePath, std::ios::out | std::ios::trunc);
+    if (!out.is_open()) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+                                     "Failed to write streaming profile: %s\n",
+                                     StorageLocation);
+        return -1;
+    }
+    out << profileSettings.dump(2);
+    out.flush();
+    return 0;
+}
+
+
+int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& settings) {
+    const std::filesystem::path profilePath(StorageLocation);
+
+    if (!std::filesystem::exists(profilePath)) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN,
+                                     "Streaming profile does not exist: %s\n",
+                                     StorageLocation);
+        return 0;
+    }
+
+    // If a previous version accidentally created a directory at the file path, move it aside.
+    if (std::filesystem::is_directory(profilePath)) {
+        std::error_code ec;
+        std::filesystem::path bak = profilePath;
+        bak += ".bakdir";
+        std::filesystem::rename(profilePath, bak, ec);
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN,
+                                     "Streaming profile path is a directory; moved aside to %s\n",
+                                     bak.string().c_str());
+        return 0;
+    }
+
+    // Read from the file
+    std::ifstream profileFile(profilePath);
+    if (!profileFile.is_open()) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+                                     "Failed to open streaming profile: %s\n",
+                                     StorageLocation);
+        return -1;
+    }
+
+    nlohmann::json profileSettings;
+
+    try {
+        profileFile >> profileSettings;
+    } catch (const std::exception& e) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+                                     "Failed to parse streaming profile container %s: %s\n",
+                                     StorageLocation,
+                                     e.what());
+        return -1;
+    }
+
+    if (profileSettings.contains("quality")) settings.quality = profileSettings["quality"].get<int>();
+    if (profileSettings.contains("fps")) settings.frameRate = profileSettings["fps"].get<int>();
+    if (profileSettings.contains("disparities")) settings.numDisparities = profileSettings["disparities"].get<int>();
+    if (profileSettings.contains("numBlocks")) settings.numBlocks = profileSettings["numBlocks"].get<int>();
+
+    // Basic sanity
+    if (settings.numDisparities < 8 || (settings.numDisparities % 8) != 0) settings.numDisparities = 96;
+    if (settings.numBlocks < 5 || (settings.numBlocks % 2) == 0) settings.numBlocks = 15;
+    if (settings.quality < 1 || settings.quality > 100) settings.quality = 100;
+    if (settings.frameRate < 1 || settings.frameRate > 120) settings.frameRate = 30;
+
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
+                                 "Loaded video streaming profile from: %s\n",
+                                 StorageLocation);
     return 0;
 }
 
@@ -352,44 +466,45 @@ void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::
     // InputArray::getGpuMat() and throws "getGpuMat is available only for cuda::GpuMat".
     d_left.upload(rectL, stream);
     d_right.upload(rectR, stream);
-    stereoBM->compute(d_left, d_right, d_disp, stream);
+    std::lock_guard<std::mutex> guard(m_StereoMutex);
+
+    try {
+        stereoBM->compute(d_left, d_right, d_disp, stream);
+    } catch (cv::Exception& e) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Stereo conversion failed: %s\n", e.what());
+        m_CamSettings.numDisparities = 96;
+        stereoBM.reset();
+        stereoBM = cv::cuda::createStereoBM(m_CamSettings.numDisparities, m_CamSettings.numBlocks);
+    }
+
     d_disp.download(disparity, stream);
     stream.waitForCompletion();
 
-    // Normalize for visualization.
-    // StereoBM outputs fixed-point disparity (typically scaled by 16). If most values
-    // are <= 0 (common when not rectified), the colormap will look mostly blue.
-    cv::Mat disp32f;
-    disparity.convertTo(disp32f, CV_32F, 1.0 / 16.0);
-    cv::max(disp32f, 0.0f, disp32f);
-
-    // Fast display normalization (avoid per-frame full-image scans / percentiles).
-    cv::Mat disp8U(disp32f.size(), CV_8U, cv::Scalar(0));
-    cv::Mat validMask = disp32f > 0.0f;
-    if (cv::countNonZero(validMask) > 0) {
-        double vmin = 0.0, vmax = 0.0;
-        cv::minMaxLoc(disp32f, &vmin, &vmax, nullptr, nullptr, validMask);
-        if (vmax > vmin) {
-            const double scale = 255.0 / (vmax - vmin);
-            const double shift = -vmin * scale;
-            cv::Mat scaled;
-            disp32f.convertTo(scaled, CV_8U, scale, shift);
-            scaled.copyTo(disp8U, validMask);
-        }
+    if (disparity.empty()) {
+        stereoFrame.release();
+        return;
     }
-    cv::applyColorMap(disp8U, stereoFrame, cv::COLORMAP_JET);
 
-    // Lightweight periodic debug to catch "all blue" (near-zero disparity) quickly.
-    static auto lastLog = std::chrono::steady_clock::now();
-    const auto now = std::chrono::steady_clock::now();
-    if (now - lastLog > std::chrono::seconds(2)) {
-        double minVal = 0.0, maxVal = 0.0;
-        cv::minMaxLoc(disp32f, &minVal, &maxVal);
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG,
-                                    "Stereo disparity range: min=%.2f max=%.2f (post-clamp)\n",
-                                    minVal, maxVal);
-        lastLog = now;
+    // Send raw disparity as 16-bit single-channel PNG-friendly format.
+    // StereoBM outputs fixed-point disparity (typically scaled by 16) and may be signed.
+    if (disparity.type() == CV_16U) {
+        stereoFrame = disparity;
+        return;
     }
+
+    cv::Mat disp16s;
+    if (disparity.type() == CV_16S) {
+        disp16s = disparity;
+    } else {
+        disparity.convertTo(disp16s, CV_16S);
+    }
+
+    cv::Mat dispClamped16s;
+    cv::max(disp16s, 0, dispClamped16s);
+
+    cv::Mat disp16u;
+    dispClamped16s.convertTo(disp16u, CV_16U);
+    stereoFrame = disp16u;
 }
 
 
@@ -488,14 +603,18 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
                 logger->log(Logger::LOG_LVL_ERROR, "Failed to set FPS throttle to %u fps\n", cmd->data.u8);
                 return -1;
             }
+            m_CamSettings.frameRate = cmd->data.u8;
             logger->log(Logger::LOG_LVL_INFO, "Set stream FPS throttle to %u fps\n", cmd->data.u8);
+            VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
 
         case VisionControls::CmdRdParams: {
             nlohmann::json jsonResponse;
-            jsonResponse["quality"] = m_VideoStreamer->getQuality();
-            jsonResponse["fps"] = m_VideoStreamer->getFrameRate();
+            jsonResponse["quality"]     = m_VideoStreamer->getQuality();
+            jsonResponse["fps"]         = m_VideoStreamer->getFrameRate();
+            jsonResponse["disparities"] = m_CamSettings.numDisparities;
+            jsonResponse["blocks"]      = m_CamSettings.numBlocks;
             responseBuffer.resize(jsonResponse.dump().size());
             std::strncpy(responseBuffer.data(), jsonResponse.dump().c_str(), jsonResponse.dump().size());
             break;;
@@ -508,6 +627,45 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             }
 
             logger->log(Logger::LOG_LVL_INFO, "Set quality to %u\n", cmd->data.u8);
+
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+
+        case VisionControls::CmdSetNumDisparities: {
+            uint8_t numDisparities = cmd->data.u8;
+
+            if (numDisparities < 8 || (numDisparities % 8) != 0) {
+                logger->log(Logger::LOG_LVL_ERROR,
+                            "Invalid disparity value %u (must be >= 8 and divisible by 8)\n",
+                            numDisparities);
+                return -1;
+            }
+
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            stereoBM.reset();
+            stereoBM = cv::cuda::createStereoBM(numDisparities, m_CamSettings.numBlocks);
+            m_CamSettings.numDisparities = numDisparities;
+            logger->log(Logger::LOG_LVL_INFO, "Setting number of disparities to %u\n", numDisparities);
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+
+        case VisionControls::CmdSetBlockSize: {
+            const uint8_t blockSize = cmd->data.u8;
+            if (blockSize < 5 || (blockSize % 2) == 0) {
+                logger->log(Logger::LOG_LVL_ERROR,
+                            "Invalid block size %u (must be odd and >= 5)\n",
+                            blockSize);
+                return -1;
+            }
+
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            stereoBM.reset();
+            stereoBM = cv::cuda::createStereoBM(m_CamSettings.numDisparities, blockSize);
+            m_CamSettings.numBlocks = blockSize;
+            logger->log(Logger::LOG_LVL_INFO, "Setting block size to %u\n", blockSize);
+            VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
 
@@ -663,7 +821,7 @@ void VisionControls::mainProc() {
     int16_t xGyro, yGyro, zGyro;
     while (m_Running.load()) {
         switch(m_CamSettings.streamSelection.load()) {
-            case StreamCameraSource:
+            case VisionControls::StreamCameraSource:
                 ret = m_Cam->read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
                 if (ret != 0) {
                     continue;
@@ -679,7 +837,7 @@ void VisionControls::mainProc() {
                 }
                 break;
 
-            case StreamSimSource: {
+            case VisionControls::StreamSimSource: {
                 // We draw a frame from the recording object
                 cv::Mat simFrame = m_VideoRecorder.getNextFrame();
                 if (simFrame.empty()) {
