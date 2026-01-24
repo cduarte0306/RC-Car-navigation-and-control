@@ -19,9 +19,11 @@ class VideoStreamer {
     public:
 
     enum class FrameRate : uint8_t {
-        _15Fps = 66, // 15 frames per second
-        _30Fps = 33, // 30 frames per second
-        _60Fps = 16  // 60 frames per second
+        _5Fps  = 250, // 5 fps
+        _10Fps = 100, // 10 Frames per second
+        _15Fps = 66,  // 15 frames per second
+        _30Fps = 33,  // 30 frames per second
+        _60Fps = 16   // 60 frames per second
     };
 
     class VideoPacket {
@@ -230,6 +232,37 @@ public:
     int setStreamFrameRate(FrameRate fps);
 
     /**
+     * @brief Get the Frame Rate parameter
+     * 
+     * @return uint8_t Frame rate
+     */
+    uint8_t getFrameRate() {
+        switch (static_cast<FrameRate>(frameIntervalMs.load())) {
+            case FrameRate::_5Fps:
+                return 5;
+            case FrameRate::_10Fps:
+                return 10;
+            case FrameRate::_15Fps:
+                return 15;
+            case FrameRate::_30Fps:
+                return 30;
+            case FrameRate::_60Fps:
+                return 60;
+            default:
+                return 0;
+        }
+    }
+
+    /**
+     * @brief Get the Quality parameter
+     * 
+     * @return uint8_t Quality
+     */
+    int getQuality() const {
+        return encodeQuality;
+    }
+
+    /**
      * @brief Enqueue a frame for transmission (frame is cloned).
      */
     void pushFrame(const cv::Mat& frame);
@@ -336,8 +369,24 @@ private:
      */
     int prepFrame(const std::pair<cv::Mat, cv::Mat>& framePair);
 
-    int frameIntervalMs = 33;  // default ~30 FPS
-    int encodeQuality;
+    /**
+     * @brief Enforces FPS on the loop
+     * 
+     * @param fps Frames per second setting
+     */
+    static void throttleFps(int intervalMs) {
+        if (intervalMs <= 0) return;
+        thread_local auto lastTime = std::chrono::steady_clock::now();
+        const auto target = lastTime + std::chrono::milliseconds(intervalMs);
+        const auto now = std::chrono::steady_clock::now();
+        if (now < target) {
+            std::this_thread::sleep_until(target);
+        }
+        lastTime = std::chrono::steady_clock::now();
+    }
+
+    std::atomic<int> frameIntervalMs{33};  // default ~30 FPS
+    int encodeQuality = 35;
     Adapter::CommsAdapter::NetworkAdapter& m_TxAdapter;
     std::string m_DestIp;
 

@@ -122,9 +122,12 @@ int VisionControls::init(void) {
         return -1;
     }
 
-    m_VideoStreamer->setJpegQuality(35);  // Default to maximum quality
+    // Create camera object
+    m_Cam = std::make_unique<Devices::StereoCam>(0, 1);
+    m_Cam->start(1920, 1080, 30);
+
+    m_VideoStreamer->setJpegQuality(100);  // Default to maximum quality
     m_VideoStreamer->setStreamFrameRate(Vision::VideoStreamer::FrameRate::_30Fps);
-    m_VideoStreamer->start();
     
     m_VideoRecorder.setFrameRate(Vision::VideoRecording::FrameRate::_30Fps);
     stereoBM = cv::cuda::createStereoBM(96, 15);
@@ -435,16 +438,12 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
 
     switch (cmd->command) 
     {
-        case VisionControls::CmdSetFrameRate:
-            /* code */
-            break;
-
         case VisionControls::CmdStartStream:
-            /* code */
+            m_VideoStreamer->start();
             break;
 
         case VisionControls::CmdStopStream:
-            /* code */
+            m_VideoStreamer->stop();
             break;
 
         case VisionControls::CmdSelCameraStream: {
@@ -483,6 +482,35 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             break;
         }
 
+        case VisionControls::CmdSetFps: {
+            int ret = m_VideoStreamer->setStreamFrameRate(static_cast<Vision::VideoStreamer::FrameRate>(cmd->data.u8));
+            if (ret < 0) {
+                logger->log(Logger::LOG_LVL_ERROR, "Failed to set FPS throttle to %u fps\n", cmd->data.u8);
+                return -1;
+            }
+            logger->log(Logger::LOG_LVL_INFO, "Set stream FPS throttle to %u fps\n", cmd->data.u8);
+            break;
+        }
+
+        case VisionControls::CmdRdParams: {
+            nlohmann::json jsonResponse;
+            jsonResponse["quality"] = m_VideoStreamer->getQuality();
+            jsonResponse["fps"] = m_VideoStreamer->getFrameRate();
+            responseBuffer.resize(jsonResponse.dump().size());
+            std::strncpy(responseBuffer.data(), jsonResponse.dump().c_str(), jsonResponse.dump().size());
+            break;;
+        }
+
+        case VisionControls::CmdSetQuality: {
+            int ret = m_VideoStreamer->setJpegQuality(cmd->data.u8);
+            if (ret < 0) {
+                logger->log(Logger::LOG_LVL_ERROR, "Failed to set quality: %d\n", cmd->data.u8);
+            }
+
+            logger->log(Logger::LOG_LVL_INFO, "Set quality to %u\n", cmd->data.u8);
+            break;
+        }
+
         case VisionControls::CmdClrVideoRec:
             logger->log(Logger::LOG_LVL_INFO, "Clearing video recording buffer\n");
             m_StreamInFrame.reset();
@@ -503,7 +531,6 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
                 return -1;
             }
 
-            return 0;
             break;
         }
 
@@ -520,7 +547,7 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             jsonResponse["loaded-video"] = m_VideoRecorder.getLoadedVideoName();
             jsonResponse["video-list"] = ss.str();
             responseBuffer.resize(jsonResponse.dump().size());
-            std::strncpy(responseBuffer.data(), jsonResponse.dump().c_str(), jsonResponse.dump().size());            
+            std::strncpy(responseBuffer.data(), jsonResponse.dump().c_str(), jsonResponse.dump().size());
             break;
         }
 
@@ -538,7 +565,7 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             }
             
             logger->log(Logger::LOG_LVL_INFO, "Loading selected video from disk: %s\n", std::string(namePtr, cmd->payloadLen).c_str());
-            return 0;
+            break;
         }
 
         case VisionControls::CmdDeleteVideo: {
@@ -555,7 +582,6 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             }
 
             logger->log(Logger::LOG_LVL_INFO, "Deleted video from disk: %s\n", std::string(namePtr, cmd->payloadLen).c_str());
-            return 0;
             break;
         }
 
@@ -625,8 +651,7 @@ void VisionControls::OnTimer(void) {
 void VisionControls::mainProc() {
     Logger* logger = Logger::getLoggerInst();
 
-    Devices::StereoCam cam(0, 1);
-    cam.start(1920, 1080, 30);
+    // Devices::StereoCam cam(0, 1);
     cv::Mat frameL;
     cv::Mat frameR;
     cv::Mat frameStereo;
@@ -639,7 +664,7 @@ void VisionControls::mainProc() {
     while (m_Running.load()) {
         switch(m_CamSettings.streamSelection.load()) {
             case StreamCameraSource:
-                ret = cam.read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
+                ret = m_Cam->read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
                 if (ret != 0) {
                     continue;
                 }
