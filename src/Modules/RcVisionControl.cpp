@@ -128,10 +128,10 @@ int VisionControls::init(void) {
 
     // Create camera object
     m_Cam = std::make_unique<Devices::StereoCam>(0, 1);
-    m_Cam->start(1920, 1080, 30);
+    m_Cam->start(CAM_WIDTH, CAM_HEIGHT, 30);
 
-    m_VideoStreamer->setJpegQuality(100);  // Default to maximum quality
-    m_VideoStreamer->setStreamFrameRate(Vision::VideoStreamer::FrameRate::_30Fps);
+    m_VideoStreamer->setJpegQuality(m_CamSettings.quality);  // Default to maximum quality
+    m_VideoStreamer->setStreamFrameRate(static_cast<Vision::VideoStreamer::FrameRate>(m_CamSettings.frameRate));
     
     m_VideoRecorder.setFrameRate(Vision::VideoRecording::FrameRate::_30Fps);
     stereoBM = cv::cuda::createStereoBM(m_CamSettings.numDisparities, m_CamSettings.numBlocks);
@@ -431,7 +431,7 @@ void VisionControls::decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameE
  * 
  * @param stereoFrame Input/output stereo frame pair
  */
-void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair) {
+void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q) {
     using namespace std;
     using namespace cv;
     using namespace dnn;
@@ -493,7 +493,8 @@ void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::
     }
 
     cv::Mat disp16s;
-    if (disparity.type() == CV_16S) {
+    int type = disparity.type();
+    if (type == CV_16S) {
         disp16s = disparity;
     } else {
         disparity.convertTo(disp16s, CV_16S);
@@ -504,7 +505,40 @@ void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::
 
     cv::Mat disp16u;
     dispClamped16s.convertTo(disp16u, CV_16U);
+
     stereoFrame = disp16u;
+
+    // Read the reprojection matrix
+    Q = m_VideoCalib.reprojectionQ();
+}
+
+
+/**
+ * @brief Process disparity frame into point cloud
+ * 
+ * @param dispFrame 
+ */
+void VisionControls::doPointCloud(cv::Mat& dispFrame, cv::Matx44d& Q) {
+    // Q is the reprojection matrix
+    cv::Mat Q64(Q);   // CV_64F 4x4
+    cv::Mat Q32;
+    Q64.convertTo(Q32, CV_32F);
+
+    cv::Mat disp32f;
+    dispFrame.convertTo(disp32f, CV_32F, 1.0 / 16.0);
+
+    cv::Mat points3d;
+    cv::cuda::GpuMat d_disparity, d_3dImage;
+    d_disparity.upload(disp32f);
+    cv::cuda::reprojectImageTo3D(d_disparity, d_3dImage, Q32, 3, stream);
+    d_3dImage.download(points3d);
+    stream.waitForCompletion();
+    
+    // Convert floating point to uint16_t    
+    int x = points3d.cols / 2;
+    int y = points3d.rows / 2;
+    cv::Vec3f xyz = points3d.at<cv::Vec3f>(y, x);
+    float Z = xyz[2]; // meters (if your calibration square size was meters)
 }
 
 
@@ -627,7 +661,7 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             }
 
             logger->log(Logger::LOG_LVL_INFO, "Set quality to %u\n", cmd->data.u8);
-
+            m_CamSettings.quality = cmd->data.u8;
             VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
@@ -816,9 +850,54 @@ void VisionControls::mainProc() {
 
     int ret = -1;
     cv::Mat frameSim;
+    cv::Mat resizedFrame;
+
+    const int _resizeWidth  = 640;
+    const int _resizeHeight = 360;
+
     std::pair<cv::Mat, cv::Mat> stereoFramePair;
     int16_t xAccel, yAccel, zAccel;
     int16_t xGyro, yGyro, zGyro;
+    cv::Matx44d Q;
+
+    auto scaleRectMat = [this, _resizeWidth, _resizeHeight](cv::Mat& frame, cv::Mat& resizedFrame, cv::Matx44d& Q) -> void {
+        if (frame.empty()) {
+            resizedFrame.release();
+            return;
+        }
+
+        const int dstW = _resizeWidth;
+        const int dstH = _resizeHeight;
+        const int srcW = frame.cols;
+        const int srcH = frame.rows;
+        if (dstW <= 0 || dstH <= 0 || srcW <= 0 || srcH <= 0) {
+            resizedFrame = frame;
+            return;
+        }
+
+        const double sx = static_cast<double>(dstW) / static_cast<double>(srcW);
+        const double sy = static_cast<double>(dstH) / static_cast<double>(srcH);
+
+        const int interp = (frame.depth() == CV_16U || frame.depth() == CV_16S) ? cv::INTER_NEAREST : cv::INTER_LINEAR;
+        cv::resize(frame, resizedFrame, cv::Size(dstW, dstH), 0.0, 0.0, interp);
+
+        // If we're resizing an already-computed disparity map, disparity must scale with x-resolution.
+        // StereoBM outputs fixed-point disparity (d*16).
+        if ((frame.type() == CV_16U || frame.type() == CV_16S) && resizedFrame.type() == frame.type()) {
+            cv::Mat scaled;
+            resizedFrame.convertTo(scaled, CV_32F);
+            scaled *= static_cast<float>(sx);
+            scaled.convertTo(resizedFrame, resizedFrame.type());
+        }
+
+        // Scale pixel-dependent terms of Q to match the transmitted resolution.
+        // Standard OpenCV Q has: Q(0,3)=-cx, Q(1,3)=-cy, Q(2,3)=f, Q(3,2)=1/Tx, Q(3,3)=(cx-cx')/Tx.
+        Q(0, 3) *= sx;
+        Q(1, 3) *= sy;
+        Q(2, 3) *= sx;
+        Q(3, 3) *= sx;
+    };
+
     while (m_Running.load()) {
         switch(m_CamSettings.streamSelection.load()) {
             case VisionControls::StreamCameraSource:
@@ -832,8 +911,17 @@ void VisionControls::mainProc() {
                     m_VideoCalib.DoCalibration(frameL, frameR);
                     m_VideoStreamer->pushFrame(stereoFramePair);
                 } else {
-                    processStereo(frameStereo, stereoFramePair);
-                    m_VideoStreamer->pushFrame(frameStereo, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
+                    // Extract the disparity frame
+                    processStereo(frameStereo, stereoFramePair, Q);
+
+                    // Convert to point cloud for local processing
+                    doPointCloud(frameStereo, Q);
+
+                    // Resize disparity before transmission and scale Q accordingly.
+                    scaleRectMat(frameStereo, resizedFrame, Q);
+
+                    // Stream disparity frame
+                    m_VideoStreamer->pushFrame(resizedFrame, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel, Q);
                 }
                 break;
 

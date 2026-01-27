@@ -54,6 +54,10 @@ void VideoStreamer::stop() {
         m_ThreadStereoMono.join();
     }
 
+    m_Buffer.flush();
+    m_BufferStereoMono.flush();
+    m_BufferStereo.flush();
+
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer stopped.\n");
 }
 
@@ -70,7 +74,16 @@ int VideoStreamer::setJpegQuality(int quality) {
 
 int VideoStreamer::setStreamFrameRate(FrameRate fps) {
     const uint8_t rawFps = static_cast<uint8_t>(fps);
+
     switch (fps) {
+        case FrameRate::_5Fps:
+            frameIntervalMs.store(250);
+            break;
+
+        case FrameRate::_10Fps:
+            frameIntervalMs.store(100);
+            break;
+        
         case FrameRate::_15Fps:
             frameIntervalMs.store(66);
             break;
@@ -130,11 +143,23 @@ int VideoStreamer::decodePacket(const char* pbuf, size_t len, VideoPacket& packe
 }
 
 
-void VideoStreamer::pushFrame(const cv::Mat& frame,  int16_t xGyro, int16_t yGyro, int16_t zGyro, int16_t xAccel, int16_t yAccel, int16_t zAccel) {
+void VideoStreamer::pushFrame(const cv::Mat& frame,  int16_t xGyro, int16_t yGyro, int16_t zGyro, int16_t xAccel, int16_t yAccel, int16_t zAccel, cv::Matx44d& Q) {
     if (!m_Running.load()) return;
     if (frame.empty()) return;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
-    m_BufferStereoMono.push({xGyro, yGyro, zGyro, xAccel, yAccel, zAccel, frame});
+    stereoPayload payload{};
+    payload.stereoHeader.gx = xGyro;
+    payload.stereoHeader.gy = yGyro;
+    payload.stereoHeader.gz = zGyro;
+    payload.stereoHeader.ax = xAccel;
+    payload.stereoHeader.ay = yAccel;
+    payload.stereoHeader.az = zAccel;
+    for (size_t i = 0; i < QSize; ++i) {
+        payload.stereoHeader.Q[i] = Q.val[i];
+    }
+    payload.Q = Q;
+    payload.stereoFrame = frame;
+    m_BufferStereoMono.push(payload);
 }
 
 
@@ -247,7 +272,8 @@ void VideoStreamer::runStereoMono() {
             continue;
         }
 
-        VideoStreamer::throttleFps(frameIntervalMs.load());
+        // Point cloud transmission is hard coded to 5 frames per second deu to bandwith limitations
+        VideoStreamer::throttleFps(static_cast<int>(VideoStreamer::FrameRate::_5Fps));
 
         // For lowest latency, always transmit the newest frame.
         do {
@@ -260,43 +286,43 @@ void VideoStreamer::runStereoMono() {
         }
 
         // transmitFrame(stereoFrame, 2, 0);  // frameType=2 (stereo-mono), frameSide=0
-        transmitFrame(stereoFrame, 2);
+        transmitPointCloud(stereoFrame);
         m_FrameID++;
     }
 }
 
 
-int VideoStreamer::transmitFrame(stereoPayload& stereoFrame, int frameType) {
+int VideoStreamer::transmitPointCloud(stereoPayload& stereoFrame) {
     cv::Mat& frame = stereoFrame.stereoFrame;
     if (frame.empty()) {
         return -1;
     }
 
-    cv::Mat encodeBgr;
-    cv::Mat* encodeFrame = &frame;
-    if (frame.channels() == 4) {
-        cv::cvtColor(frame, encodeBgr, cv::COLOR_BGRA2BGR);
-        encodeFrame = &encodeBgr;
-    }
-
     std::vector<uint8_t> dataOut;
-    std::vector<uint8_t> encoded;
-
-    std::vector<int> params = { cv::IMWRITE_JPEG_QUALITY, encodeQuality };
-    cv::imencode(".jpg", *encodeFrame, encoded, params);
-    dataOut.resize(sizeof(stereoHeader_t) + encoded.size());
+    const uint32_t dataLen = static_cast<uint32_t>(frame.total() * frame.elemSize());
+    dataOut.resize(sizeof(stereoHeader_t) + dataLen);
 
     // Append gyro header at the beginning
     stereoHeader_t* headerPtr = reinterpret_cast<stereoHeader_t*>(dataOut.data());
-    headerPtr->gx = stereoFrame.stereoHeader.gx;
-    headerPtr->gy = stereoFrame.stereoHeader.gy;
-    headerPtr->gz = stereoFrame.stereoHeader.gz;
-    headerPtr->ax = stereoFrame.stereoHeader.ax;
-    headerPtr->ay = stereoFrame.stereoHeader.ay;
-    headerPtr->az = stereoFrame.stereoHeader.az;
+    headerPtr->gx   = stereoFrame.stereoHeader.gx;
+    headerPtr->gy   = stereoFrame.stereoHeader.gy;
+    headerPtr->gz   = stereoFrame.stereoHeader.gz;
+    headerPtr->ax   = stereoFrame.stereoHeader.ax;
+    headerPtr->ay   = stereoFrame.stereoHeader.ay;
+    headerPtr->az   = stereoFrame.stereoHeader.az;
+    headerPtr->rows = frame.rows;
+    headerPtr->cols = frame.cols;
+    headerPtr->type = frame.type();
+    headerPtr->elemSize = frame.elemSize();
+    headerPtr->channels = frame.channels();
 
-    // Append encoded JPEG data after the header
-    std::memcpy(dataOut.data() + sizeof(stereoHeader_t), encoded.data(), encoded.size());
+    for (int i = 0; i < QSize; i++) {
+        headerPtr->Q[i] = stereoFrame.Q.val[i];
+    }
+
+    if (dataLen > 0) {
+        std::memcpy(dataOut.data() + sizeof(stereoHeader_t), frame.data, dataLen);
+    }
 
     size_t totalSize      = dataOut.size();  // header + JPEG data
     size_t bytesRemaining = totalSize;
@@ -326,7 +352,7 @@ int VideoStreamer::transmitFrame(stereoPayload& stereoFrame, int frameType) {
         meta.length = static_cast<uint16_t>(bytesToSend);
 
         // Write metadata
-        packet.FragmentHeader.frameType = static_cast<uint8_t>(frameType);
+        packet.FragmentHeader.frameType = VideoStreamer::DisparityType;
         packet.metadata = meta;
 
         // Copy payload bytes

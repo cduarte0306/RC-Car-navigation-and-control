@@ -282,8 +282,9 @@ public:
      * @param xAccel Accel X-axis
      * @param yAccel Accel Y-axis
      * @param zAccel Accel Z-axis
+     * @param Q Reprojection matrix
      */
-    void pushFrame(const cv::Mat& frame, int16_t xGyro, int16_t yGyro, int16_t zGyro, int16_t xAccel, int16_t yAccel, int16_t zAccel);
+    void pushFrame(const cv::Mat& frame, int16_t xGyro, int16_t yGyro, int16_t zGyro, int16_t xAccel, int16_t yAccel, int16_t zAccel, cv::Matx44d& Q);
 
 
     /**
@@ -323,6 +324,8 @@ private:
         uint8_t payload[MaxPayloadSize];
     };
 
+    static constexpr size_t QSize = 16;
+
     typedef struct __attribute__((__packed__)) {
         int16_t gx;  // Gyro X-axis
         int16_t gy;  // Gyro Y-axis
@@ -330,14 +333,27 @@ private:
         int16_t ax;  // Accel X-axis
         int16_t ay;  // Accel Y-axis
         int16_t az;  // Accel Z-axis
+        int rows;    // Number of rowss on frame
+        int cols;    // Number of columns on frame
+        uint8_t  type;                // OpenCV type enum (e.g. CV_16S = 3)
+        uint8_t  channels;            // normally 1 for disparity
+        uint16_t elemSize;            // Element sizes
+        double Q[QSize];  // Reprojection matrix
     } stereoHeader_t;
 
     #pragma pack(pop)
 
     typedef struct {
         stereoHeader_t stereoHeader;
+        cv::Matx44d Q;
         cv::Mat stereoFrame;
     } stereoPayload;
+
+    enum {
+        RegularMono = 0,
+        DualStreamType,
+        DisparityType
+    };
 
     static_assert(sizeof(FragmentPayload) <= MaxUDPLen, "FragmentPayload exceeds UDP max payload");
 
@@ -359,7 +375,7 @@ private:
      * @param stereoFrame Reference to the stereo frame to transmit
      * @return int 
      */
-    int transmitFrame(stereoPayload& stereoFrame, int frameType=2);
+    int transmitPointCloud(stereoPayload& stereoFrame);
 
     /**
      * @brief Transmit a stereo frame pair.

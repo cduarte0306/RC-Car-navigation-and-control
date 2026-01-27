@@ -110,6 +110,8 @@ protected:
         cv::Size chessboardSize{9, 6}; // inner corners (cols, rows)
     } m_CamSettings;
 
+    static constexpr int CAM_WIDTH  = 1920;
+    static constexpr int CAM_HEIGHT = 1080;
 
     // Parent main proc override
     virtual void mainProc() override;
@@ -127,7 +129,10 @@ protected:
     void processFrame(cv::Mat& frame);
 
     // Stereo frame processing handler
-    void processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair);
+    void processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
+
+    // Generate point cloud image
+    void doPointCloud(cv::Mat& dispFrame, cv::Matx44d& Q);
 
     // Save the streaming profile parameters
     static int saveStreamingProfile(CameraSettings& settings);

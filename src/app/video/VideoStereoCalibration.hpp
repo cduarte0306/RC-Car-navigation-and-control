@@ -33,6 +33,33 @@ public:
     std::optional<double> depthMetersFromDisparity(double disparityPx) const;
 
     /**
+     * @brief Get rectified focal length in pixels (fx).
+     *
+     * Uses P1(0,0) from the loaded/computed rectification profile.
+     */
+    double focalLengthPx() const;
+
+    cv::Size imageSize() const;
+    bool hasRectification() const;
+
+    cv::Matx33d leftK() const;
+    cv::Matx33d rightK() const;
+
+    cv::Matx33d stereoR() const;
+    cv::Vec3d stereoT() const;
+    double baselineMeters() const;
+
+    cv::Matx33d rectifyR1() const;
+    cv::Matx33d rectifyR2() const;
+    cv::Matx34d projectionP1() const;
+    cv::Matx34d projectionP2() const;
+
+    /**
+     * @brief Get the 4x4 reprojection (Q) matrix from the loaded/computed rectification profile.
+     */
+    cv::Matx44d reprojectionQ() const;
+
+    /**
      * @brief Configure calibration settings from a JSON string received from the remote UI.
      *
      * Expected fields (others ignored):
