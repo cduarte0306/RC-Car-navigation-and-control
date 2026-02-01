@@ -254,6 +254,86 @@ std::optional<double> VideoStereoCalib::depthMetersFromDisparity(double disparit
     return z;
 }
 
+double VideoStereoCalib::focalLengthPx() const {
+    // P1 is stored row-major 3x4, so P1(0,0) is index 0.
+    return profileSettings_.P1[0];
+}
+
+cv::Size VideoStereoCalib::imageSize() const {
+    return cv::Size(static_cast<int>(profileSettings_.imageWidth),
+                    static_cast<int>(profileSettings_.imageHeight));
+}
+
+bool VideoStereoCalib::hasRectification() const {
+    return m_HaveRectifyMaps;
+}
+
+cv::Matx33d VideoStereoCalib::leftK() const {
+    const double* k = profileSettings_.K_left.data();
+    return cv::Matx33d(k[0], k[1], k[2],
+                       k[3], k[4], k[5],
+                       k[6], k[7], k[8]);
+}
+
+cv::Matx33d VideoStereoCalib::rightK() const {
+    const double* k = profileSettings_.K_right.data();
+    return cv::Matx33d(k[0], k[1], k[2],
+                       k[3], k[4], k[5],
+                       k[6], k[7], k[8]);
+}
+
+cv::Matx33d VideoStereoCalib::stereoR() const {
+    const double* r = profileSettings_.R.data();
+    return cv::Matx33d(r[0], r[1], r[2],
+                       r[3], r[4], r[5],
+                       r[6], r[7], r[8]);
+}
+
+cv::Vec3d VideoStereoCalib::stereoT() const {
+    const double* t = profileSettings_.T.data();
+    return cv::Vec3d(t[0], t[1], t[2]);
+}
+
+double VideoStereoCalib::baselineMeters() const {
+    return std::abs(profileSettings_.T[0]);
+}
+
+cv::Matx33d VideoStereoCalib::rectifyR1() const {
+    const double* r = profileSettings_.R1.data();
+    return cv::Matx33d(r[0], r[1], r[2],
+                       r[3], r[4], r[5],
+                       r[6], r[7], r[8]);
+}
+
+cv::Matx33d VideoStereoCalib::rectifyR2() const {
+    const double* r = profileSettings_.R2.data();
+    return cv::Matx33d(r[0], r[1], r[2],
+                       r[3], r[4], r[5],
+                       r[6], r[7], r[8]);
+}
+
+cv::Matx34d VideoStereoCalib::projectionP1() const {
+    const double* p = profileSettings_.P1.data();
+    return cv::Matx34d(p[0], p[1], p[2], p[3],
+                       p[4], p[5], p[6], p[7],
+                       p[8], p[9], p[10], p[11]);
+}
+
+cv::Matx34d VideoStereoCalib::projectionP2() const {
+    const double* p = profileSettings_.P2.data();
+    return cv::Matx34d(p[0], p[1], p[2], p[3],
+                       p[4], p[5], p[6], p[7],
+                       p[8], p[9], p[10], p[11]);
+}
+
+cv::Matx44d VideoStereoCalib::reprojectionQ() const {
+    const auto& q = profileSettings_.Q;
+    return cv::Matx44d(q[0],  q[1],  q[2],  q[3],
+                       q[4],  q[5],  q[6],  q[7],
+                       q[8],  q[9],  q[10], q[11],
+                       q[12], q[13], q[14], q[15]);
+}
+
 
 int VideoStereoCalib::loadCalibrationProfile(const char* path) {
     if (!path || path[0] == '\0') {

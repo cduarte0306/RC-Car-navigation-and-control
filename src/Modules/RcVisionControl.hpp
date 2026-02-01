@@ -70,6 +70,18 @@ protected:
         CmdSelCameraStream,       // select camera stream (Normal or training)
         CmdSetFps,                // set streaming parameters (host IP, port, etc)
         CmdSetQuality,            // Set the stream compresison quality
+        CmdSetNumDisparities,     // Sets the number of disparities
+        CmdSetBlockSize,          // Sets the number of blocks
+        
+        CmdSetPreFilterType,      // Sets the pre filter type
+        CmdSetPreFilterSize,      // Sets the pre filter size
+        CmdSetPreFilterCap,       // Sets the pre filter cap
+        CmdSetTextureThreshold,   // Sets the texture threshold
+        CmdSetUniquenessRatio,    // Sets the uniqueness ratio
+        CmdSetSpeckleWindowSize,  // Sets the speckle window size
+        CmdSetSpeckleRange,       // Sets the speckle range
+        CmdSetDisp12MaxDiff,      // Sets the disp12 max diff
+
         CmdRdParams,              // Command to read all configured parameteres
         CmdClrVideoRec,           // clear video recording buffer
         CmdSaveVideo,             // save video recording to disks
@@ -97,12 +109,28 @@ protected:
 
     struct CameraSettings {
         int frameRate = 30;
+        int quality = 100;
+        int numDisparities = 96;
+        int numBlocks = 15;
+
+        int preFilterType;
+        int preFilterSize;
+        int preFilterCap;
+        int textureThreshold;
+        int uniquenessRatio;
+        int speckleWindowSize;
+        int speckleRange;
+        int disp12MaxDiff;
+
         int mode      = CamModeNormal;
         std::atomic<uint8_t> streamSelection{StreamCameraSource};
         std::atomic<bool> calibrationMode{false};
         std::string videoName = "recording.MOV";
         cv::Size chessboardSize{9, 6}; // inner corners (cols, rows)
     } m_CamSettings;
+
+    static constexpr int CAM_WIDTH  = 1920;
+    static constexpr int CAM_HEIGHT = 1080;
 
     // Parent main proc override
     virtual void mainProc() override;
@@ -120,10 +148,16 @@ protected:
     void processFrame(cv::Mat& frame);
 
     // Stereo frame processing handler
-    void processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair);
+    void processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
 
-    // Stereo frame processing handler
-    void processFramePair(std::pair<cv::Mat, cv::Mat>& stereoFrame);
+    // Generate point cloud image
+    void doPointCloud(cv::Mat& dispFrame, cv::Matx44d& Q);
+
+    // Save the streaming profile parameters
+    static int saveStreamingProfile(CameraSettings& settings);
+
+    // Load all settings
+    static int loadStreamingProfile(CameraSettings& settings);
 
     // Camera source stream handler
     // void processCameraSource(Devices::StereoCam& cam);
@@ -141,6 +175,9 @@ protected:
 
     // Pipeline mutex lock
     std::mutex m_HostIPMutex;
+
+    // Stereo object mutex
+    std::mutex m_StereoMutex;
 
     // Video transmitter socket
     std::unique_ptr<Network::UdpServer> m_UdpSocket;
@@ -182,6 +219,8 @@ protected:
 
     // Frame ID
     uint32_t m_FrameID = 0;
+
+    uint8_t m_NumDisparities = 0;
 
     // Name of the currently-downloaded (sim) video, derived from incoming packet metadata.
     std::string m_LastIncomingVideoName;
