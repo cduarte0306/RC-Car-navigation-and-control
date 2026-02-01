@@ -72,6 +72,16 @@ protected:
         CmdSetQuality,            // Set the stream compresison quality
         CmdSetNumDisparities,     // Sets the number of disparities
         CmdSetBlockSize,          // Sets the number of blocks
+        
+        CmdSetPreFilterType,      // Sets the pre filter type
+        CmdSetPreFilterSize,      // Sets the pre filter size
+        CmdSetPreFilterCap,       // Sets the pre filter cap
+        CmdSetTextureThreshold,   // Sets the texture threshold
+        CmdSetUniquenessRatio,    // Sets the uniqueness ratio
+        CmdSetSpeckleWindowSize,  // Sets the speckle window size
+        CmdSetSpeckleRange,       // Sets the speckle range
+        CmdSetDisp12MaxDiff,      // Sets the disp12 max diff
+
         CmdRdParams,              // Command to read all configured parameteres
         CmdClrVideoRec,           // clear video recording buffer
         CmdSaveVideo,             // save video recording to disks
@@ -102,6 +112,15 @@ protected:
         int quality = 100;
         int numDisparities = 96;
         int numBlocks = 15;
+
+        int preFilterType;
+        int preFilterSize;
+        int preFilterCap;
+        int textureThreshold;
+        int uniquenessRatio;
+        int speckleWindowSize;
+        int speckleRange;
+        int disp12MaxDiff;
 
         int mode      = CamModeNormal;
         std::atomic<uint8_t> streamSelection{StreamCameraSource};

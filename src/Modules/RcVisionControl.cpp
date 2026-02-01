@@ -135,6 +135,14 @@ int VisionControls::init(void) {
     
     m_VideoRecorder.setFrameRate(Vision::VideoRecording::FrameRate::_30Fps);
     stereoBM = cv::cuda::createStereoBM(m_CamSettings.numDisparities, m_CamSettings.numBlocks);
+    stereoBM->setPreFilterType(m_CamSettings.preFilterType);
+    stereoBM->setPreFilterSize(m_CamSettings.preFilterSize);
+    stereoBM->setPreFilterCap(m_CamSettings.preFilterCap);
+    stereoBM->setTextureThreshold(m_CamSettings.textureThreshold);
+    stereoBM->setUniquenessRatio(m_CamSettings.uniquenessRatio);
+    stereoBM->setSpeckleWindowSize(m_CamSettings.speckleWindowSize);
+    stereoBM->setSpeckleRange(m_CamSettings.speckleRange);
+    stereoBM->setDisp12MaxDiff(m_CamSettings.disp12MaxDiff);
     m_NumDisparities = 96;
 
     logger->log(Logger::LOG_LVL_INFO, "Vision control module initialized\r\n");
@@ -176,6 +184,14 @@ int VisionControls::saveStreamingProfile(VisionControls::CameraSettings& setting
     profileSettings["fps"         ] = settings.frameRate;
     profileSettings["disparities" ] = settings.numDisparities;
     profileSettings["numBlocks"   ] = settings.numBlocks;
+    profileSettings["preFilterType"    ] = settings.preFilterType;
+    profileSettings["preFilterSize"    ] = settings.preFilterSize;
+    profileSettings["preFilterCap"     ] = settings.preFilterCap;
+    profileSettings["textureThreshold" ] = settings.textureThreshold;
+    profileSettings["uniquenessRatio"  ] = settings.uniquenessRatio;
+    profileSettings["speckleWindowSize"] = settings.speckleWindowSize;
+    profileSettings["speckleRange"     ] = settings.speckleRange;
+    profileSettings["disp12MaxDiff"    ] = settings.disp12MaxDiff;
 
     std::ofstream out(profilePath, std::ios::out | std::ios::trunc);
     if (!out.is_open()) {
@@ -237,12 +253,27 @@ int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& setting
     if (profileSettings.contains("fps")) settings.frameRate = profileSettings["fps"].get<int>();
     if (profileSettings.contains("disparities")) settings.numDisparities = profileSettings["disparities"].get<int>();
     if (profileSettings.contains("numBlocks")) settings.numBlocks = profileSettings["numBlocks"].get<int>();
+    if (profileSettings.contains("preFilterType")) settings.preFilterType = profileSettings["preFilterType"].get<int>();
+    if (profileSettings.contains("preFilterSize")) settings.preFilterSize = profileSettings["preFilterSize"].get<int>();
+    if (profileSettings.contains("preFilterCap")) settings.preFilterCap = profileSettings["preFilterCap"].get<int>();
+    if (profileSettings.contains("textureThreshold")) settings.textureThreshold = profileSettings["textureThreshold"].get<int>();
+    if (profileSettings.contains("uniquenessRatio")) settings.uniquenessRatio = profileSettings["uniquenessRatio"].get<int>();
+    if (profileSettings.contains("speckleWindowSize")) settings.speckleWindowSize = profileSettings["speckleWindowSize"].get<int>();
+    if (profileSettings.contains("speckleRange")) settings.speckleRange = profileSettings["speckleRange"].get<int>();
+    if (profileSettings.contains("disp12MaxDiff")) settings.disp12MaxDiff = profileSettings["disp12MaxDiff"].get<int>();
 
     // Basic sanity
     if (settings.numDisparities < 8 || (settings.numDisparities % 8) != 0) settings.numDisparities = 96;
     if (settings.numBlocks < 5 || (settings.numBlocks % 2) == 0) settings.numBlocks = 15;
     if (settings.quality < 1 || settings.quality > 100) settings.quality = 100;
     if (settings.frameRate < 1 || settings.frameRate > 120) settings.frameRate = 30;
+    if (settings.preFilterSize < 5 || (settings.preFilterSize % 2) == 0) settings.preFilterSize = 9;
+    if (settings.preFilterCap < 1 || settings.preFilterCap > 63) settings.preFilterCap = 31;
+    if (settings.textureThreshold < 0) settings.textureThreshold = 10;
+    if (settings.uniquenessRatio < 0) settings.uniquenessRatio = 15;
+    if (settings.speckleWindowSize < 0) settings.speckleWindowSize = 0;
+    if (settings.speckleRange < 0) settings.speckleRange = 0;
+    if (settings.disp12MaxDiff < 0) settings.disp12MaxDiff = -1;
 
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
                                  "Loaded video streaming profile from: %s\n",
@@ -649,6 +680,14 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             jsonResponse["fps"]         = m_VideoStreamer->getFrameRate();
             jsonResponse["disparities"] = m_CamSettings.numDisparities;
             jsonResponse["blocks"]      = m_CamSettings.numBlocks;
+            jsonResponse["preFilterType"]    = m_CamSettings.preFilterType;
+            jsonResponse["preFilterSize"]    = m_CamSettings.preFilterSize;
+            jsonResponse["preFilterCap"]     = m_CamSettings.preFilterCap;
+            jsonResponse["textureThreshold"] = m_CamSettings.textureThreshold;
+            jsonResponse["uniquenessRatio"]  = m_CamSettings.uniquenessRatio;
+            jsonResponse["speckleWindowSize"]= m_CamSettings.speckleWindowSize;
+            jsonResponse["speckleRange"]     = m_CamSettings.speckleRange;
+            jsonResponse["disp12MaxDiff"]    = m_CamSettings.disp12MaxDiff;
             responseBuffer.resize(jsonResponse.dump().size());
             std::strncpy(responseBuffer.data(), jsonResponse.dump().c_str(), jsonResponse.dump().size());
             break;;
@@ -677,8 +716,7 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             }
 
             std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM.reset();
-            stereoBM = cv::cuda::createStereoBM(numDisparities, m_CamSettings.numBlocks);
+            stereoBM->setNumDisparities(numDisparities);
             m_CamSettings.numDisparities = numDisparities;
             logger->log(Logger::LOG_LVL_INFO, "Setting number of disparities to %u\n", numDisparities);
             VisionControls::saveStreamingProfile(m_CamSettings);
@@ -695,11 +733,66 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             }
 
             std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM.reset();
-            stereoBM = cv::cuda::createStereoBM(m_CamSettings.numDisparities, blockSize);
+            stereoBM->setBlockSize(blockSize);
             m_CamSettings.numBlocks = blockSize;
             logger->log(Logger::LOG_LVL_INFO, "Setting block size to %u\n", blockSize);
             VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+
+        case VisionControls::CmdSetPreFilterType: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            stereoBM->setPreFilterType(cmd->data.u8);
+            m_CamSettings.preFilterType = cmd->data.u8;
+            break;
+        }
+
+        case VisionControls::CmdSetPreFilterSize: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            stereoBM->setPreFilterSize(cmd->data.u8);
+            m_CamSettings.preFilterSize = cmd->data.u8;
+            break;
+        }
+
+        case VisionControls::CmdSetPreFilterCap: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            stereoBM->setPreFilterCap(cmd->data.u8);
+            m_CamSettings.preFilterCap= cmd->data.u8;
+            break;
+        }
+
+        case VisionControls::CmdSetTextureThreshold: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            stereoBM->setTextureThreshold(cmd->data.u16);
+            m_CamSettings.textureThreshold = cmd->data.u16;
+            break;
+        }
+
+        case VisionControls::CmdSetUniquenessRatio: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            stereoBM->setUniquenessRatio(cmd->data.u8);
+            m_CamSettings.uniquenessRatio = cmd->data.u8;
+            break;
+        }
+
+        case VisionControls::CmdSetSpeckleWindowSize: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            stereoBM->setSpeckleWindowSize(cmd->data.u8);
+            m_CamSettings.speckleWindowSize = cmd->data.u8;
+            break;
+        }
+        
+        case VisionControls::CmdSetSpeckleRange: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            stereoBM->setSpeckleRange(cmd->data.u8);
+            m_CamSettings.speckleRange = cmd->data.u8;
+            break;
+        }
+
+        case VisionControls::CmdSetDisp12MaxDiff: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            stereoBM->setDisp12MaxDiff(cmd->data.u8);
+            m_CamSettings.disp12MaxDiff = cmd->data.u8;
             break;
         }
 
