@@ -88,6 +88,15 @@ public:
         return ipAddress;
     }
 
+    size_t GetTxBytes() const { return m_TxBytes; };
+
+    size_t GetRxBytes() const { return m_RxBytes; };
+
+    void resetCounters() {
+        m_TxBytes = 0;
+        m_RxBytes = 0;
+    }
+
 protected:
     bool threadCanRun = true;
 
@@ -108,6 +117,9 @@ protected:
     udp::endpoint remoteEndpoint;
     // std::array<char, 32768> m_RecvBuffer;
     std::vector<char> m_RecvBuffer;
+
+    size_t m_TxBytes = 0;
+    size_t m_RxBytes = 0;
 };
 
 

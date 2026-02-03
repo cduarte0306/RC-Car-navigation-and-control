@@ -215,6 +215,8 @@ public:
             return std::move(CommsAdapter);
         } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
             return std::move(CommandAdapter);
+        } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
+            return std::move(TlmAdapter);
         } else {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
             return nullptr;
@@ -286,6 +288,7 @@ public:
             TlmAdapter.reset(static_cast<Adapter::TlmAdapter*>(adapter.release()));
             return 0;
         }
+
         // unknown concrete adapter: keep as baseAdapter
         baseAdapter = std::move(adapter);
         return 0;
@@ -360,6 +363,9 @@ protected:
     std::unique_ptr<Adapter::CommandAdapter > CommandAdapter = nullptr;
     std::unique_ptr<Adapter::CommsAdapter   > CommsAdapter   = nullptr;
     std::unique_ptr<Adapter::TlmAdapter     > TlmAdapter     = nullptr;
+
+    // Default CLI adapter on every module
+    Adapter::CLIAdapter CliAdapter;
 
     static boost::asio::io_context io_context;
     std::mutex mutex;

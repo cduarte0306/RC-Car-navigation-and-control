@@ -13,9 +13,10 @@
 
 
 namespace Vision {
-VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
+VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter, Adapter::CommsAdapter::NetworkAdapter& txAdapterEth,
                             std::size_t bufferCapacity)
       : m_TxAdapter(txAdapter),
+        m_TxAdapterEth(txAdapterEth),
         m_Buffer(bufferCapacity), 
         m_BufferStereo(bufferCapacity),
         m_BufferStereoMono(bufferCapacity) {}
@@ -458,4 +459,14 @@ int VideoStreamer::prepFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
     m_FrameID++;
     return 0;
 }
+
+
+int VideoStreamer::xfer(char* pBuf, size_t length) {
+    if (pBuf == nullptr) {
+        return -1;
+    }
+
+    return 0;
+}
+
 } // namespace Vision

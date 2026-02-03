@@ -13,6 +13,7 @@ using namespace Adapter;
 namespace Modules {
 class NetworkComms : public Base, public Adapter::CommsAdapter {
 public:
+
     NetworkComms(int moduleID, std::string name);
     ~NetworkComms();
 
@@ -29,34 +30,13 @@ public:
     Adapter::AdapterBase* getInputAdapter() override {
         return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CommsAdapter*>(this));
     }
-protected:
-    enum {
-        CMD_NOOP,
-        CMD_FWD_DIR,
-        CMD_STEER,
-    };
-
-    typedef struct __attribute__((__packed__))
-    {
-        uint32_t   sequence_id;
-        uint16_t   msg_length;
-
-        struct __attribute__((__packed__))
-        {
-            uint8_t    command;
-            val_type_t data;
-        } payload;
-    } ClientReq_t;
-
-    typedef struct __attribute__((__packed__)) {
-        val_type_t data;
-        uint8_t state;    
-    } reply_t;
 
     // Override moduleCommand to handle incoming commands
     virtual int moduleCommand(char* pbuf, size_t len) override {
         return 0;
     }
+
+    virtual void OnTimer(void);
 
     // Main Process
     virtual void mainProc();
@@ -73,14 +53,26 @@ protected:
     // Provide host IP lookup for bound adapters
     virtual std::string getHostIP_(NetworkAdapter& adapter) override;
 
+    // CLI spefic stats reading
+    virtual std::string readStats() override;
+
     // WLAN write function
     int wlanWrite(const uint8_t* data, size_t length);
 
     // Ethernet write function
     int ethWrite(const uint8_t* data, size_t length);
+
+protected:
+    struct NetStats {
+        int port;
+        uint64_t txRate;
+        uint64_t rxRate;
+        std::string moduleName;
+        std::unique_ptr<Network::UdpServer> socket;
+    };
     
     // Map of UDP sockets by adapter ID
-    std::unordered_map<int, std::unique_ptr<Network::UdpServer>> m_UdpSockets;
+    std::unordered_map<int, NetStats> m_UdpSockets;
 
     // Map of adapter name to non-owning socket pointers
     std::unordered_map<std::string, Network::UdpServer*> m_AdapterMap;

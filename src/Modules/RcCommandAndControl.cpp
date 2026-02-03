@@ -29,7 +29,7 @@ CommandController::~CommandController() {
 int CommandController::init(void) {
     Logger* logger = Logger::getLoggerInst();
     // Initialize the UDP server
-    m_CommandNetAdapter = this->CommsAdapter->createNetworkAdapter(65000, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_CommandNetAdapter = this->CommsAdapter->createNetworkAdapter(getName(), 65000, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
     if (!m_CommandNetAdapter) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create command network adapter\r\n");
         return -1;

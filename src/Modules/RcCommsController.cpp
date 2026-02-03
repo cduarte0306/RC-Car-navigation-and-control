@@ -1,5 +1,6 @@
 #include "RcCommsController.hpp"
 #include <functional>
+#include <sstream>
 #include "utils/logger.hpp"
 
 using namespace std;
@@ -10,6 +11,7 @@ namespace Modules {
 NetworkComms::NetworkComms(int moduleID, string name) 
     : Base(moduleID, name), Adapter::CommsAdapter(name) {
     // Socket instances are created per adapter in configureAdapter.
+    setPeriod(1000);  // Set the timer thread to service ever second
 }
 
 
@@ -66,7 +68,9 @@ int NetworkComms::configureAdapter(
 
     // Keep ownership in the map and cache a non-owning pointer to the first socket
     Network::UdpServer* socketPtr = udpSocket.get();
-    m_UdpSockets[adapterIdx] = std::move(udpSocket);
+    m_UdpSockets[adapterIdx].socket = std::move(udpSocket);
+    m_UdpSockets[adapterIdx].port   = netAdapter.port;
+    m_UdpSockets[adapterIdx].moduleName = netAdapter.parent;
     if (!m_UdpSocket) {
         m_UdpSocket = socketPtr;
     }
@@ -89,14 +93,14 @@ int NetworkComms::configureAdapter(
  */
 void NetworkComms::configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx) {
     auto it = m_UdpSockets.find(adapter.id);
-    if (it == m_UdpSockets.end() || !it->second) {
+    if (it == m_UdpSockets.end() || !it->second.socket) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "No UDP socket for adapter %d\r\n", adapter.id);
         return;
     }
 
     // Start listening for inbound payloads using the provided handler
-    it->second->startReceive(std::move(dataReceivedCommand_), asyncTx);
+    it->second.socket->startReceive(std::move(dataReceivedCommand_), asyncTx);
 }
 
 
@@ -135,6 +139,40 @@ int NetworkComms::ethWrite(const uint8_t* data, size_t length) {
     uint8_t* buf = const_cast<uint8_t*>(data);
     bool ok = this->m_UdpSocket->transmit(buf, length, m_EthHostIP);
     return ok ? 0 : -1;
+}
+
+
+/**
+ * @brief Returns network stats for CLI
+ * 
+ * @return std::string 
+ */
+std::string NetworkComms::readStats() {
+    std::stringstream stats;
+
+    for (auto& [index, socket] : m_UdpSockets) {
+        stats << "Module: " << socket.moduleName << " | "
+              << "Port: " << socket.port << " | "
+              << "TX Rate: " << socket.txRate << " Mbps | "
+              << "RX Rate: " << socket.rxRate << " Mbps\r\n";
+    }
+
+    std::string ret = stats.str();
+    return ret;
+}
+
+
+/**
+ * @brief Timer timeout callback
+ * 
+ */
+void NetworkComms::OnTimer(void) {
+    for (auto& [idx, socket] : m_UdpSockets) {
+        socket.txRate = (socket.socket->GetTxBytes() * 8) / 1000000;
+        socket.rxRate = (socket.socket->GetRxBytes() * 8) / 1000000;
+
+        socket.socket->resetCounters();
+    }
 }
 
 
@@ -201,12 +239,19 @@ int NetworkComms::transmitData_(const uint8_t* data, size_t length) {
     return ok ? 0 : -1;
 }
 
+
+/**
+ * @brief Returns the host IP address
+ * 
+ * @param adapter Reference to module adapter
+ * @return std::string 
+ */
 std::string NetworkComms::getHostIP_(NetworkAdapter& adapter) {
     auto it = m_UdpSockets.find(adapter.id);
-    if (it == m_UdpSockets.end() || !it->second) {
+    if (it == m_UdpSockets.end() || !it->second.socket) {
         return std::string();
     }
-    return it->second->getHostIP();
+    return it->second.socket->getHostIP();
 }
 
 } // namespace Modules

@@ -111,6 +111,7 @@ void UdpServer::startReceive_(void) {
                 }
             }
             // Continue receiving
+            m_RxBytes += bytes_recvd;
             this->startReceive_();
         });
 }
@@ -149,6 +150,8 @@ bool UdpServer::transmit(uint8_t* pBuf, size_t length, std::string& ip) {
                 logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s, message length: %lu\r\n", ec.message().c_str(), length);
             }
         });
+
+    m_TxBytes += length;
     return true;
 }
 

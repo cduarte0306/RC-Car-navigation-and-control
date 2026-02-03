@@ -148,6 +148,38 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
             }
         },
         (CliCommandBinding){
+            "read-stats",
+            
+            "Reads stats from specied module\r\n"
+                "\tCommunications module ID: 0\r\n"
+                "\tread-stats \"<module ID>\"\r\n",
+            true, this,
+            
+            [](EmbeddedCli *cli, char *args, void *context) {
+                (void)cli;
+                AppCLI* _cli = static_cast<AppCLI*>(context);
+                const char *moduleIdx_ = embeddedCliGetToken(args, 1);
+                if (moduleIdx_ == nullptr) {
+                    _cli->writeIface("ERROR: Failed to provide argument\r\n");
+                    return;
+                }
+                
+                int moduleIdx = std::stoi(std::string(moduleIdx_));
+                switch (moduleIdx)
+                {
+                case 0: {
+                    std::string stats = _cli->CommsAdapter->readStats();
+                    _cli->writeIface("%s\n", stats.c_str());
+                    break;   
+                }
+
+                default:
+                    _cli->writeIface("Unknown module ID provided\r\n");
+                    break;
+                }
+            }
+        },
+        (CliCommandBinding){
             "reboot-cpu",
             
             "Reboots CPU after shutting off all RC car components\r\n"

@@ -67,15 +67,19 @@ int VisionControls::init(void) {
 
     Logger* logger = Logger::getLoggerInst();
     // Initialize the network adapters
-    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
-    m_RxAdapter = this->CommsAdapter->createNetworkAdapter(STREAM_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
-    if (!m_TxAdapter || !m_RxAdapter) {
+    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_EthAdapter = this->CommsAdapter->createNetworkAdapter(getName(), STREAM_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+
+    m_TxAdapter->setParent(this->getName());
+    m_EthAdapter->setParent(this->getName());
+
+    if (!m_TxAdapter || !m_EthAdapter) {
         logger->log(Logger::LOG_LVL_WARN, "Failed to create vision network adapters\r\n");
         return -1;
     }
 
     // Create the streamer only once the TX adapter exists; otherwise we'd bind a dangling reference.
-    m_VideoStreamer = std::make_unique<Vision::VideoStreamer>(*m_TxAdapter, 100);
+    m_VideoStreamer = std::make_unique<Vision::VideoStreamer>(*m_TxAdapter, *m_EthAdapter, 100);
 
     bool useCuda = false;
 
@@ -115,7 +119,7 @@ int VisionControls::init(void) {
 
     // Start receiving frames
     this->CommsAdapter->startReceive(
-        *m_RxAdapter,
+        *m_EthAdapter,
         std::bind(&VisionControls::recvFrame, this, std::placeholders::_1),
         false);
 
@@ -143,7 +147,6 @@ int VisionControls::init(void) {
     stereoBM->setSpeckleWindowSize(m_CamSettings.speckleWindowSize);
     stereoBM->setSpeckleRange(m_CamSettings.speckleRange);
     stereoBM->setDisp12MaxDiff(m_CamSettings.disp12MaxDiff);
-    m_NumDisparities = 96;
 
     logger->log(Logger::LOG_LVL_INFO, "Vision control module initialized\r\n");
     return 0;

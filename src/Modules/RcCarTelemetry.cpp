@@ -16,7 +16,7 @@ RcCarTelemetry::RcCarTelemetry(int moduleID, std::string name) : Modules::Base(m
 int RcCarTelemetry::init(void) {
     // Initialize transmission adapter
     Logger* logger = Logger::getLoggerInst();
-    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(6000, "wlP1p1s0");
+    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), 6000, "wlP1p1s0");
     if (!m_TxAdapter) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create telemetry transmission adapter\r\n");
         return -1;

@@ -201,7 +201,7 @@ protected:
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TxAdapter{nullptr};
 
     // Reception port
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_RxAdapter{nullptr};
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_EthAdapter{nullptr};
 
     // Video recorder
     Vision::VideoRecording m_VideoRecorder;
@@ -219,8 +219,6 @@ protected:
 
     // Frame ID
     uint32_t m_FrameID = 0;
-
-    uint8_t m_NumDisparities = 0;
 
     // Name of the currently-downloaded (sim) video, derived from incoming packet metadata.
     std::string m_LastIncomingVideoName;
