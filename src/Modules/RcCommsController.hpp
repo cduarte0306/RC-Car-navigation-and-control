@@ -63,12 +63,19 @@ public:
     int ethWrite(const uint8_t* data, size_t length);
 
 protected:
+    enum {
+        EthAdapter,
+        WlanAdapter,
+        MaxAdapter
+    };
+
     struct NetStats {
         int port;
         uint64_t txRate;
         uint64_t rxRate;
         std::string moduleName;
         std::unique_ptr<Network::UdpServer> socket;
+        Adapter::CommsAdapter::NetworkAdapter* netAdapter = nullptr;
     };
     
     // Map of UDP sockets by adapter ID
@@ -91,5 +98,7 @@ protected:
 
     // Map of adapter IDs to failed adapter structs for quick lookup
     std::map<int, Adapter::CommsAdapter::NetworkAdapter*> m_FailedAdapterMap;
+
+    
 };
 };

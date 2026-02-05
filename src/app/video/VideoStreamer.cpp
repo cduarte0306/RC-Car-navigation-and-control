@@ -183,15 +183,15 @@ void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
 
 void VideoStreamer::runMono() {
     // Wait until allowed to run
-    RegisterMap* regMap = RegisterMap::getInstance();
-    std::optional<std::string> destIpReg;
-    while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    // RegisterMap* regMap = RegisterMap::getInstance();
+    // std::optional<std::string> destIpReg;
+    // while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
+    //     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // }
 
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (mono) started. Host IP: %s\n", destIpReg->c_str());
+    // Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (mono) started. Host IP: %s\n", destIpReg->c_str());
 
-    m_DestIp = *destIpReg;
+    // m_DestIp = *destIpReg;
 
     while (m_Running) {
         if (m_Buffer.isEmpty()) {
@@ -220,14 +220,14 @@ void VideoStreamer::runMono() {
 
 void VideoStreamer::runStereo() {
     // Wait until allowed to run
-    RegisterMap* regMap = RegisterMap::getInstance();
-    std::optional<std::string> destIpReg;
-    while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    // RegisterMap* regMap = RegisterMap::getInstance();
+    // std::optional<std::string> destIpReg;
+    // while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
+    //     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // }
 
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (stereo) started. Host IP: %s\n", destIpReg->c_str());
-    m_DestIp = *destIpReg;
+    // Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (stereo) started. Host IP: %s\n", destIpReg->c_str());
+    // m_DestIp = *destIpReg;
 
     std::pair<cv::Mat, cv::Mat> stereoFrames;
 
@@ -255,15 +255,15 @@ void VideoStreamer::runStereo() {
 
 
 void VideoStreamer::runStereoMono() {
-    // Wait until allowed to run
-    RegisterMap* regMap = RegisterMap::getInstance();
-    std::optional<std::string> destIpReg;
-    while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    // // Wait until allowed to run
+    // RegisterMap* regMap = RegisterMap::getInstance();
+    // std::optional<std::string> destIpReg;
+    // while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
+    //     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // }
 
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (stereo-mono) started. Host IP: %s\n", destIpReg->c_str());
-    m_DestIp = *destIpReg;
+    // Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (stereo-mono) started. Host IP: %s\n", destIpReg->c_str());
+    // m_DestIp = *destIpReg;
 
     stereoPayload stereoFrame;
 
@@ -336,11 +336,6 @@ int VideoStreamer::transmitPointCloud(stereoPayload& stereoFrame) {
     FragmentPayload packet{};
     Metadata meta{};
 
-    std::string destIp = m_DestIp;
-    if (destIp.empty()) {
-        return -1;
-    }
-
     while (bytesRemaining > 0) {
         // Fill metadata
         std::memset(meta.videoName, 0, sizeof(meta.videoName));
@@ -368,7 +363,7 @@ int VideoStreamer::transmitPointCloud(stereoPayload& stereoFrame) {
         const std::size_t packetSize = sizeof(FragmentHeader) + sizeof(Metadata) + bytesToSend;
         auto* raw = reinterpret_cast<uint8_t*>(&packet);
 
-        m_TxAdapter.send(destIp, raw, packetSize);
+        xfer(raw, packetSize);
     }
     return 0;
 }
@@ -402,11 +397,6 @@ int VideoStreamer::transmitFrame(cv::Mat& frame, int frameType, int frameSide) {
     FragmentPayload packet{};
     Metadata meta{};
 
-    std::string destIp = m_DestIp;
-    if (destIp.empty()) {
-        return -1;
-    }
-
     while (bytesRemaining > 0) {
         // Fill metadata
         std::memset(meta.videoName, 0, sizeof(meta.videoName));
@@ -435,7 +425,7 @@ int VideoStreamer::transmitFrame(cv::Mat& frame, int frameType, int frameSide) {
         const std::size_t packetSize = sizeof(FragmentHeader) + sizeof(Metadata) + bytesToSend;
         auto* raw = reinterpret_cast<uint8_t*>(&packet);
 
-        m_TxAdapter.send(destIp, raw, packetSize);
+        xfer(raw, packetSize);
     }
     return 0;
 }
@@ -461,9 +451,16 @@ int VideoStreamer::prepFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
 }
 
 
-int VideoStreamer::xfer(char* pBuf, size_t length) {
+int VideoStreamer::xfer(unsigned char* pBuf, size_t length) {
     if (pBuf == nullptr) {
         return -1;
+    }
+
+    // Check if the ethernet adapter is connected
+    if (m_TxAdapterEth.ethLinkDetected.load()) {
+        m_TxAdapterEth.send(reinterpret_cast<uint8_t*>(pBuf), length, "255.255.255.0");
+    } else {
+        m_TxAdapter.send(reinterpret_cast<uint8_t*>(pBuf), length);
     }
 
     return 0;

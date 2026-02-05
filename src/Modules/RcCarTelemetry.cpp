@@ -108,7 +108,7 @@ void RcCarTelemetry::mainProc() {
             nlohmann::json tlmData = m_TlmBuffer.getHead();
             m_TlmBuffer.pop();
             std::string payload = tlmData.dump();
-            m_TxAdapter->send(hostIP,
+            m_TxAdapter->send(
                 reinterpret_cast<const uint8_t*>(payload.data()),
                 payload.size());
         }

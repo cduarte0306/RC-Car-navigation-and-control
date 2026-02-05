@@ -88,6 +88,8 @@ public:
         return ipAddress;
     }
 
+    std::string& GetAdapterName() { return m_AdapterName; }
+
     size_t GetTxBytes() const { return m_TxBytes; };
 
     size_t GetRxBytes() const { return m_RxBytes; };
@@ -112,6 +114,7 @@ protected:
      */
     std::function<void(std::vector<char>&)> dataReceivedCallback;
     
+    std::string m_AdapterName;
     std::string m_HostIP;
     udp::socket socket_;
     udp::endpoint remoteEndpoint;

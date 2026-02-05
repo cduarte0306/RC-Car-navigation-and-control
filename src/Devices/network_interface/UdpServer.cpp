@@ -8,14 +8,16 @@
 #include <cstring>
 #include <netdb.h>
 #include <iostream>
+#include <sstream>
+#include <fstream>
 #include "utils/logger.hpp"
 
 
 using namespace Network;
 
 
-UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port, size_t bufferSize):
-    Sockets(io_context, port) {
+UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port, size_t bufferSize, bool broadcast):
+    Sockets(io_context, port), m_Broadcast(broadcast) {
 
     sport_ = port;
     Logger* logger = Logger::getLoggerInst();
@@ -58,8 +60,73 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, s
 
     udp::endpoint listen_endpoint(boost::asio::ip::make_address(ipAddress), port);
     socket_.open(listen_endpoint.protocol());
+    socket_.set_option(boost::asio::socket_base::broadcast(m_Broadcast));
     socket_.bind(listen_endpoint);
+
+    // Fill host field with broadcast version
+    if (m_Broadcast) {
+        std::string netMask = getNetMask(adapter);
+        std::vector<char> ipOctets;
+        std::vector<char> maskOctets;
+
+        ipOctets.reserve(4);
+        maskOctets.reserve(4);
+        std::istringstream ipStream(ipAddress);
+        std::istringstream maskStream(netMask);
+        std::string segment;
+        while (std::getline(ipStream, segment, '.')) {
+            ipOctets.push_back(static_cast<char>(std::stoi(segment)));
+        }
+        while (std::getline(maskStream, segment, '.')) {
+            maskOctets.push_back(static_cast<char>(std::stoi(segment)));
+        }
+
+        if (ipOctets.size() == 4 && maskOctets.size() == 4) {
+            std::string broadcastIp;
+            for (size_t i = 0; i < 4; ++i) {
+                char broadcastOctet = ipOctets[i] | (~maskOctets[i]);
+                broadcastIp += std::to_string(static_cast<unsigned char>(broadcastOctet));
+                if (i < 3) {
+                    broadcastIp += ".";
+                }
+            }
+            m_BroadcastIP = broadcastIp;
+        }
+    }
+
     logger->log(Logger::LOG_LVL_INFO, "Opened UDP socket: %s:%lu\r\n", ipAddress.c_str(), port);
+}
+
+
+/**
+ * @brief Reads MAC address from device
+ * 
+ * @return std::string 
+ */
+std::string UdpServer::getNetMask(std::string& iface) {
+    ifaddrs* ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) != 0)
+        return std::string("");
+
+    std::string result("");
+
+    for (auto* ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || !ifa->ifa_netmask)
+            continue;
+
+        if (iface != ifa->ifa_name)
+            continue;
+
+        if (ifa->ifa_addr->sa_family == AF_INET) {
+            auto* nm = reinterpret_cast<sockaddr_in*>(ifa->ifa_netmask);
+            result = inet_ntoa(nm->sin_addr);  // dotted-decimal
+            break;
+        }
+    }
+
+    freeifaddrs(ifaddr);
+    return result;
+
 }
 
 
@@ -132,10 +199,13 @@ UdpServer::~UdpServer() {
  * @return false Transmission failed
  */
 bool UdpServer::transmit(uint8_t* pBuf, size_t length, std::string& ip) {
-    if (pBuf == nullptr || length == 0) {
+    if (pBuf == nullptr || length == 0 || ip.length() == 0) {
         return false;
     }
 
+    if (m_Broadcast) {
+        ip = m_BroadcastIP;
+    }
     udp::endpoint remoteEndpoint(
         boost::asio::ip::address::from_string(ip),
         sport_

@@ -142,7 +142,7 @@ protected:
     void decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameEntry);
 
     // Receive frame handler
-    void recvFrame(std::vector<char>& data);
+    void onEthRecv(std::vector<char>& data);
 
     // Frame processing handler
     void processFrame(cv::Mat& frame);
@@ -151,7 +151,7 @@ protected:
     void processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
 
     // Generate point cloud image
-    void doPointCloud(cv::Mat& dispFrame, cv::Matx44d& Q);
+    void doPointCloud(cv::Mat& dispFrame, cv::Mat& pointCloudMat, cv::Matx44d& Q);
 
     // Save the streaming profile parameters
     static int saveStreamingProfile(CameraSettings& settings);
@@ -181,9 +181,6 @@ protected:
 
     // Video transmitter socket
     std::unique_ptr<Network::UdpServer> m_UdpSocket;
-
-    //  Training video input socket (only over eth)
-    std::unique_ptr<Network::UdpServer> m_UdpSimSocket;
 
     // Flag allowing the camera reader to feed the circular buffer
     std::atomic<bool> m_StreamerCanRun{false};

@@ -174,7 +174,7 @@ class VideoStreamer {
         
     };
 public:
-        /**
+    /**
      * @brief Construct a streamer.
      * @param txAdapter outbound network adapter used to send packets.
      * @param destIpProvider callable returning the current destination IP (thread-safe in caller).
@@ -369,7 +369,7 @@ private:
      * @param length Size of data
      * @return int 
      */
-    int xfer(char* pBuf, size_t length);
+    int xfer(unsigned char* pBuf, size_t length);
 
     /**
      * @brief Transmit a single frame.
@@ -437,7 +437,7 @@ private:
      */
     Msg::CircularBuffer<std::pair<cv::Mat, cv::Mat>> m_BufferStereo;
 
-    Msg::CircularBuffer<
+    // Msg::CircularBuffer<
     std::atomic<bool> m_Running{false};
     std::thread m_ThreadMono;
     std::thread m_ThreadStereo;

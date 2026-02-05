@@ -1,12 +1,19 @@
 #include "RcCommsController.hpp"
 #include <functional>
 #include <sstream>
+#include <fstream>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <sys/socket.h>
 #include "utils/logger.hpp"
+
 
 using namespace std;
 using namespace Adapter;
 
 namespace Modules {
+
+std::vector<std::string> hostMap = {"", ""};
 
 NetworkComms::NetworkComms(int moduleID, string name) 
     : Base(moduleID, name), Adapter::CommsAdapter(name) {
@@ -37,7 +44,7 @@ int NetworkComms::configureAdapter(
     std::unique_ptr<Network::UdpServer> udpSocket;
     try {
         udpSocket = make_unique<Network::UdpServer>(
-            io_context, adapter, "enP8p1s0", netAdapter.port, netAdapter.bufferSize);  // Default bakeup interface is enP8p1s0
+            io_context, adapter, "enP8p1s0", netAdapter.port, netAdapter.bufferSize, netAdapter.broadcast);  // Default bakeup interface is enP8p1s0
     } catch(const std::exception& e) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create UDP socket for adapter %s: %s\r\n", adapter.c_str(), e.what());
@@ -55,7 +62,14 @@ int NetworkComms::configureAdapter(
 
         // UdpServer::transmit expects a non-const buffer pointer
         uint8_t* buf = const_cast<uint8_t*>(data);
-        bool ok = udpSocket->transmit(buf, length, destIp);
+        std::string destIp_;
+        
+        if (destIp.length())
+            destIp_ = destIp;
+        else
+            destIp_ = hostMap[netAdapter.adapterType];
+        
+        bool ok = udpSocket->transmit(buf, length, destIp_);
         return ok ? 0 : -1;
     };
 
@@ -66,11 +80,19 @@ int NetworkComms::configureAdapter(
         return udpSocket->getHostIP();
     };
 
+    if (netAdapter.adapter == "enP8p1s0") {
+        netAdapter.adapterType = NetworkComms::EthAdapter;
+    } else if (netAdapter.adapter == "wlP1p1s0") {
+        netAdapter.adapterType = NetworkComms::WlanAdapter;
+    }
+
     // Keep ownership in the map and cache a non-owning pointer to the first socket
     Network::UdpServer* socketPtr = udpSocket.get();
     m_UdpSockets[adapterIdx].socket = std::move(udpSocket);
     m_UdpSockets[adapterIdx].port   = netAdapter.port;
     m_UdpSockets[adapterIdx].moduleName = netAdapter.parent;
+    m_UdpSockets[adapterIdx].netAdapter = &netAdapter;
+
     if (!m_UdpSocket) {
         m_UdpSocket = socketPtr;
     }
@@ -184,6 +206,24 @@ void NetworkComms::mainProc() {
     string hostIP("");
     string lastHost("");
 
+    auto ethernetCablePlugged = [](const char* ifname)
+    {
+        std::ifstream f(std::string("/sys/class/net/") + ifname + "/carrier");
+        int carrier = 0;
+        return (f >> carrier) && (carrier == 1);
+    };
+
+    auto seEthState = [this](bool state) {
+        for (auto& [idx, adapter] : m_UdpSockets) {
+            adapter.netAdapter->OnEthLinkDetected(state);
+        }
+    };
+
+    int ethernetPollCounter = 0;
+    int hostIPPollCounter = 0;
+
+    bool lastReading = false;
+
     while (true) {
         for (auto& [adapterName, udpSocketPtr] : m_AdapterMap) {
             if (!udpSocketPtr) {
@@ -209,6 +249,34 @@ void NetworkComms::mainProc() {
                     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Successfully reconfigured adapter %s\r\n", netAdapterPtr->adapter.c_str());
                     m_FailedAdapterMap.erase(adapterIdx);
                     break;
+                }
+            }
+        }
+
+        // Check for ethernet link
+        if (ethernetPollCounter ++ > 10) {
+            bool ret = ethernetCablePlugged("enP8p1s0");
+            if (ret != lastReading && ret) {
+                Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Ethernet link detected\r\n");
+                seEthState(true);
+                lastReading = ret;
+            } else if (!ret && ret != lastReading) {
+                Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Ethernet link disconnection detected\r\n");
+                seEthState(false);
+                lastReading = ret;
+            }
+
+            ethernetPollCounter = 0;
+        }
+
+        for ( auto& [idx, adapter] : m_UdpSockets ) {
+            if (adapter.netAdapter->adapter == "enP8p1s0") {
+                if (adapter.socket->getHostIP().length() > 0  && hostMap[NetworkComms::WlanAdapter].length() == 0) {
+                    hostMap[NetworkComms::EthAdapter] = adapter.socket->getHostIP();
+                }
+            } else if (adapter.netAdapter->adapter == "wlP1p1s0") {
+                if (adapter.socket->getHostIP().length() > 0 && hostMap[NetworkComms::WlanAdapter].length() == 0) {
+                    hostMap[NetworkComms::WlanAdapter] = adapter.socket->getHostIP();
                 }
             }
         }

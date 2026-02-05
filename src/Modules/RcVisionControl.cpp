@@ -68,7 +68,7 @@ int VisionControls::init(void) {
     Logger* logger = Logger::getLoggerInst();
     // Initialize the network adapters
     m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
-    m_EthAdapter = this->CommsAdapter->createNetworkAdapter(getName(), STREAM_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_EthAdapter = this->CommsAdapter->createNetworkAdapter(getName(), STREAM_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize, true);
 
     m_TxAdapter->setParent(this->getName());
     m_EthAdapter->setParent(this->getName());
@@ -120,7 +120,7 @@ int VisionControls::init(void) {
     // Start receiving frames
     this->CommsAdapter->startReceive(
         *m_EthAdapter,
-        std::bind(&VisionControls::recvFrame, this, std::placeholders::_1),
+        std::bind(&VisionControls::onEthRecv, this, std::placeholders::_1),
         false);
 
     // Register telemetry port
@@ -291,7 +291,7 @@ int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& setting
  * @param pbuf Pointer to UDP receive buffer
  * @param length Length of data received
  */
-void VisionControls::recvFrame(std::vector<char>& data) {
+void VisionControls::onEthRecv(std::vector<char>& data) {
     if (data.empty()) return;
     Logger* logger = Logger::getLoggerInst();
     const std::size_t packetSize = data.size();
@@ -552,7 +552,7 @@ void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::
  * 
  * @param dispFrame 
  */
-void VisionControls::doPointCloud(cv::Mat& dispFrame, cv::Matx44d& Q) {
+void VisionControls::doPointCloud(cv::Mat& dispFrame, cv::Mat& pointCloudMat, cv::Matx44d& Q) {
     // Q is the reprojection matrix
     cv::Mat Q64(Q);   // CV_64F 4x4
     cv::Mat Q32;
@@ -561,17 +561,16 @@ void VisionControls::doPointCloud(cv::Mat& dispFrame, cv::Matx44d& Q) {
     cv::Mat disp32f;
     dispFrame.convertTo(disp32f, CV_32F, 1.0 / 16.0);
 
-    cv::Mat points3d;
     cv::cuda::GpuMat d_disparity, d_3dImage;
     d_disparity.upload(disp32f);
     cv::cuda::reprojectImageTo3D(d_disparity, d_3dImage, Q32, 3, stream);
-    d_3dImage.download(points3d);
+    d_3dImage.download(pointCloudMat);
     stream.waitForCompletion();
     
     // Convert floating point to uint16_t    
-    int x = points3d.cols / 2;
-    int y = points3d.rows / 2;
-    cv::Vec3f xyz = points3d.at<cv::Vec3f>(y, x);
+    int x = pointCloudMat.cols / 2;
+    int y = pointCloudMat.rows / 2;
+    cv::Vec3f xyz = pointCloudMat.at<cv::Vec3f>(y, x);
     float Z = xyz[2]; // meters (if your calibration square size was meters)
 }
 
@@ -948,8 +947,8 @@ void VisionControls::mainProc() {
     cv::Mat frameSim;
     cv::Mat resizedFrame;
 
-    const int _resizeWidth  = 640;
-    const int _resizeHeight = 360;
+    const int _resizeWidth  = 1280;
+    const int _resizeHeight = 720;
 
     std::pair<cv::Mat, cv::Mat> stereoFramePair;
     int16_t xAccel, yAccel, zAccel;
@@ -1007,17 +1006,28 @@ void VisionControls::mainProc() {
                     m_VideoCalib.DoCalibration(frameL, frameR);
                     m_VideoStreamer->pushFrame(stereoFramePair);
                 } else {
+                    cv::Mat frameOut;
+                    cv::Mat pointCloud;
+
                     // Extract the disparity frame
                     processStereo(frameStereo, stereoFramePair, Q);
 
                     // Convert to point cloud for local processing
-                    doPointCloud(frameStereo, Q);
+                    doPointCloud(frameStereo, pointCloud, Q);                    
 
-                    // Resize disparity before transmission and scale Q accordingly.
+                    // Select the frame base on the ethernet link status
+                    // if (m_EthAdapter->ethLinkDetected.load()) {
+                    //     frameOut = pointCloud;
+                    // } else {                        
+                    //     // Resize disparity before transmission and scale Q accordingly.
+                    //     scaleRectMat(frameStereo, resizedFrame, Q);
+                    //     frameOut = resizedFrame;  // Reference the frame out to the resized frame
+                    // }
                     scaleRectMat(frameStereo, resizedFrame, Q);
+                    frameOut = frameStereo;
 
                     // Stream disparity frame
-                    m_VideoStreamer->pushFrame(resizedFrame, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel, Q);
+                    m_VideoStreamer->pushFrame(frameOut, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel, Q);
                 }
                 break;
 

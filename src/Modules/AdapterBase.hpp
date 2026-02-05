@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <list>
 #include <utility>
-
+#include <atomic>
 #include <functional>
 #include <iostream>
 
@@ -269,15 +269,21 @@ namespace Adapter {
             NetworkAdapter(const std::string& adapter_, int port_, size_t bufferSize_=2048) : adapter(adapter_), port(port_), bufferSize(bufferSize_) {}
             ~NetworkAdapter() {}
             std::function<int(std::string, const uint8_t*, size_t)> sendCallback = nullptr;
+            std::function<void(void)> OnEthDetected = nullptr;
             std::function<std::string()> hostResolver = nullptr;
             int id = -1;
+            int typeID = -1;
             std::string adapter;
             const int port = -1;
             const size_t bufferSize = 0;
             bool connected = false;
             std::string parent;
+            std::atomic<bool> wlanLinkDetected;
+            std::atomic<bool> ethLinkDetected;
+            bool broadcast = false;
+            int adapterType = -1;
 
-            int send(std::string destIp, const uint8_t* data, size_t length) {
+            int send(const uint8_t* data, size_t length, std::string destIp="") {
                 if (sendCallback) {
                     return sendCallback(destIp, data, length);
                 }
@@ -293,6 +299,14 @@ namespace Adapter {
                     return hostResolver();
                 }
                 return std::string();
+            }
+            
+            void OnEthLinkDetected(bool state) {
+                ethLinkDetected.store(state);
+            }
+
+            void OnWlanLinkDetected(bool state) {
+                wlanLinkDetected.store(state);
             }
 
         };
@@ -347,8 +361,8 @@ namespace Adapter {
             return 0;
         }
 
-        virtual std::unique_ptr<NetworkAdapter> createNetworkAdapter(const std::string& callerName, int port, std::string adapter, size_t bufferSize=2048) {
-            return openAdapterCommand(callerName, port, adapter, bufferSize);  // Pass the calling module's name to the sink adapter's openAdapter
+        virtual std::unique_ptr<NetworkAdapter> createNetworkAdapter(const std::string& callerName, int port, std::string adapter, size_t bufferSize=2048, bool broadcast=false) {
+            return openAdapterCommand(callerName, port, adapter, bufferSize, broadcast);  // Pass the calling module's name to the sink adapter's openAdapter
         }
 
         /**
@@ -362,19 +376,30 @@ namespace Adapter {
             }
             return "";
         }
+        
+        /**
+         * @brief Get the Eth Connection State 
+         * 
+         * @return true 
+         * @return false 
+         */
+        virtual bool GetEthConnectionState() const {
+            return ethConnectionState.load();
+        }
     protected:
         // callable to request data transmit; now includes caller identity
         std::function<int(const uint8_t*, size_t)                                                       > transmitDataCommand   = nullptr;
-        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, const std::string&, size_t)> openAdapterCommand    = nullptr;
+        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, const std::string&, size_t, bool)> openAdapterCommand    = nullptr;
         std::function<int (const char* pbuf, size_t len)                                                > recvDataCallback      = nullptr;
         std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)> dataReceivedCommand = nullptr;
         std::function<std::string(NetworkAdapter& adapter)> hostIPQueryCommand = nullptr;
         std::function<std::string(void)> readStatsCommand = nullptr;
+        std::atomic<bool> ethConnectionState{false};
         int adapterCounter = -1;
 
         std::list<std::pair<std::string, std::string>> m_RegisteredCallers;  // List of modules that have opened an adapter here
         // Fast lookup from caller module name -> adapter pointer (populated on open)
-        std::unordered_map<std::string, AdapterBase*> m_CallerAdapterMap;
+        std::unordered_map<std::string, CommsAdapter*> m_CallerAdapterMap;
 
         /**
          * @brief Bind interface for communication adapter
@@ -382,7 +407,8 @@ namespace Adapter {
          * @param Adapter Pointer to communication adapter
          */
         virtual int bind_(AdapterBase* Adapter) final {
-            bindInterface(static_cast<CommsAdapter*>(Adapter));
+            CommsAdapter* Adapter_ = static_cast<CommsAdapter*>(Adapter);
+            bindInterface(Adapter_);
             return 0;
         }
 
@@ -400,8 +426,8 @@ namespace Adapter {
                 return adapter->transmitData_(pData, length);
             };
 
-            this->openAdapterCommand = [adapter](const std::string& parent, int port, const std::string& adpName, size_t bufferSize) -> std::unique_ptr<NetworkAdapter> {
-                return adapter->openAdapter_(parent, port, adpName, bufferSize);
+            this->openAdapterCommand = [adapter](const std::string& parent, int port, const std::string& adpName, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
+                return adapter->openAdapter_(parent, port, adpName, bufferSize, broadcast);
             };
             
             this->dataReceivedCommand = [adapter](NetworkAdapter& netAdp, std::function<void(std::vector<char>&)> callback, bool asyncTx) -> int {
@@ -467,21 +493,23 @@ namespace Adapter {
          * @param adapter Adapter identifier or name
          * @return int Status code of the operation
          */
-        virtual std::unique_ptr<NetworkAdapter> openAdapter_(const std::string& parent, int port, const std::string& adapter, size_t bufferSize) final {
+        virtual std::unique_ptr<NetworkAdapter> openAdapter_(const std::string& parent, int port, const std::string& adapter, size_t bufferSize, bool broadcast) final {
             std::pair<std::string, std::string> adapterDesc(parent, adapter);
             m_RegisteredCallers.push_back(adapterDesc);
 
             // If we have previously bound this caller adapter into adapterMap
             // (via AdapterBase::bind), cache a direct pointer for fast lookup
             auto it = adapterMap.find(parent);
-            if (it != adapterMap.end()) {
-                m_CallerAdapterMap[parent] = it->second;
+            if (it != adapterMap.end() && it->second) {
+                CommsAdapter* boundAdapter = reinterpret_cast<CommsAdapter*>(it->second);
+                m_CallerAdapterMap[parent] = boundAdapter;
             }
 
             std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapter, port, bufferSize);
             adapterCounter++;
             netAdapter->id = adapterCounter;  // assign unique ID
             netAdapter->setParent(parent);    // set the parent module name
+            netAdapter->broadcast = broadcast;
 
             // Configure the adapter on the derived comms driver
             const int cfgStatus = configureAdapter(*netAdapter, netAdapter->id);

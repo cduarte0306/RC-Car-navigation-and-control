@@ -14,7 +14,7 @@ namespace Network {
 
 class UdpServer : public Sockets {
 public:
-    UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port, size_t bufferSize=1024);
+    UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port, size_t bufferSize=1024, bool broadcast=false);
     ~UdpServer();
 
     bool transmit(uint8_t* pBuf, size_t length, std::string& ip) override;
@@ -24,11 +24,17 @@ public:
 private:
     void startReceive_(void);
 
+    std::string getNetMask(std::string& iface);
+
     static constexpr int BUFFER_SIZE = 1024;
     static constexpr int MAX_CONNECTIONS = 10;
     static constexpr int TIMEOUT = 5000;
 
     bool threadCanRun = true;
+
+    bool m_Broadcast{false};
+
+    std::string m_BroadcastIP{""};
 
     bool m_HostFound{false};
 };
