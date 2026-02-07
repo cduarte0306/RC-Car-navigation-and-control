@@ -16,7 +16,7 @@ RcCarTelemetry::RcCarTelemetry(int moduleID, std::string name) : Modules::Base(m
 int RcCarTelemetry::init(void) {
     // Initialize transmission adapter
     Logger* logger = Logger::getLoggerInst();
-    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(6000, "wlP1p1s0");
+    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), 0, 6000, "wlP1p1s0");
     if (!m_TxAdapter) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create telemetry transmission adapter\r\n");
         return -1;
@@ -108,7 +108,7 @@ void RcCarTelemetry::mainProc() {
             nlohmann::json tlmData = m_TlmBuffer.getHead();
             m_TlmBuffer.pop();
             std::string payload = tlmData.dump();
-            m_TxAdapter->send(hostIP,
+            m_TxAdapter->send(
                 reinterpret_cast<const uint8_t*>(payload.data()),
                 payload.size());
         }

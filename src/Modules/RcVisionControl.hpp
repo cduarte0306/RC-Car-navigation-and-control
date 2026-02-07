@@ -129,8 +129,8 @@ protected:
         cv::Size chessboardSize{9, 6}; // inner corners (cols, rows)
     } m_CamSettings;
 
-    static constexpr int CAM_WIDTH  = 1920;
-    static constexpr int CAM_HEIGHT = 1080;
+    static constexpr int CAM_WIDTH  = 1280;
+    static constexpr int CAM_HEIGHT = 720;
 
     // Parent main proc override
     virtual void mainProc() override;
@@ -142,7 +142,7 @@ protected:
     void decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameEntry);
 
     // Receive frame handler
-    void recvFrame(std::vector<char>& data);
+    void onEthRecv(std::vector<char>& data);
 
     // Frame processing handler
     void processFrame(cv::Mat& frame);
@@ -151,7 +151,7 @@ protected:
     void processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
 
     // Generate point cloud image
-    void doPointCloud(cv::Mat& dispFrame, cv::Matx44d& Q);
+    void doPointCloud(cv::Mat& dispFrame, cv::Mat& pointCloudMat, cv::Matx44d& Q);
 
     // Save the streaming profile parameters
     static int saveStreamingProfile(CameraSettings& settings);
@@ -182,9 +182,6 @@ protected:
     // Video transmitter socket
     std::unique_ptr<Network::UdpServer> m_UdpSocket;
 
-    //  Training video input socket (only over eth)
-    std::unique_ptr<Network::UdpServer> m_UdpSimSocket;
-
     // Flag allowing the camera reader to feed the circular buffer
     std::atomic<bool> m_StreamerCanRun{false};
 
@@ -201,7 +198,7 @@ protected:
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TxAdapter{nullptr};
 
     // Reception port
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_RxAdapter{nullptr};
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_EthAdapter{nullptr};
 
     // Video recorder
     Vision::VideoRecording m_VideoRecorder;
@@ -219,8 +216,6 @@ protected:
 
     // Frame ID
     uint32_t m_FrameID = 0;
-
-    uint8_t m_NumDisparities = 0;
 
     // Name of the currently-downloaded (sim) video, derived from incoming packet metadata.
     std::string m_LastIncomingVideoName;

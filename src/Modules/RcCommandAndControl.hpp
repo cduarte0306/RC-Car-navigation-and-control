@@ -77,6 +77,9 @@ protected:
     // Map of UDP sockets by adapter ID
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_CommandNetAdapter{nullptr};
 
+    // UDP socket pointer for sending data
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_CommandNetAdapterEth{nullptr};
+
     std::unique_ptr<Network::UdpServer> m_UdpSocket;
 
     // UDP socket

@@ -13,9 +13,10 @@
 
 
 namespace Vision {
-VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
+VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter, Adapter::CommsAdapter::NetworkAdapter& txAdapterEth,
                             std::size_t bufferCapacity)
       : m_TxAdapter(txAdapter),
+        m_TxAdapterEth(txAdapterEth),
         m_Buffer(bufferCapacity), 
         m_BufferStereo(bufferCapacity),
         m_BufferStereoMono(bufferCapacity) {}
@@ -181,17 +182,6 @@ void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
 
 
 void VideoStreamer::runMono() {
-    // Wait until allowed to run
-    RegisterMap* regMap = RegisterMap::getInstance();
-    std::optional<std::string> destIpReg;
-    while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (mono) started. Host IP: %s\n", destIpReg->c_str());
-
-    m_DestIp = *destIpReg;
-
     while (m_Running) {
         if (m_Buffer.isEmpty()) {
             std::this_thread::sleep_for(std::chrono::microseconds(1));
@@ -218,16 +208,6 @@ void VideoStreamer::runMono() {
 
 
 void VideoStreamer::runStereo() {
-    // Wait until allowed to run
-    RegisterMap* regMap = RegisterMap::getInstance();
-    std::optional<std::string> destIpReg;
-    while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (stereo) started. Host IP: %s\n", destIpReg->c_str());
-    m_DestIp = *destIpReg;
-
     std::pair<cv::Mat, cv::Mat> stereoFrames;
 
     while (m_Running) {
@@ -254,15 +234,6 @@ void VideoStreamer::runStereo() {
 
 
 void VideoStreamer::runStereoMono() {
-    // Wait until allowed to run
-    RegisterMap* regMap = RegisterMap::getInstance();
-    std::optional<std::string> destIpReg;
-    while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (stereo-mono) started. Host IP: %s\n", destIpReg->c_str());
-    m_DestIp = *destIpReg;
 
     stereoPayload stereoFrame;
 
@@ -273,7 +244,7 @@ void VideoStreamer::runStereoMono() {
         }
 
         // Point cloud transmission is hard coded to 5 frames per second deu to bandwith limitations
-        VideoStreamer::throttleFps(static_cast<int>(VideoStreamer::FrameRate::_5Fps));
+        VideoStreamer::throttleFps(static_cast<int>(VideoStreamer::FrameRate::_10Fps));
 
         // For lowest latency, always transmit the newest frame.
         do {
@@ -330,15 +301,10 @@ int VideoStreamer::transmitPointCloud(stereoPayload& stereoFrame) {
     uint32_t segmentIndex = 0;
 
     // Number of segments
-    uint8_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
+    uint16_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
 
     FragmentPayload packet{};
     Metadata meta{};
-
-    std::string destIp = m_DestIp;
-    if (destIp.empty()) {
-        return -1;
-    }
 
     while (bytesRemaining > 0) {
         // Fill metadata
@@ -367,7 +333,7 @@ int VideoStreamer::transmitPointCloud(stereoPayload& stereoFrame) {
         const std::size_t packetSize = sizeof(FragmentHeader) + sizeof(Metadata) + bytesToSend;
         auto* raw = reinterpret_cast<uint8_t*>(&packet);
 
-        m_TxAdapter.send(destIp, raw, packetSize);
+        xfer(raw, packetSize);
     }
     return 0;
 }
@@ -396,15 +362,10 @@ int VideoStreamer::transmitFrame(cv::Mat& frame, int frameType, int frameSide) {
     uint32_t segmentIndex = 0;
 
     // Number of segments
-    uint8_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
+    uint16_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
 
     FragmentPayload packet{};
     Metadata meta{};
-
-    std::string destIp = m_DestIp;
-    if (destIp.empty()) {
-        return -1;
-    }
 
     while (bytesRemaining > 0) {
         // Fill metadata
@@ -434,7 +395,7 @@ int VideoStreamer::transmitFrame(cv::Mat& frame, int frameType, int frameSide) {
         const std::size_t packetSize = sizeof(FragmentHeader) + sizeof(Metadata) + bytesToSend;
         auto* raw = reinterpret_cast<uint8_t*>(&packet);
 
-        m_TxAdapter.send(destIp, raw, packetSize);
+        xfer(raw, packetSize);
     }
     return 0;
 }
@@ -458,4 +419,23 @@ int VideoStreamer::prepFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
     m_FrameID++;
     return 0;
 }
+
+
+int VideoStreamer::xfer(unsigned char* pBuf, size_t length) {
+    if (pBuf == nullptr) {
+        return -1;
+    }
+
+    // m_TxAdapter.send(reinterpret_cast<uint8_t*>(pBuf), length);
+
+    // Check if the ethernet adapter is connected
+    if (m_TxAdapterEth.ethLinkDetected.load()) {
+        m_TxAdapterEth.send(reinterpret_cast<uint8_t*>(pBuf), length);
+    } else {
+        m_TxAdapter.send(reinterpret_cast<uint8_t*>(pBuf), length);
+    }
+
+    return 0;
+}
+
 } // namespace Vision

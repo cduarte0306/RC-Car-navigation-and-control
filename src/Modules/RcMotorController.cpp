@@ -206,7 +206,6 @@ void MotorController::pollTlmData(void) {
         this->peripheralDriver->readData(psocData);
     }
     RegisterMap* regMap = RegisterMap::getInstance();
-    auto retVal = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP);
 
     nlohmann::json telemetryJson;
 
@@ -235,11 +234,9 @@ void MotorController::pollTlmData(void) {
         telemetryJson["encoderStatus"] = psocData.encoderStatus.u8;
     }
 
-    if (retVal.has_value()) {
-        this->TlmAdapter->publishTelemetry(this->getName(),
-            reinterpret_cast<const uint8_t*>(telemetryJson.dump().c_str()),
-            telemetryJson.dump().length());
-    }
+    this->TlmAdapter->publishTelemetry(this->getName(),
+        reinterpret_cast<const uint8_t*>(telemetryJson.dump().c_str()),
+        telemetryJson.dump().length());
 }
 
 

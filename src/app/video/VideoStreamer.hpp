@@ -174,7 +174,7 @@ class VideoStreamer {
         
     };
 public:
-        /**
+    /**
      * @brief Construct a streamer.
      * @param txAdapter outbound network adapter used to send packets.
      * @param destIpProvider callable returning the current destination IP (thread-safe in caller).
@@ -189,11 +189,12 @@ public:
     /**
      * @brief Construct a streamer.
      * @param txAdapter outbound network adapter used to send packets.
+     * @param txAdapter outbound network adapter used to send packets (Ethernet)
      * @param destIpProvider callable returning the current destination IP (thread-safe in caller).
      * @param jpegQuality JPEG quality [0-100]; defaults to 35.
      * @param bufferCapacity number of frames buffered for jitter smoothing.
      */
-    VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
+    VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter, Adapter::CommsAdapter::NetworkAdapter& txAdapterEth,
                   std::size_t bufferCapacity = 100);
 
     /**
@@ -303,8 +304,8 @@ private:
     struct Metadata {
         char     videoName[128];
         uint32_t sequenceID;
-        uint8_t  segmentID;
-        uint8_t  numSegments;
+        uint16_t  segmentID;
+        uint16_t  numSegments;
         uint32_t totalLength;
         uint16_t length;
     };
@@ -362,6 +363,15 @@ private:
     void runStereoMono();
 
     /**
+     * @brief Transfer over IP
+     * 
+     * @param pBuf Pointer to buffer
+     * @param length Size of data
+     * @return int 
+     */
+    int xfer(unsigned char* pBuf, size_t length);
+
+    /**
      * @brief Transmit a single frame.
      * 
      * @param frame Reference to the frame to transmit
@@ -404,6 +414,7 @@ private:
     std::atomic<int> frameIntervalMs{33};  // default ~30 FPS
     int encodeQuality = 35;
     Adapter::CommsAdapter::NetworkAdapter& m_TxAdapter;
+    Adapter::CommsAdapter::NetworkAdapter& m_TxAdapterEth;
     std::string m_DestIp;
 
     uint32_t m_FrameID = 0;
@@ -425,6 +436,8 @@ private:
      * 
      */
     Msg::CircularBuffer<std::pair<cv::Mat, cv::Mat>> m_BufferStereo;
+
+    // Msg::CircularBuffer<
     std::atomic<bool> m_Running{false};
     std::thread m_ThreadMono;
     std::thread m_ThreadStereo;
