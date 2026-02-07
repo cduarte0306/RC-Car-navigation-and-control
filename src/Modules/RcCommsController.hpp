@@ -17,10 +17,7 @@ public:
     NetworkComms(int moduleID, std::string name);
     ~NetworkComms();
 
-    virtual int init(void) override {
-        // Implementation to initialize the motor controller
-        return 0;
-    }
+    virtual int init(void) override;
 
     virtual int stop(void) override {
         // Implementation to stop the motor controller
@@ -70,13 +67,20 @@ protected:
     };
 
     struct NetStats {
-        int port;
-        uint64_t txRate;
-        uint64_t rxRate;
+        int sPort;
+        int dPort;
+        double txRate;
+        double rxRate;
         std::string moduleName;
         std::unique_ptr<Network::UdpServer> socket;
         Adapter::CommsAdapter::NetworkAdapter* netAdapter = nullptr;
     };
+
+    void OnWlanHandShakeRecv(std::vector<char>& data);
+    void OnEthHandShakeRecv(std::vector<char>& data);
+
+    constexpr static uint32_t EthHandshakePort = 8192;
+    constexpr static uint32_t WlanHandshakePort = 8193;
     
     // Map of UDP sockets by adapter ID
     std::unordered_map<int, NetStats> m_UdpSockets;
@@ -92,6 +96,12 @@ protected:
 
     // Non-owning pointer to the primary socket (first configured adapter)
     Network::UdpServer* m_UdpSocket{nullptr};
+
+    // WLAN socket for handshaking
+    std::shared_ptr<Network::UdpServer> m_WlanSocket{nullptr};
+    
+    // ETH socket for handshaking
+    std::shared_ptr<Network::UdpServer> m_EthSocket{nullptr};
 
     // List of adapter names that failed to open
     std::vector<std::pair<int, Adapter::CommsAdapter::NetworkAdapter*>> m_FailedAdapters;

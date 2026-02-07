@@ -90,6 +90,10 @@ public:
 
     std::string& GetAdapterName() { return m_AdapterName; }
 
+    int getSrcPort() const { return sport_; };
+
+    int getDstPort() const { return dport_; };
+
     size_t GetTxBytes() const { return m_TxBytes; };
 
     size_t GetRxBytes() const { return m_RxBytes; };

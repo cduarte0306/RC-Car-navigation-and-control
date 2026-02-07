@@ -304,8 +304,8 @@ private:
     struct Metadata {
         char     videoName[128];
         uint32_t sequenceID;
-        uint8_t  segmentID;
-        uint8_t  numSegments;
+        uint16_t  segmentID;
+        uint16_t  numSegments;
         uint32_t totalLength;
         uint16_t length;
     };

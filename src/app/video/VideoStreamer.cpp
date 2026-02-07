@@ -255,15 +255,6 @@ void VideoStreamer::runStereo() {
 
 
 void VideoStreamer::runStereoMono() {
-    // // Wait until allowed to run
-    // RegisterMap* regMap = RegisterMap::getInstance();
-    // std::optional<std::string> destIpReg;
-    // while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
-    //     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    // }
-
-    // Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (stereo-mono) started. Host IP: %s\n", destIpReg->c_str());
-    // m_DestIp = *destIpReg;
 
     stereoPayload stereoFrame;
 
@@ -274,7 +265,8 @@ void VideoStreamer::runStereoMono() {
         }
 
         // Point cloud transmission is hard coded to 5 frames per second deu to bandwith limitations
-        VideoStreamer::throttleFps(static_cast<int>(VideoStreamer::FrameRate::_5Fps));
+        // VideoStreamer::throttleFps(static_cast<int>(VideoStreamer::FrameRate::_5Fps));
+        VideoStreamer::throttleFps(static_cast<int>(1000));
 
         // For lowest latency, always transmit the newest frame.
         do {
@@ -331,7 +323,7 @@ int VideoStreamer::transmitPointCloud(stereoPayload& stereoFrame) {
     uint32_t segmentIndex = 0;
 
     // Number of segments
-    uint8_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
+    uint16_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
 
     FragmentPayload packet{};
     Metadata meta{};
@@ -343,6 +335,8 @@ int VideoStreamer::transmitPointCloud(stereoPayload& stereoFrame) {
         meta.totalLength = static_cast<uint32_t>(totalSize);
         meta.segmentID   = segmentIndex;
         meta.numSegments = numSegments;
+        std::string segmentIndexStr = std::to_string(segmentIndex);
+        memcpy(meta.videoName, segmentIndexStr.c_str(), std::min(segmentIndexStr.size(), sizeof(meta.videoName)));
 
         size_t bytesToSend = std::min<std::size_t>(bytesRemaining, MaxPayloadSize);
         meta.length = static_cast<uint16_t>(bytesToSend);
@@ -392,7 +386,7 @@ int VideoStreamer::transmitFrame(cv::Mat& frame, int frameType, int frameSide) {
     uint32_t segmentIndex = 0;
 
     // Number of segments
-    uint8_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
+    uint16_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
 
     FragmentPayload packet{};
     Metadata meta{};
@@ -456,9 +450,11 @@ int VideoStreamer::xfer(unsigned char* pBuf, size_t length) {
         return -1;
     }
 
+    // m_TxAdapter.send(reinterpret_cast<uint8_t*>(pBuf), length);
+
     // Check if the ethernet adapter is connected
     if (m_TxAdapterEth.ethLinkDetected.load()) {
-        m_TxAdapterEth.send(reinterpret_cast<uint8_t*>(pBuf), length, "255.255.255.0");
+        m_TxAdapterEth.send(reinterpret_cast<uint8_t*>(pBuf), length);
     } else {
         m_TxAdapter.send(reinterpret_cast<uint8_t*>(pBuf), length);
     }

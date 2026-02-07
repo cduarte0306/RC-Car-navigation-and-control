@@ -14,7 +14,7 @@ namespace Network {
 
 class UdpServer : public Sockets {
 public:
-    UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port, size_t bufferSize=1024, bool broadcast=false);
+    UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short sPort, unsigned short dPort, size_t bufferSize=1024, bool broadcast=false);
     ~UdpServer();
 
     bool transmit(uint8_t* pBuf, size_t length, std::string& ip) override;

@@ -28,6 +28,71 @@ NetworkComms::~NetworkComms() {
 }
 
 
+int NetworkComms::init(void) {
+    Logger* logger = Logger::getLoggerInst();
+
+    // Initialize host IP map
+    hostMap[WlanAdapter] = "";
+    hostMap[EthAdapter]  = "";
+
+    m_WlanSocket = std::make_shared<Network::UdpServer>(
+        io_context, "wlP1p1s0", "enP8p1s0", 0, WlanHandshakePort);  // Default bakeup interface is enP8p1s0
+
+    m_EthSocket = std::make_shared<Network::UdpServer>(
+        io_context, "enP8p1s0", "enP8p1s0", 0, EthHandshakePort);  // Default bakeup interface is wlan
+
+    m_WlanSocket->startReceive(std::bind(&NetworkComms::OnWlanHandShakeRecv, this, std::placeholders::_1));
+    m_EthSocket->startReceive(std::bind(&NetworkComms::OnEthHandShakeRecv, this, std::placeholders::_1));
+
+    logger->log(Logger::LOG_LVL_INFO, "NetworkComms module initialized\r\n");
+    return 0;
+}
+
+
+/**
+ * @brief Handler for handshake data received via UDP
+ * 
+ * @param data Reference to received data buffer
+ */
+void NetworkComms::OnWlanHandShakeRecv(std::vector<char>& data) {
+    Logger* logger = Logger::getLoggerInst();
+    // Process handshake data
+    logger->log(Logger::LOG_LVL_INFO, "Received handshake data (%zu bytes)\r\n", data.size());
+
+    // Build reply
+    data.clear();
+    std::string replyStr = "HANDSHAKE_ACK";
+
+    // Fill the host map for WLAN
+    hostMap[NetworkComms::WlanAdapter] = m_WlanSocket->getHostIP();
+
+    if (!hostMap[NetworkComms::WlanAdapter].length())
+        logger->log(Logger::LOG_LVL_INFO, "WLAN Host IP: %s\r\n", hostMap[NetworkComms::WlanAdapter].c_str());
+    data.insert(data.end(), replyStr.begin(), replyStr.end());
+}
+
+
+/**
+ * @brief Handler for handshake data received via UDP
+ * 
+ * @param data Reference to received data buffer
+ */
+void NetworkComms::OnEthHandShakeRecv(std::vector<char>& data) {
+    Logger* logger = Logger::getLoggerInst();
+    // Process handshake data
+    logger->log(Logger::LOG_LVL_INFO, "Received handshake data (%zu bytes)\r\n", data.size());
+
+    // Build reply
+    data.clear();
+    std::string replyStr = "HANDSHAKE_ACK";
+    // Fill the host map for Ethernet
+    hostMap[NetworkComms::EthAdapter] = m_EthSocket->getHostIP();
+    if (!hostMap[NetworkComms::EthAdapter].length())
+        logger->log(Logger::LOG_LVL_INFO, "Ethernet Host IP: %s\r\n", hostMap[NetworkComms::EthAdapter].c_str());
+    data.insert(data.end(), replyStr.begin(), replyStr.end());
+}
+
+
 /**
  * @brief Configure network adapter with port mapping
  * 
@@ -44,7 +109,7 @@ int NetworkComms::configureAdapter(
     std::unique_ptr<Network::UdpServer> udpSocket;
     try {
         udpSocket = make_unique<Network::UdpServer>(
-            io_context, adapter, "enP8p1s0", netAdapter.port, netAdapter.bufferSize, netAdapter.broadcast);  // Default bakeup interface is enP8p1s0
+            io_context, adapter, "enP8p1s0", netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize, netAdapter.broadcast);  // Default bakeup interface is enP8p1s0
     } catch(const std::exception& e) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create UDP socket for adapter %s: %s\r\n", adapter.c_str(), e.what());
@@ -86,10 +151,14 @@ int NetworkComms::configureAdapter(
         netAdapter.adapterType = NetworkComms::WlanAdapter;
     }
 
+    netAdapter.sPort = udpSocket->getSrcPort();;
+    netAdapter.dPort = udpSocket->getDstPort();
+
     // Keep ownership in the map and cache a non-owning pointer to the first socket
     Network::UdpServer* socketPtr = udpSocket.get();
     m_UdpSockets[adapterIdx].socket = std::move(udpSocket);
-    m_UdpSockets[adapterIdx].port   = netAdapter.port;
+    m_UdpSockets[adapterIdx].sPort   = netAdapter.sPort;
+    m_UdpSockets[adapterIdx].dPort   = netAdapter.dPort;
     m_UdpSockets[adapterIdx].moduleName = netAdapter.parent;
     m_UdpSockets[adapterIdx].netAdapter = &netAdapter;
 
@@ -173,10 +242,27 @@ std::string NetworkComms::readStats() {
     std::stringstream stats;
 
     for (auto& [index, socket] : m_UdpSockets) {
+        std::string txPrint;
+        std::string rxPrint;
+
+        if (socket.txRate < 1.0) {
+            txPrint = std::to_string(socket.txRate * 1000.0) + " Kbps";
+        } else {
+            txPrint = std::to_string(socket.txRate) + " Mbps";
+        }
+
+        if (socket.rxRate < 1.0) {
+            rxPrint = std::to_string(socket.rxRate * 1000.0) + " Kbps";
+        } else {
+            rxPrint = std::to_string(socket.rxRate) + " Mbps";
+        } 
+
         stats << "Module: " << socket.moduleName << " | "
-              << "Port: " << socket.port << " | "
-              << "TX Rate: " << socket.txRate << " Mbps | "
-              << "RX Rate: " << socket.rxRate << " Mbps\r\n";
+              << "Adapter: " << socket.netAdapter->adapter << " | "
+              << "sPort: " << socket.sPort << " | "
+              << "dPort: " << socket.dPort << " | "
+              << "TX Rate: " << txPrint << " | "
+              << "RX Rate: " << rxPrint << "\r\n";
     }
 
     std::string ret = stats.str();
@@ -190,8 +276,8 @@ std::string NetworkComms::readStats() {
  */
 void NetworkComms::OnTimer(void) {
     for (auto& [idx, socket] : m_UdpSockets) {
-        socket.txRate = (socket.socket->GetTxBytes() * 8) / 1000000;
-        socket.rxRate = (socket.socket->GetRxBytes() * 8) / 1000000;
+        socket.txRate = (static_cast<double>(socket.socket->GetTxBytes()) * 8.0) / 1000000.0;
+        socket.rxRate = (static_cast<double>(socket.socket->GetRxBytes()) * 8.0) / 1000000.0;
 
         socket.socket->resetCounters();
     }
@@ -273,10 +359,12 @@ void NetworkComms::mainProc() {
             if (adapter.netAdapter->adapter == "enP8p1s0") {
                 if (adapter.socket->getHostIP().length() > 0  && hostMap[NetworkComms::WlanAdapter].length() == 0) {
                     hostMap[NetworkComms::EthAdapter] = adapter.socket->getHostIP();
+                    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Ethernet Host IP: %s\r\n", hostMap[NetworkComms::EthAdapter].c_str());
                 }
             } else if (adapter.netAdapter->adapter == "wlP1p1s0") {
                 if (adapter.socket->getHostIP().length() > 0 && hostMap[NetworkComms::WlanAdapter].length() == 0) {
                     hostMap[NetworkComms::WlanAdapter] = adapter.socket->getHostIP();
+                    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "WLAN Host IP: %s\r\n", hostMap[NetworkComms::WlanAdapter].c_str());
                 }
             }
         }

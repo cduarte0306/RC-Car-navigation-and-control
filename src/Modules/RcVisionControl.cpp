@@ -67,8 +67,8 @@ int VisionControls::init(void) {
 
     Logger* logger = Logger::getLoggerInst();
     // Initialize the network adapters
-    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
-    m_EthAdapter = this->CommsAdapter->createNetworkAdapter(getName(), STREAM_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize, true);
+    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), 0, STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_EthAdapter = this->CommsAdapter->createNetworkAdapter(getName(), 0, STREAM_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
 
     m_TxAdapter->setParent(this->getName());
     m_EthAdapter->setParent(this->getName());
@@ -1024,7 +1024,7 @@ void VisionControls::mainProc() {
                     //     frameOut = resizedFrame;  // Reference the frame out to the resized frame
                     // }
                     scaleRectMat(frameStereo, resizedFrame, Q);
-                    frameOut = frameStereo;
+                    frameOut = resizedFrame;
 
                     // Stream disparity frame
                     m_VideoStreamer->pushFrame(frameOut, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel, Q);

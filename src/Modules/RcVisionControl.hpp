@@ -129,8 +129,8 @@ protected:
         cv::Size chessboardSize{9, 6}; // inner corners (cols, rows)
     } m_CamSettings;
 
-    static constexpr int CAM_WIDTH  = 1920;
-    static constexpr int CAM_HEIGHT = 1080;
+    static constexpr int CAM_WIDTH  = 1280;
+    static constexpr int CAM_HEIGHT = 720;
 
     // Parent main proc override
     virtual void mainProc() override;

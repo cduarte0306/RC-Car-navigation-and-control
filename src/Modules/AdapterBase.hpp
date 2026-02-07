@@ -266,7 +266,7 @@ namespace Adapter {
         };
 
         struct NetworkAdapter {
-            NetworkAdapter(const std::string& adapter_, int port_, size_t bufferSize_=2048) : adapter(adapter_), port(port_), bufferSize(bufferSize_) {}
+            NetworkAdapter(const std::string& adapter_,  int sPort_, int dPort_, size_t bufferSize_=2048) : adapter(adapter_), sPort(sPort_), dPort(dPort_), bufferSize(bufferSize_) {}
             ~NetworkAdapter() {}
             std::function<int(std::string, const uint8_t*, size_t)> sendCallback = nullptr;
             std::function<void(void)> OnEthDetected = nullptr;
@@ -274,7 +274,8 @@ namespace Adapter {
             int id = -1;
             int typeID = -1;
             std::string adapter;
-            const int port = -1;
+            int sPort = -1;
+            int dPort = -1;
             const size_t bufferSize = 0;
             bool connected = false;
             std::string parent;
@@ -361,8 +362,8 @@ namespace Adapter {
             return 0;
         }
 
-        virtual std::unique_ptr<NetworkAdapter> createNetworkAdapter(const std::string& callerName, int port, std::string adapter, size_t bufferSize=2048, bool broadcast=false) {
-            return openAdapterCommand(callerName, port, adapter, bufferSize, broadcast);  // Pass the calling module's name to the sink adapter's openAdapter
+        virtual std::unique_ptr<NetworkAdapter> createNetworkAdapter(const std::string& callerName, int sPort, int dPort, std::string adapter, size_t bufferSize=2048, bool broadcast=false) {
+            return openAdapterCommand(callerName, sPort, dPort, adapter, bufferSize, broadcast);  // Pass the calling module's name to the sink adapter's openAdapter
         }
 
         /**
@@ -389,7 +390,7 @@ namespace Adapter {
     protected:
         // callable to request data transmit; now includes caller identity
         std::function<int(const uint8_t*, size_t)                                                       > transmitDataCommand   = nullptr;
-        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, const std::string&, size_t, bool)> openAdapterCommand    = nullptr;
+        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, const std::string&, size_t, bool)> openAdapterCommand    = nullptr;
         std::function<int (const char* pbuf, size_t len)                                                > recvDataCallback      = nullptr;
         std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)> dataReceivedCommand = nullptr;
         std::function<std::string(NetworkAdapter& adapter)> hostIPQueryCommand = nullptr;
@@ -426,8 +427,8 @@ namespace Adapter {
                 return adapter->transmitData_(pData, length);
             };
 
-            this->openAdapterCommand = [adapter](const std::string& parent, int port, const std::string& adpName, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
-                return adapter->openAdapter_(parent, port, adpName, bufferSize, broadcast);
+            this->openAdapterCommand = [adapter](const std::string& parent, int sPort, int dPort, const std::string& adpName, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
+                return adapter->openAdapter_(parent, sPort, dPort, adpName, bufferSize, broadcast);
             };
             
             this->dataReceivedCommand = [adapter](NetworkAdapter& netAdp, std::function<void(std::vector<char>&)> callback, bool asyncTx) -> int {
@@ -489,11 +490,12 @@ namespace Adapter {
          * @brief Open an adapter for a given parent module
          * 
          * @param parent Identifier of the parent module requesting the adapter
-         * @param port Port number for the adapter
+         * @param sPort Source port number for the adapter
+         * @param dPort Destination port number for the adapter
          * @param adapter Adapter identifier or name
          * @return int Status code of the operation
          */
-        virtual std::unique_ptr<NetworkAdapter> openAdapter_(const std::string& parent, int port, const std::string& adapter, size_t bufferSize, bool broadcast) final {
+        virtual std::unique_ptr<NetworkAdapter> openAdapter_(const std::string& parent,  int sPort, int dPort, const std::string& adapter, size_t bufferSize, bool broadcast) final {
             std::pair<std::string, std::string> adapterDesc(parent, adapter);
             m_RegisteredCallers.push_back(adapterDesc);
 
@@ -505,7 +507,7 @@ namespace Adapter {
                 m_CallerAdapterMap[parent] = boundAdapter;
             }
 
-            std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapter, port, bufferSize);
+            std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapter, sPort, dPort, bufferSize);
             adapterCounter++;
             netAdapter->id = adapterCounter;  // assign unique ID
             netAdapter->setParent(parent);    // set the parent module name

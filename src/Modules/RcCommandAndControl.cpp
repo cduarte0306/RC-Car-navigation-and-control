@@ -29,14 +29,19 @@ CommandController::~CommandController() {
 int CommandController::init(void) {
     Logger* logger = Logger::getLoggerInst();
     // Initialize the UDP server
-    m_CommandNetAdapter = this->CommsAdapter->createNetworkAdapter(getName(), 65000, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_CommandNetAdapter = this->CommsAdapter->createNetworkAdapter(getName(), 65000, 0, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
     if (!m_CommandNetAdapter) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create command network adapter\r\n");
         return -1;
     }
 
-    // Initialize host IP in register for broadcast
-    // RegisterMap::getInstance()->set(RegisterMap::RegisterKeys::HostIP, "255.255.255.255");
+    m_CommandNetAdapterEth = this->CommsAdapter->createNetworkAdapter(getName(), 65000, 0, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    if (!m_CommandNetAdapterEth) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to create command network adapter\r\n");
+        return -1;
+    }
+
+    logger->log(Logger::LOG_LVL_INFO, "CommandController module initialized\r\n");
     return 0;
 }
 
@@ -162,15 +167,9 @@ void CommandController::mainProc() {
 
         Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "CommandController network adapter connected. Configuring receive callback\r\n");
         this->CommsAdapter->startReceive(*m_CommandNetAdapter, std::bind(&CommandController::processIncomingData, this, std::placeholders::_1));
+        this->CommsAdapter->startReceive(*m_CommandNetAdapterEth, std::bind(&CommandController::processIncomingData, this, std::placeholders::_1));
 
         while (true) {
-            // Process motor commands
-            hostIP = this->CommsAdapter->getHostIP(*m_CommandNetAdapter);
-            if (hostIP.length() && (hostIP != lastHost)) {
-                regMap->set(RegisterMap::RegisterKeys::HostIP, hostIP);
-                lastHost = hostIP;
-            }
-
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }

@@ -16,10 +16,11 @@
 using namespace Network;
 
 
-UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port, size_t bufferSize, bool broadcast):
-    Sockets(io_context, port), m_Broadcast(broadcast) {
+UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short sPort, unsigned short dPort, size_t bufferSize, bool broadcast):
+    Sockets(io_context, sPort), m_Broadcast(broadcast) {
 
-    sport_ = port;
+    sport_ = sPort;
+    dport_ = dPort;
     Logger* logger = Logger::getLoggerInst();
 
     m_RecvBuffer.resize(bufferSize);
@@ -58,10 +59,13 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, s
         throw std::runtime_error("");
     }
 
-    udp::endpoint listen_endpoint(boost::asio::ip::make_address(ipAddress), port);
+    udp::endpoint listen_endpoint(boost::asio::ip::make_address(ipAddress), sPort);
     socket_.open(listen_endpoint.protocol());
     socket_.set_option(boost::asio::socket_base::broadcast(m_Broadcast));
     socket_.bind(listen_endpoint);
+
+    sport_ = socket_.local_endpoint().port();  // Update in case we used port 0
+    dport_ = dPort;
 
     // Fill host field with broadcast version
     if (m_Broadcast) {
@@ -94,7 +98,7 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, s
         }
     }
 
-    logger->log(Logger::LOG_LVL_INFO, "Opened UDP socket: %s:%lu\r\n", ipAddress.c_str(), port);
+    logger->log(Logger::LOG_LVL_INFO, "Opened UDP socket: %s:%d\r\n", ipAddress.c_str(), sport_);
 }
 
 
@@ -208,7 +212,7 @@ bool UdpServer::transmit(uint8_t* pBuf, size_t length, std::string& ip) {
     }
     udp::endpoint remoteEndpoint(
         boost::asio::ip::address::from_string(ip),
-        sport_
+        dport_
     );
 
     bool ret = false;
