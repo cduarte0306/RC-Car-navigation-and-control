@@ -215,15 +215,12 @@ bool UdpServer::transmit(uint8_t* pBuf, size_t length, std::string& ip) {
         dport_
     );
 
-    bool ret = false;
-    socket_.async_send_to(
-        boost::asio::buffer(pBuf, length), remoteEndpoint,
-        [&](const boost::system::error_code& ec, std::size_t bytes_sent) {
-            if (ec) {
-                Logger* logger = Logger::getLoggerInst();
-                logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s, message length: %lu\r\n", ec.message().c_str(), length);
-            }
-        });
+    ssize_t bytes_sent = socket_.send_to(boost::asio::buffer(pBuf, length), remoteEndpoint);
+    if (bytes_sent < 0) {
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s, message length: %lu\r\n", strerror(errno), length);
+        return false;
+    }
 
     m_TxBytes += length;
     return true;

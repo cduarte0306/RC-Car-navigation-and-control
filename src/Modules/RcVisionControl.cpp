@@ -1016,15 +1016,13 @@ void VisionControls::mainProc() {
                     doPointCloud(frameStereo, pointCloud, Q);                    
 
                     // Select the frame base on the ethernet link status
-                    // if (m_EthAdapter->ethLinkDetected.load()) {
-                    //     frameOut = pointCloud;
-                    // } else {                        
-                    //     // Resize disparity before transmission and scale Q accordingly.
-                    //     scaleRectMat(frameStereo, resizedFrame, Q);
-                    //     frameOut = resizedFrame;  // Reference the frame out to the resized frame
-                    // }
-                    scaleRectMat(frameStereo, resizedFrame, Q);
-                    frameOut = resizedFrame;
+                    if (m_EthAdapter->ethLinkDetected.load()) {
+                        frameOut = pointCloud;
+                    } else {                        
+                        // Resize disparity before transmission and scale Q accordingly.
+                        scaleRectMat(frameStereo, resizedFrame, Q);
+                        frameOut = resizedFrame;  // Reference the frame out to the resized frame
+                    }
 
                     // Stream disparity frame
                     m_VideoStreamer->pushFrame(frameOut, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel, Q);

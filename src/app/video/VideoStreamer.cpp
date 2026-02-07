@@ -182,17 +182,6 @@ void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
 
 
 void VideoStreamer::runMono() {
-    // Wait until allowed to run
-    // RegisterMap* regMap = RegisterMap::getInstance();
-    // std::optional<std::string> destIpReg;
-    // while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
-    //     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    // }
-
-    // Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (mono) started. Host IP: %s\n", destIpReg->c_str());
-
-    // m_DestIp = *destIpReg;
-
     while (m_Running) {
         if (m_Buffer.isEmpty()) {
             std::this_thread::sleep_for(std::chrono::microseconds(1));
@@ -219,16 +208,6 @@ void VideoStreamer::runMono() {
 
 
 void VideoStreamer::runStereo() {
-    // Wait until allowed to run
-    // RegisterMap* regMap = RegisterMap::getInstance();
-    // std::optional<std::string> destIpReg;
-    // while (destIpReg = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP), !destIpReg.has_value()) {
-    //     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    // }
-
-    // Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer (stereo) started. Host IP: %s\n", destIpReg->c_str());
-    // m_DestIp = *destIpReg;
-
     std::pair<cv::Mat, cv::Mat> stereoFrames;
 
     while (m_Running) {
@@ -265,8 +244,7 @@ void VideoStreamer::runStereoMono() {
         }
 
         // Point cloud transmission is hard coded to 5 frames per second deu to bandwith limitations
-        // VideoStreamer::throttleFps(static_cast<int>(VideoStreamer::FrameRate::_5Fps));
-        VideoStreamer::throttleFps(static_cast<int>(1000));
+        VideoStreamer::throttleFps(static_cast<int>(VideoStreamer::FrameRate::_10Fps));
 
         // For lowest latency, always transmit the newest frame.
         do {
@@ -335,8 +313,6 @@ int VideoStreamer::transmitPointCloud(stereoPayload& stereoFrame) {
         meta.totalLength = static_cast<uint32_t>(totalSize);
         meta.segmentID   = segmentIndex;
         meta.numSegments = numSegments;
-        std::string segmentIndexStr = std::to_string(segmentIndex);
-        memcpy(meta.videoName, segmentIndexStr.c_str(), std::min(segmentIndexStr.size(), sizeof(meta.videoName)));
 
         size_t bytesToSend = std::min<std::size_t>(bytesRemaining, MaxPayloadSize);
         meta.length = static_cast<uint16_t>(bytesToSend);
