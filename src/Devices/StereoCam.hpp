@@ -53,6 +53,15 @@ public:
      */
     int read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t& yGyro, int16_t& zGyro, int16_t& xAccel, int16_t& yAccel, int16_t& zAccel);
 
+    /**
+     * @brief Get the Timestamp Difference between the two cameras in nanoseconds
+     * 
+     * @return uint64_t Timestamp difference in nanoseconds
+     */
+    uint64_t getTimestampDiffNs() const {
+        return m_TimestampDiffNs_;
+    }
+
 private:
     enum class CamIdx : uint8_t {
       CamLeft,
@@ -92,6 +101,14 @@ private:
      * @return int 
      */
     void cam0CaptureProducer();
+
+    static void ApplyStereoFixedControls(
+      Argus::IRequest* iRequest,
+      Argus::ISourceSettings* iSource,
+      uint64_t exposureNs,
+      float gain,
+      bool lockAwb
+      ) ;
 
     /**
      * @brief Convert NvBufSurface to cv::Mat in BGR format
@@ -155,6 +172,8 @@ private:
     std::condition_variable startCv_;
     bool start_ = false;
     std::atomic<bool> m_ThreadCanRun{true};
+
+    uint64_t m_TimestampDiffNs_ = 0;
 };
 };
 

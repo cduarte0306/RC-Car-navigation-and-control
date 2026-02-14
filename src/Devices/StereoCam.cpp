@@ -92,6 +92,29 @@ int StereoCam::start(uint32_t w, uint32_t h, uint32_t fps) {
 }
 
 
+void StereoCam::ApplyStereoFixedControls(
+      Argus::IRequest* iRequest,
+      Argus::ISourceSettings* iSource,
+      uint64_t exposureNs,
+      float gain,
+      bool lockAwb
+      ) {
+    using namespace Argus;
+
+    // 1) Force manual exposure+gain (min=max)
+    iSource->setExposureTimeRange(Range<uint64_t>(exposureNs, exposureNs));
+    iSource->setGainRange(Range<float>(gain, gain));
+
+    // 2) Lock AE/AWB via AutoControlSettings
+    IAutoControlSettings* iACS =
+        interface_cast<IAutoControlSettings>(iRequest->getAutoControlSettings());
+    if (iACS) {
+        iACS->setAeLock(true);
+        iACS->setAwbLock(lockAwb);
+    } 
+}
+
+
 int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
     std::vector<CameraDevice*> devices;
     iProvider_->getCameraDevices(&devices);
@@ -166,7 +189,7 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
     iEglSettings->setResolution(Size2D<uint32_t>(w_, h_));
     iEglSettings->setPixelFormat(PIXEL_FMT_YCbCr_420_888);
     iEglSettings->setEGLDisplay(EGL_NO_DISPLAY);
-    iEglSettings->setMode(EGL_STREAM_MODE_MAILBOX);
+    iEglSettings->setMode(EGL_STREAM_MODE_FIFO);
     iEglSettings->setMetadataEnable(true);
     // iEglSettings->setMetadataEnabled(true);
 
@@ -191,6 +214,14 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
         iSource->setSensorMode(selectedMode);
     }
     iSource->setFrameDurationRange(Range<uint64_t>(frameDuration, frameDuration));
+
+    // const uint64_t fixedExposureNs = 5'000'000ULL; // 5 ms
+    // const float fixedGain = 8.0f;
+
+    // const uint64_t safeExposureNs = std::min<uint64_t>(fixedExposureNs, frameDuration - 1);
+
+    // ApplyStereoFixedControls(iRequest, iSource, safeExposureNs, fixedGain, /*lockAwb=*/true);
+
 
     // Cap exposure time to the frame period to prevent long exposures from lowering FPS.
     // (This API is exposed on ISourceSettings in this Argus SDK.)
@@ -473,17 +504,18 @@ void StereoCam::streamConsumer() {
 
         const uint64_t absDiff = static_cast<uint64_t>(timeDiff < 0 ? -timeDiff : timeDiff);
         if (absDiff <= THRESH_NS) {
+            m_TimestampDiffNs_ = absDiff;
+
             // Aligned: pop both and publish.
-            FrameObject leftOut = left;
-            FrameObject rightOut = right;
+            auto leftOut = left;
+            auto rightOut = right;
             m_ProducerLeftBuffer.pop();
             m_ProducerRightBuffer.pop();
-
             // Get gyro data
             gyroScope_.getData(gyroData.gx, gyroData.gy, gyroData.gz, 
                                gyroData.ax, gyroData.ay, gyroData.az);
 
-            // Read gyro and appen 
+            // Read gyro and append
             m_StereoBuffer.push({{leftOut.frame, rightOut.frame}, gyroData});
         } else {
             // Not aligned: drop the older frame (smaller timestamp) to catch up.

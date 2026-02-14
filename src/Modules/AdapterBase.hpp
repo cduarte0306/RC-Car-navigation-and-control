@@ -32,7 +32,11 @@ namespace Adapter {
         }
 
         virtual std::string readStats() {
-            return "";
+            if (!readStatsCommand) {
+                return "";
+            }
+
+            return readStatsCommand();
         }
 
         virtual int bind_(AdapterBase* Adapter)= 0;
@@ -86,6 +90,8 @@ namespace Adapter {
         std::function< int(char* pbuf, size_t len) > moduleWriteCmd = nullptr;
         std::function< int(std::vector<char>&)     > moduleWriteCmdVector = nullptr;
         std::function< int(char* pbuf, size_t len) > moduleWriteAsyncCmd = nullptr;
+        std::function<std::string(void)> readStatsCommand = nullptr;
+
 
         const int adapterId;
 
@@ -222,6 +228,18 @@ namespace Adapter {
             return 0;
         }
 
+        /**
+         * @brief Read stats from module
+         * 
+         * @return std::string 
+         */
+        virtual std::string readStats() {
+            if (readStatsCommand) {
+                return readStatsCommand();
+            }
+            return "";
+        }
+
     protected:
         std::function<int(bool)>                    setCameraStateCommand    = nullptr;
 
@@ -244,6 +262,10 @@ namespace Adapter {
 
             this->moduleWriteCmdVector = [adapter](std::vector<char>& buffer) {
                 return adapter->moduleCommand_(buffer);
+            };
+
+            this->readStatsCommand = [adapter]() -> std::string {
+                return adapter->readStats();
             };
         }
 
@@ -394,7 +416,6 @@ namespace Adapter {
         std::function<int (const char* pbuf, size_t len)                                                > recvDataCallback      = nullptr;
         std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)> dataReceivedCommand = nullptr;
         std::function<std::string(NetworkAdapter& adapter)> hostIPQueryCommand = nullptr;
-        std::function<std::string(void)> readStatsCommand = nullptr;
         std::atomic<bool> ethConnectionState{false};
         int adapterCounter = -1;
 

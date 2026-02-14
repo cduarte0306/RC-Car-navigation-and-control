@@ -17,6 +17,8 @@
 #include "app/video/VideoStereoCalibration.hpp"
 #include "app/video/VideoStreamer.hpp"
 
+#include <opencv2/cudastereo.hpp>
+
 
 namespace Modules {
 class VisionControls : public Base, public Adapter::CameraAdapter {
@@ -37,6 +39,9 @@ public:
     // virtual int moduleCommand_(char* pbuf, size_t len) override;
 
     virtual int moduleCommand_(std::vector<char>& buffer) override;
+
+    // Command handlers
+    virtual std::string readStats() override;
     
 protected:
 #pragma pack(push, 1)
@@ -110,7 +115,7 @@ protected:
     struct CameraSettings {
         int frameRate = 30;
         int quality = 100;
-        int numDisparities = 96;
+        int numDisparities = 128;
         int numBlocks = 15;
 
         int preFilterType;
@@ -144,11 +149,8 @@ protected:
     // Receive frame handler
     void onEthRecv(std::vector<char>& data);
 
-    // Frame processing handler
-    void processFrame(cv::Mat& frame);
-
     // Stereo frame processing handler
-    void processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
+    void processStereo(cv::Mat& stereoFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
 
     // Generate point cloud image
     void doPointCloud(cv::Mat& dispFrame, cv::Mat& pointCloudMat, cv::Matx44d& Q);
@@ -187,6 +189,10 @@ protected:
 
     // Frame received flag
     bool m_ReceivingFrame{false};
+
+    cv::Ptr<cv::cuda::StereoSGM> m_stereoSGM = nullptr;
+
+    cv::Ptr<cv::cuda::StereoBM> m_stereoBM = nullptr;
 
     // Receive frame buffer
     cv::Mat m_ReceivedFrame;

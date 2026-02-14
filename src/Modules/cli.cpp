@@ -152,6 +152,7 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
             
             "Reads stats from specied module\r\n"
                 "\tCommunications module ID: 0\r\n"
+                "\tCamera module ID: 1\r\n"
                 "\tread-stats \"<module ID>\"\r\n",
             true, this,
             
@@ -170,7 +171,13 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 case 0: {
                     std::string stats = _cli->CommsAdapter->readStats();
                     _cli->writeIface("%s\n", stats.c_str());
-                    break;   
+                    break;
+                }
+
+                case 1: {
+                    std::string stats = _cli->CameraAdapter->readStats();
+                    _cli->writeIface("%s\n", stats.c_str());
+                    break;
                 }
 
                 default:
