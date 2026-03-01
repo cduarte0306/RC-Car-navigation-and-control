@@ -235,7 +235,6 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
     }
 
     if (iSessions_[index]->repeat(requests_[index].get()) != STATUS_OK) return -1;
-
     started_ = true;
     return 0;
 }
@@ -297,19 +296,25 @@ int StereoCam::close() {
 
 
 int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t& yGyro, int16_t& zGyro, int16_t& xAccel, int16_t& yAccel, int16_t& zAccel) {
-    if (!started_) return -1;
+    if (!started_) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Camera is not opened\n");
+        return -1;
+    }
 
     constexpr uint32_t timeoutMs = 1000;
     auto startTime = std::chrono::steady_clock::now();
 
     // If you can, replace this with a blocking condition variable from your CircularBuffer.
     while (m_StereoBuffer.isEmpty()) {
-        auto elapsed = std::chrono::steady_clock::now() - startTime;
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() > timeoutMs) {
-            return -1;  // Timeout
-        }
+        // auto elapsed = std::chrono::steady_clock::now() - startTime;
+        // if (std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() > timeoutMs) {
+        //     return -1;  // Timeout
+        // }
         std::this_thread::sleep_for(std::chrono::microseconds(100));
-        if (!m_ThreadCanRun.load()) return -1;
+        if (!m_ThreadCanRun.load())  {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Camera thread is not running\n");
+            return -1;
+        }
     }
 
     auto& frames = m_StereoBuffer.getHead();

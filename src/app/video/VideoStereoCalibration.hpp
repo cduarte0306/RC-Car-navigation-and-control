@@ -87,6 +87,10 @@ public:
       m_Calibrated = false;
     }
 
+    bool GetCalibMode() const {
+      return m_Calibrated;
+    }
+
     /**
      * @brief Perform video calibration
      * 

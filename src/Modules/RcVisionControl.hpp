@@ -18,13 +18,20 @@
 #include "app/video/VideoStreamer.hpp"
 
 #include <opencv2/cudastereo.hpp>
-
+#include <vpi/OpenCVInterop.hpp>
+  
+#include <vpi/Image.h>
+#include <vpi/Status.h>
+#include <vpi/Stream.h>
+#include <vpi/algo/ConvertImageFormat.h>
+#include <vpi/algo/Rescale.h>
+#include <vpi/algo/StereoDisparity.h>
 
 namespace Modules {
 class VisionControls : public Base, public Adapter::CameraAdapter {
 public:
     VisionControls(int moduleID, std::string name);
-    ~VisionControls() {}
+    ~VisionControls();
 
     virtual int init(void) override;
 
@@ -86,11 +93,15 @@ protected:
         CmdSetSpeckleWindowSize,  // Sets the speckle window size
         CmdSetSpeckleRange,       // Sets the speckle range
         CmdSetDisp12MaxDiff,      // Sets the disp12 max diff
+        CmdSetMinDisparity,       // Sets StereoSGM min disparity
+        CmdSetP1,                 // Sets StereoSGM P1
+        CmdSetP2,                 // Sets StereoSGM P2
+        CmdSetSgbmMode,           // Sets StereoSGM mode
 
         CmdRdParams,              // Command to read all configured parameteres
         CmdClrVideoRec,           // clear video recording buffer
         CmdSaveVideo,             // save video recording to disks
-        CmdReadStoredVideos,      // Read stored videos from disk
+        CmdLoadStoredVideos,      // Read stored videos from disk
         CmdLoadSelectedVideo,     // load selected video from disk
         CmdDeleteVideo,           // Delete video
         CmdCalibrationSetState,   // Start video calibration
@@ -126,6 +137,10 @@ protected:
         int speckleWindowSize;
         int speckleRange;
         int disp12MaxDiff;
+        int minDisparity = 0;
+        int p1 = 0;
+        int p2 = 0;
+        int sgmMode = cv::cuda::StereoSGM::MODE_HH4;
 
         int mode      = CamModeNormal;
         std::atomic<uint8_t> streamSelection{StreamCameraSource};
@@ -161,6 +176,9 @@ protected:
     // Load all settings
     static int loadStreamingProfile(CameraSettings& settings);
 
+    // Clamp settings to VPI CUDA stereo constraints.
+    static void sanitizeVpiStereoSettings(CameraSettings& settings);
+
     // Camera source stream handler
     // void processCameraSource(Devices::StereoCam& cam);
 
@@ -190,9 +208,35 @@ protected:
     // Frame received flag
     bool m_ReceivingFrame{false};
 
-    cv::Ptr<cv::cuda::StereoSGM> m_stereoSGM = nullptr;
+    VPIStream m_Stream_ = nullptr;
+    VPIPayload m_Payload_ = nullptr;
 
-    cv::Ptr<cv::cuda::StereoBM> m_stereoBM = nullptr;
+    VPIImageFormat m_StereoFmt_;
+    VPIImageFormat m_DispFmt_;
+
+    // Persistent wrappers around rectified OpenCV mats.
+    VPIImage m_StereoLeftU16  = nullptr;
+    VPIImage m_StereoRightU16 = nullptr;
+    
+    VPIImage m_WrapLeft_ = nullptr;
+    VPIImage m_WrapRight_ = nullptr;
+
+    VPIImage m_Disparity_ = nullptr;
+    VPIImage m_Confidence_ = nullptr;
+
+    // const int w_ = 480;
+    // const int h_ = 270;
+
+    const int w_ = 640;
+    const int h_ = 480;
+
+    uint64_t backend_ = 0;
+
+    VPIStereoDisparityEstimatorCreationParams m_CreateParams;
+
+    VPIStereoDisparityEstimatorParams m_StereoParams;
+
+    VPIConvertImageFormatParams m_ConvParams;
 
     // Receive frame buffer
     cv::Mat m_ReceivedFrame;

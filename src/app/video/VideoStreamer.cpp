@@ -68,7 +68,7 @@ int VideoStreamer::setJpegQuality(int quality) {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "JPEG quality must be between 1 and 100.\n");
         return -1;
     }
-    encodeQuality = quality;
+    m_EncodeQuality = quality;
     return 0;
 }
 
@@ -164,11 +164,28 @@ void VideoStreamer::pushFrame(const cv::Mat& frame,  int16_t xGyro, int16_t yGyr
 }
 
 
+void VideoStreamer::pushFrame(const cv::Mat& frame, cv::Matx44d& Q) {
+    if (!m_Running.load()) return;
+    if (frame.empty()) return;
+    stereoPayload payload{};
+
+    for (size_t i = 0; i < QSize; ++i) {
+        payload.stereoHeader.Q[i] = Q.val[i];
+    }
+    payload.Q = Q;
+    payload.stereoFrame = frame;
+    // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
+    m_Buffer.push(payload);
+}
+
+
 void VideoStreamer::pushFrame(const cv::Mat& frame) {
     if (!m_Running.load()) return;
     if (frame.empty()) return;
+    stereoPayload payload{};
+    payload.stereoFrame = frame;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
-    m_Buffer.push(frame);
+    m_Buffer.push(payload);
 }
 
 
@@ -191,17 +208,13 @@ void VideoStreamer::runMono() {
         VideoStreamer::throttleFps(frameIntervalMs.load());
 
         // For lowest latency, always transmit the newest frame.
-        cv::Mat frame;
+        stereoPayload bufPayload;
         do {
-            frame = m_Buffer.getHead();
+            bufPayload = m_Buffer.getHead();
             m_Buffer.pop();
         } while (!m_Buffer.isEmpty());
 
-        if (frame.empty()) {
-            continue;
-        }
-
-        transmitFrame(frame);
+        transmitFrame(bufPayload);
         m_FrameID++;
     }
 }
@@ -228,7 +241,6 @@ void VideoStreamer::runStereo() {
             continue;
         }
 
-        prepFrame(stereoFrames);
     }
 }
 
@@ -256,167 +268,137 @@ void VideoStreamer::runStereoMono() {
             continue;
         }
 
-        // transmitFrame(stereoFrame, 2, 0);  // frameType=2 (stereo-mono), frameSide=0
-        transmitPointCloud(stereoFrame);
+        transmitFrame(stereoFrame);
         m_FrameID++;
     }
 }
 
 
-int VideoStreamer::transmitPointCloud(stereoPayload& stereoFrame) {
+int VideoStreamer::transmitFrame(stereoPayload& stereoFrame) {
     cv::Mat& frame = stereoFrame.stereoFrame;
     if (frame.empty()) {
         return -1;
     }
 
-    std::vector<uint8_t> dataOut;
-    const uint32_t dataLen = static_cast<uint32_t>(frame.total() * frame.elemSize());
-    dataOut.resize(sizeof(stereoHeader_t) + dataLen);
+    // What we describe in the header must match what we actually send.
+    // - CV_32FC3 point-cloud: raw float bytes (no color conversion)
+    // - Ethernet/raw frames: convert OpenCV-native BGR/BGRA -> RGB so host raw decode shows correct colors
+    // - Wi-Fi: JPEG encode (OpenCV expects BGR ordering for encode/decode)
+    const cv::Mat* headerFrame = &frame;
+    cv::Mat converted;
+    std::vector<uint8_t> body;
 
-    // Append gyro header at the beginning
-    stereoHeader_t* headerPtr = reinterpret_cast<stereoHeader_t*>(dataOut.data());
-    headerPtr->gx   = stereoFrame.stereoHeader.gx;
-    headerPtr->gy   = stereoFrame.stereoHeader.gy;
-    headerPtr->gz   = stereoFrame.stereoHeader.gz;
-    headerPtr->ax   = stereoFrame.stereoHeader.ax;
-    headerPtr->ay   = stereoFrame.stereoHeader.ay;
-    headerPtr->az   = stereoFrame.stereoHeader.az;
-    headerPtr->rows = frame.rows;
-    headerPtr->cols = frame.cols;
-    headerPtr->type = frame.type();
-    headerPtr->elemSize = frame.elemSize();
-    headerPtr->channels = frame.channels();
+    if (frame.type() == CV_32FC3 || frame.type() == CV_32FC(6))  {
+        const size_t dataLen = frame.total() * frame.elemSize();
+        body.resize(dataLen);
+        if (dataLen > 0) {
+            std::memcpy(body.data(), frame.data, dataLen);
+        }
+    } else if (m_TxAdapterEth.ethLinkDetected.load()) {
+        if (frame.channels() == 3) {
+            cv::cvtColor(frame, converted, cv::COLOR_BGR2RGB);
+            headerFrame = &converted;
+        } else if (frame.channels() == 4) {
+            cv::cvtColor(frame, converted, cv::COLOR_BGRA2RGB);
+            headerFrame = &converted;
+        }
 
-    for (int i = 0; i < QSize; i++) {
+        if (!headerFrame->isContinuous()) {
+            converted = headerFrame->clone();
+            headerFrame = &converted;
+        }
+
+        const size_t dataLen = headerFrame->total() * headerFrame->elemSize();
+        body.resize(dataLen);
+        if (dataLen > 0) {
+            std::memcpy(body.data(), headerFrame->data, dataLen);
+        }
+    } else {
+        cv::Mat encodeBgr;
+        const cv::Mat* encodeFrame = &frame;
+        if (frame.channels() == 4) {
+            cv::cvtColor(frame, encodeBgr, cv::COLOR_BGRA2BGR);
+            encodeFrame = &encodeBgr;
+        }
+
+        headerFrame = encodeFrame;
+
+        std::vector<int> params = { cv::IMWRITE_JPEG_QUALITY, m_EncodeQuality };
+        if (!cv::imencode(".jpg", *encodeFrame, body, params) || body.empty()) {
+            return -1;
+        }
+    }
+
+    std::vector<uint8_t> payload(sizeof(stereoHeader_t) + body.size());
+
+    stereoHeader_t* headerPtr = reinterpret_cast<stereoHeader_t*>(payload.data());
+    headerPtr->gx = stereoFrame.stereoHeader.gx;
+    headerPtr->gy = stereoFrame.stereoHeader.gy;
+    headerPtr->gz = stereoFrame.stereoHeader.gz;
+    headerPtr->ax = stereoFrame.stereoHeader.ax;
+    headerPtr->ay = stereoFrame.stereoHeader.ay;
+    headerPtr->az = stereoFrame.stereoHeader.az;
+    headerPtr->rows = headerFrame->rows;
+    headerPtr->cols = headerFrame->cols;
+    headerPtr->type = headerFrame->type();
+    headerPtr->elemSize = static_cast<uint16_t>(headerFrame->elemSize());
+    headerPtr->channels = static_cast<uint8_t>(headerFrame->channels());
+
+    for (size_t i = 0; i < QSize; i++) {
         headerPtr->Q[i] = stereoFrame.Q.val[i];
     }
 
-    if (dataLen > 0) {
-        std::memcpy(dataOut.data() + sizeof(stereoHeader_t), frame.data, dataLen);
+    if (!body.empty()) {
+        std::memcpy(payload.data() + sizeof(stereoHeader_t), body.data(), body.size());
     }
 
-    size_t totalSize      = dataOut.size();  // header + JPEG data
+
+    const uint8_t frameType = (frame.type() == CV_32FC3 || frame.type() == CV_32FC(6))
+                                  ? VideoStreamer::DisparityType
+                                  : VideoStreamer::RegularMono;
+    return transmitPayload(payload.data(), payload.size(), frameType);
+}
+
+
+int VideoStreamer::transmitPayload(const uint8_t* payload, size_t totalSize, uint8_t frameType) {
+    if (payload == nullptr || totalSize == 0) {
+        return -1;
+    }
+
     size_t bytesRemaining = totalSize;
-    size_t offset         = 0;
+    size_t offset = 0;
     uint32_t segmentIndex = 0;
 
-    // Number of segments
-    uint16_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
+    const uint16_t numSegments = static_cast<uint16_t>((totalSize + MaxPayloadSize - 1) / MaxPayloadSize);
 
     FragmentPayload packet{};
     Metadata meta{};
 
     while (bytesRemaining > 0) {
-        // Fill metadata
         std::memset(meta.videoName, 0, sizeof(meta.videoName));
-        meta.sequenceID  = m_FrameID;
+        meta.sequenceID = m_FrameID;
         meta.totalLength = static_cast<uint32_t>(totalSize);
-        meta.segmentID   = segmentIndex;
+        meta.segmentID = static_cast<uint16_t>(segmentIndex);
         meta.numSegments = numSegments;
 
         size_t bytesToSend = std::min<std::size_t>(bytesRemaining, MaxPayloadSize);
         meta.length = static_cast<uint16_t>(bytesToSend);
 
-        // Write metadata
-        packet.FragmentHeader.frameType = VideoStreamer::DisparityType;
+        packet.FragmentHeader.frameType = frameType;
+        packet.FragmentHeader.frameSide = 0;
         packet.metadata = meta;
 
-        // Copy payload bytes
-        std::memcpy(packet.payload, dataOut.data() + offset, bytesToSend);
+        std::memcpy(packet.payload, payload + offset, bytesToSend);
 
-        offset         += bytesToSend;
+        offset += bytesToSend;
         bytesRemaining -= bytesToSend;
         segmentIndex++;
 
-        // Lowest-latency: send only the bytes we actually have.
-        // This avoids sending/zero-filling ~64KB UDP datagrams for small JPEG segments.
         const std::size_t packetSize = sizeof(FragmentHeader) + sizeof(Metadata) + bytesToSend;
         auto* raw = reinterpret_cast<uint8_t*>(&packet);
-
         xfer(raw, packetSize);
     }
-    return 0;
-}
 
-
-int VideoStreamer::transmitFrame(cv::Mat& frame, int frameType, int frameSide) {
-    if (frame.empty()) {
-        return -1;
-    }
-
-    cv::Mat encodeBgr;
-    cv::Mat* encodeFrame = &frame;
-    if (frame.channels() == 4) {
-        cv::cvtColor(frame, encodeBgr, cv::COLOR_BGRA2BGR);
-        encodeFrame = &encodeBgr;
-    }
-
-    // Encode JPEG
-    std::vector<uint8_t> encoded;
-    std::vector<int> params = { cv::IMWRITE_JPEG_QUALITY, encodeQuality };
-    cv::imencode(".jpg", *encodeFrame, encoded, params);
-
-    size_t totalSize      = encoded.size();
-    size_t bytesRemaining = totalSize;
-    size_t offset         = 0;
-    uint32_t segmentIndex = 0;
-
-    // Number of segments
-    uint16_t numSegments = (totalSize + MaxPayloadSize - 1) / MaxPayloadSize;
-
-    FragmentPayload packet{};
-    Metadata meta{};
-
-    while (bytesRemaining > 0) {
-        // Fill metadata
-        std::memset(meta.videoName, 0, sizeof(meta.videoName));
-        meta.sequenceID  = m_FrameID;
-        meta.totalLength = static_cast<uint32_t>(totalSize);
-        meta.segmentID   = segmentIndex;
-        meta.numSegments = numSegments;
-
-        size_t bytesToSend = std::min<std::size_t>(bytesRemaining, MaxPayloadSize);
-        meta.length = static_cast<uint16_t>(bytesToSend);
-
-        // Write metadata
-        packet.FragmentHeader.frameType = static_cast<uint8_t>(frameType);
-        packet.FragmentHeader.frameSide = static_cast<uint8_t>(frameSide);
-        packet.metadata = meta;
-
-        // Copy payload bytes
-        std::memcpy(packet.payload, encoded.data() + offset, bytesToSend);
-
-        offset         += bytesToSend;
-        bytesRemaining -= bytesToSend;
-        segmentIndex++;
-
-        // Lowest-latency: send only the bytes we actually have.
-        // This avoids sending/zero-filling ~64KB UDP datagrams for small JPEG segments.
-        const std::size_t packetSize = sizeof(FragmentHeader) + sizeof(Metadata) + bytesToSend;
-        auto* raw = reinterpret_cast<uint8_t*>(&packet);
-
-        xfer(raw, packetSize);
-    }
-    return 0;
-}
-
-
-int VideoStreamer::prepFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
-    cv::Mat& frameL = const_cast<cv::Mat&>(framePair.first);
-    cv::Mat& frameR = const_cast<cv::Mat&>(framePair.second);
-    if (frameL.empty() || frameR.empty()) {
-        return -1;
-    }
-
-    if (!frameL.empty()) {
-        transmitFrame(frameL, 1, 0);  // frameType=1 (stereo), frameSide=0 (left)
-    }
-
-    if (!frameR.empty()) {
-        transmitFrame(frameR, 1, 1);  // frameType=1 (stereo), frameSide=1 (right)
-    }
-
-    m_FrameID++;
     return 0;
 }
 
@@ -425,8 +407,6 @@ int VideoStreamer::xfer(unsigned char* pBuf, size_t length) {
     if (pBuf == nullptr) {
         return -1;
     }
-
-    // m_TxAdapter.send(reinterpret_cast<uint8_t*>(pBuf), length);
 
     // Check if the ethernet adapter is connected
     if (m_TxAdapterEth.ethLinkDetected.load()) {

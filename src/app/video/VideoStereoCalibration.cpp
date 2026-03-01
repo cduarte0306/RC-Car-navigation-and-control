@@ -655,8 +655,8 @@ void VideoStereoCalib::rectify(const cv::Mat& leftIn, const cv::Mat& rightIn,
         return;
     }
 
-    cv::remap(leftIn, leftRect, map1L, map2L, cv::INTER_LINEAR);
-    cv::remap(rightIn, rightRect, map1R, map2R, cv::INTER_LINEAR);
+    cv::remap(leftIn, leftRect, map1L, map2L, cv::INTER_LANCZOS4);
+    cv::remap(rightIn, rightRect, map1R, map2R, cv::INTER_LANCZOS4);
 } 
 
 int VideoStereoCalib::DoCalibration(cv::Mat& leftBgr,

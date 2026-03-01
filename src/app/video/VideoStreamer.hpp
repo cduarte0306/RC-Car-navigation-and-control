@@ -260,13 +260,20 @@ public:
      * @return uint8_t Quality
      */
     int getQuality() const {
-        return encodeQuality;
+        return m_EncodeQuality;
     }
+
+    /**
+     * @brief Enqueue frame only
+     * 
+     * @param frame Reference to frame to queue
+     */
+    void pushFrame(const cv::Mat& frame);
 
     /**
      * @brief Enqueue a frame for transmission (frame is cloned).
      */
-    void pushFrame(const cv::Mat& frame);
+    void pushFrame(const cv::Mat& frame, cv::Matx44d& Q);
 
     /**
      * @brief Enqueue a stereo frame pair for transmission (frames are cloned).
@@ -352,7 +359,6 @@ private:
 
     enum {
         RegularMono = 0,
-        DualStreamType,
         DisparityType
     };
 
@@ -372,28 +378,23 @@ private:
     int xfer(unsigned char* pBuf, size_t length);
 
     /**
-     * @brief Transmit a single frame.
-     * 
-     * @param frame Reference to the frame to transmit
-     * @return int 
-     */
-    int transmitFrame(cv::Mat& frame, int frameType=0, int frameSide=0);
-
-    /**
      * @brief Transmit a stereo frame.
      * 
      * @param stereoFrame Reference to the stereo frame to transmit
      * @return int 
      */
-    int transmitPointCloud(stereoPayload& stereoFrame);
+    int transmitFrame(stereoPayload& stereoFrame);
 
     /**
-     * @brief Transmit a stereo frame pair.
-     * 
-     * @param framePair Reference to the stereo frame pair to transmit
-     * @return int 
+     * @brief Packetize and transmit a payload buffer.
+     *
+     * @param payload Pointer to payload bytes
+     * @param totalSize Number of payload bytes
+     * @param frameType Stream frame type
+     * @return int
      */
-    int prepFrame(const std::pair<cv::Mat, cv::Mat>& framePair);
+    int transmitPayload(const uint8_t* payload, size_t totalSize, uint8_t frameType);
+
 
     /**
      * @brief Enforces FPS on the loop
@@ -412,7 +413,7 @@ private:
     }
 
     std::atomic<int> frameIntervalMs{33};  // default ~30 FPS
-    int encodeQuality = 35;
+    int m_EncodeQuality = 35;
     Adapter::CommsAdapter::NetworkAdapter& m_TxAdapter;
     Adapter::CommsAdapter::NetworkAdapter& m_TxAdapterEth;
     std::string m_DestIp;
@@ -423,7 +424,7 @@ private:
      * @brief Buffer for mono frames (Usually simulation frames)
      * 
      */
-    Msg::CircularBuffer<cv::Mat> m_Buffer;
+    Msg::CircularBuffer<stereoPayload> m_Buffer;
 
     /**
      * @brief Buffer for combined stereo frames
