@@ -103,31 +103,17 @@ void VisionControls::sanitizeVpiStereoSettings(VisionControls::CameraSettings &s
 
 VisionControls::~VisionControls()
 {
-    // Best-effort cleanup; destroy functions are NULL-safe.
-    if (m_WrapLeft_) {
-        vpiImageDestroy(m_WrapLeft_);
-        m_WrapLeft_ = nullptr;
-    }
-    if (m_WrapRight_) {
-        vpiImageDestroy(m_WrapRight_);
-        m_WrapRight_ = nullptr;
-    }
-    if (m_Disparity_) {
-        vpiImageDestroy(m_Disparity_);
-        m_Disparity_ = nullptr;
-    }
-    if (m_Confidence_) {
-        vpiImageDestroy(m_Confidence_);
-        m_Confidence_ = nullptr;
-    }
-    if (m_Payload_) {
-        vpiPayloadDestroy(m_Payload_);
-        m_Payload_ = nullptr;
-    }
-    if (m_Stream_) {
-        vpiStreamDestroy(m_Stream_);
-        m_Stream_ = nullptr;
-    }
+    // Best-effort cleanup; VPI destroy functions are NULL-safe.
+    if (m_ImgL)          { vpiImageDestroy(m_ImgL);          m_ImgL          = nullptr; }
+    if (m_ImgR)          { vpiImageDestroy(m_ImgR);          m_ImgR          = nullptr; }
+    if (m_ImgL_8u)       { vpiImageDestroy(m_ImgL_8u);       m_ImgL_8u       = nullptr; }
+    if (m_ImgR_8u)       { vpiImageDestroy(m_ImgR_8u);       m_ImgR_8u       = nullptr; }
+    if (m_ImgL_270p)     { vpiImageDestroy(m_ImgL_270p);     m_ImgL_270p     = nullptr; }
+    if (m_ImgR_270p)     { vpiImageDestroy(m_ImgR_270p);     m_ImgR_270p     = nullptr; }
+    if (m_Disparity)     { vpiImageDestroy(m_Disparity);     m_Disparity     = nullptr; }
+    if (m_ConfidenceMap) { vpiImageDestroy(m_ConfidenceMap); m_ConfidenceMap = nullptr; }
+    if (m_Stereo)        { vpiPayloadDestroy(m_Stereo);      m_Stereo        = nullptr; }
+    if (m_VpiStream)     { vpiStreamDestroy(m_VpiStream);    m_VpiStream     = nullptr; }
 }
 
 VisionControls::VisionControls(int moduleID, std::string name) :
@@ -223,40 +209,33 @@ int VisionControls::init(void) {
     
     m_VideoRecorder.setFrameRate(Vision::VideoRecording::FrameRate::_30Fps);
 
-    // Create VPI stream and payload
-    CHECK_STATUS(vpiStreamCreate(0, &m_Stream_));
+    // Create VPI stream
+    CHECK_STATUS(vpiStreamCreate(0, &m_VpiStream));
     backend_ = VPI_BACKEND_CUDA;
 
-    // Create parameters for VPI
+    // Initialise format-conversion, stereo runtime, and stereo creation params
+    CHECK_STATUS(vpiInitConvertImageFormatParams(&m_ConvParams));
+    CHECK_STATUS(vpiInitStereoDisparityEstimatorParams(&m_StereoParams));
     CHECK_STATUS(vpiInitStereoDisparityEstimatorCreationParams(&m_CreateParams));
 
     VisionControls::sanitizeVpiStereoSettings(m_CamSettings);
 
-    // Set parameters
-    m_CreateParams.maxDisparity = m_CamSettings.numDisparities;
-    m_CreateParams.downscaleFactor = 1;
+    // Set creation parameters
+    m_CreateParams.maxDisparity     = 255;
+    m_CreateParams.downscaleFactor  = 1;
     m_CreateParams.includeDiagonals = 1;
 
-    // Stereo estimator will run on U16 grayscale (we convert from CV_8U grayscale mats).
-    m_StereoFmt_ = VPI_IMAGE_FORMAT_U16;
-    m_DispFmt_   = VPI_IMAGE_FORMAT_S16;
+    // Allocate input image buffers in Y16_ER format
+    const VPIImageFormat inputFormat = VPI_IMAGE_FORMAT_Y16_ER;
+    CHECK_STATUS(vpiImageCreate(CAM_WIDTH, CAM_HEIGHT, inputFormat, 0, &m_ImgL_8u));
+    CHECK_STATUS(vpiImageCreate(CAM_WIDTH, CAM_HEIGHT, inputFormat, 0, &m_ImgR_8u));
+    CHECK_STATUS(vpiImageCreate(w_, h_, inputFormat, 0, &m_ImgL_270p));
+    CHECK_STATUS(vpiImageCreate(w_, h_, inputFormat, 0, &m_ImgR_270p));
 
-    CHECK_STATUS(vpiCreateStereoDisparityEstimator(backend_, w_, h_, m_StereoFmt_, &m_CreateParams, &m_Payload_));
-
-    // Allocate output images once.
-    const uint64_t imageBackends = VPI_BACKEND_CUDA | VPI_BACKEND_CPU;
-    CHECK_STATUS(vpiImageCreate(w_, h_, m_DispFmt_, imageBackends, &m_Disparity_));
-    CHECK_STATUS(vpiImageCreate(w_, h_, VPI_IMAGE_FORMAT_U16, imageBackends, &m_Confidence_));
-
-    // Intermediate converted stereo inputs (U16) for the VPI stereo estimator.
-    CHECK_STATUS(vpiImageCreate(w_, h_, VPI_IMAGE_FORMAT_U16, imageBackends, &m_StereoLeftU16));
-    CHECK_STATUS(vpiImageCreate(w_, h_, VPI_IMAGE_FORMAT_U16, imageBackends, &m_StereoRightU16));
-
-    // Init conversion params
-    CHECK_STATUS(vpiInitConvertImageFormatParams(&m_ConvParams));
-
-    // Stereo estimation params
-    CHECK_STATUS(vpiInitStereoDisparityEstimatorParams(&m_StereoParams));
+    // Create stereo disparity estimator + output buffers
+    CHECK_STATUS(vpiCreateStereoDisparityEstimator(backend_, w_, h_, inputFormat, &m_CreateParams, &m_Stereo));
+    CHECK_STATUS(vpiImageCreate(w_, h_, VPI_IMAGE_FORMAT_S16, 0, &m_Disparity));
+    CHECK_STATUS(vpiImageCreate(w_, h_, VPI_IMAGE_FORMAT_U16, 0, &m_ConfidenceMap));
 
     logger->log(Logger::LOG_LVL_INFO, "Vision control module initialized\r\n");
     return 0;
@@ -577,11 +556,28 @@ void VisionControls::decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameE
  * 
  * @param stereoFrame Input/output stereo frame pair
  */
-void VisionControls::processStereo(cv::Mat& stereoFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q) {
-    using namespace cv;
-
+void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q) {
     cv::Mat& frameL = stereoFramePair.first;
     cv::Mat& frameR = stereoFramePair.second;
+
+    static double sx = static_cast<double>(w_) / static_cast<double>(CAM_WIDTH);
+    static double sy = static_cast<double>(h_) / static_cast<double>(CAM_HEIGHT);
+
+    int ret = -1;
+    cv::Mat cvImageLeft, cvImageRight;
+    cv::Mat cvDisparity, cvDisparityu8, cvDisparityf32, cvDisparityColor, cvPointCloudMat;
+
+    cv::cuda::Stream stream;
+    cv::cuda::GpuMat d_disp32f, d_xyz;
+    cv::Mat zMap(h_, w_, CV_32FC(6));
+
+    Q = m_VideoCalib.reprojectionQ();
+
+    // Scale Q Matrix
+    Q(0, 3) *= sx;
+    Q(1, 3) *= sy;
+    Q(2, 3) *= sx;
+    Q(3, 3) *= sx;    
 
     cv::Mat grayL, grayR;
     if (frameL.channels() == 1)      grayL = frameL;
@@ -592,104 +588,82 @@ void VisionControls::processStereo(cv::Mat& stereoFrame, cv::Mat& pointCloudMat,
     else if (frameR.channels() == 4) cv::cvtColor(frameR, grayR, cv::COLOR_BGRA2GRAY);
     else                             cv::cvtColor(frameR, grayR, cv::COLOR_BGR2GRAY);
 
-    // Rectify each camera frame
-    cv::Mat rectL, rectR;
+    if (frameL.channels() == 4) {
+        cv::cvtColor(frameL, cvImageLeft, cv::COLOR_BGRA2BGR);
+    } else {
+        cvImageLeft = frameL;
+    }
+    if (frameR.channels() == 4) {
+        cv::cvtColor(frameR, cvImageRight, cv::COLOR_BGRA2BGR);
+    } else {
+        cvImageRight = frameR;
+    }
+
+    // rectify 
     cv::Mat rectLBuff, rectRBuff;
-    m_VideoCalib.rectify(grayL, grayR, rectL, rectR);
+    cv::Mat rectL, rectR;
+    m_VideoCalib.rectify(cvImageLeft, cvImageRight, rectL, rectR);
 
-    // Resize the frames
-    cv::resize(rectL, rectLBuff, cv::Size(w_, h_), 0, 0, cv::INTER_LINEAR);
-    cv::resize(rectR, rectRBuff, cv::Size(w_, h_), 0, 0, cv::INTER_LINEAR);
+    vpiImageSetWrappedOpenCVMat(m_ImgL, rectL);
+    vpiImageSetWrappedOpenCVMat(m_ImgR, rectR);
 
-    cv::cuda::Stream stream;
-    cv::Mat disp16s;
+    // Convert to uint8
+    CHECK_STATUS(vpiSubmitConvertImageFormat(m_VpiStream, VPI_BACKEND_CUDA, m_ImgL, m_ImgL_8u, &m_ConvParams));
+    CHECK_STATUS(vpiSubmitConvertImageFormat(m_VpiStream, VPI_BACKEND_CUDA, m_ImgR, m_ImgR_8u, &m_ConvParams));
 
-    std::lock_guard<std::mutex> guard(m_StereoMutex);
-    sanitizeVpiStereoSettings(m_CamSettings);
+    // Rescale
+    CHECK_STATUS(vpiSubmitRescale(m_VpiStream, VPI_BACKEND_CUDA, m_ImgL_8u, m_ImgL_270p, VPI_INTERP_LINEAR, VPI_BORDER_ZERO, 0));
+    CHECK_STATUS(vpiSubmitRescale(m_VpiStream, VPI_BACKEND_CUDA, m_ImgR_8u, m_ImgR_270p, VPI_INTERP_LINEAR, VPI_BORDER_ZERO, 0));
 
-    // Create VPI wrappers once and reuse them by swapping the wrapped cv::Mat.
-    // rectL/rectR are CV_8U grayscale mats, so the wrapper format must be U8.
-    const uint64_t wrapFlags = backend_;
-    if (!m_WrapLeft_) {
-        CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(rectLBuff, VPI_IMAGE_FORMAT_U8, wrapFlags, &m_WrapLeft_));
-    } else {
-        CHECK_STATUS(vpiImageSetWrappedOpenCVMat(m_WrapLeft_, rectLBuff));
-    }
-    if (!m_WrapRight_) {
-        CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(rectRBuff, VPI_IMAGE_FORMAT_U8, wrapFlags, &m_WrapRight_));
-    } else {
-        CHECK_STATUS(vpiImageSetWrappedOpenCVMat(m_WrapRight_, rectRBuff));
-    }
-    
-    // Convert to U16 (VPI sample does convert + estimator submit) :contentReference[oaicite:3]{index=3}
-    CHECK_STATUS(vpiSubmitConvertImageFormat(m_Stream_, VPI_BACKEND_CUDA, m_WrapLeft_, m_StereoLeftU16, &m_ConvParams));
-    CHECK_STATUS(vpiSubmitConvertImageFormat(m_Stream_, VPI_BACKEND_CUDA, m_WrapRight_, m_StereoRightU16, &m_ConvParams));
+    // Disparity
+    m_StereoParams.maxDisparity = 255;
+    CHECK_STATUS(vpiSubmitStereoDisparityEstimator(m_VpiStream, VPI_BACKEND_CUDA, m_Stereo, m_ImgL_270p, m_ImgR_270p, m_Disparity, m_ConfidenceMap, &m_StereoParams));
 
-    // Must match payload creation params.
-    m_StereoParams.maxDisparity = kHardMaxDisparity;
-    m_StereoParams.minDisparity = m_CamSettings.minDisparity;
-    m_StereoParams.p1 = m_CamSettings.p1;
-    m_StereoParams.p2 = m_CamSettings.p2;
-    m_StereoParams.windowSize = kHardWindowSize;
+    // Sync
+    CHECK_STATUS(vpiStreamSync(m_VpiStream));
 
-    // // Stored uniquenessRatio is [0..30]. Map directly to VPI [0..1]:
-    // // higher value means stricter matching.
-    // m_StereoParams.uniqueness = static_cast<float>(m_CamSettings.uniquenessRatio) / 30.0f;
+    // Lock disparity
+    VPIImageData data;
+    CHECK_STATUS(vpiImageLockData(m_Disparity, VPI_LOCK_READ, VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR, &data));
 
-    CHECK_STATUS(vpiSubmitStereoDisparityEstimator(m_Stream_, backend_, m_Payload_,
-                                                    m_StereoLeftU16, m_StereoRightU16,
-                                                    m_Disparity_, m_Confidence_,
-                                                    &m_StereoParams));
-    CHECK_STATUS(vpiStreamSync(m_Stream_));
+    // vpi image -> cv::Mat
+    CHECK_STATUS(vpiImageDataExportOpenCVMat(data, &cvDisparity));
 
-    // Export disparity to OpenCV. VPI output is Q10.5 in S16.
-    VPIImageData dispData;
-    CHECK_STATUS(vpiImageLockData(m_Disparity_, VPI_LOCK_READ, VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR, &dispData));
-    cv::Mat dispView;
-    CHECK_STATUS(vpiImageDataExportOpenCVMat(dispData, &dispView));
-    disp16s = dispView;
+    // Q10.5 -> float
+    cvDisparity.convertTo(cvDisparityu8, CV_8UC1, 255.0 / (32 * m_CreateParams.maxDisparity), 0);
+    applyColorMap(cvDisparityu8, cvDisparityColor, cv::COLORMAP_JET);
 
-    if (disp16s.empty()) {
-        stereoFrame.release();
-        pointCloudMat.release();
-        return;
-    }
+    disparityFrame = cvDisparityColor;
 
-    if (disp16s.type() != CV_16S) {
-        disp16s.convertTo(disp16s, CV_16S);
-    }
+    // Convert disparity to float mat
+    cvDisparity.convertTo(cvDisparityf32, CV_32F, 1.0 / (32.0), 0);
 
-    cv::Mat disp32f;
-    disp16s.convertTo(disp32f, CV_32F, 1.0 / 32.0, 0.0);
+    // Unlock disparity BEFORE any further VPI/CUDA work on m_Disparity
+    CHECK_STATUS(vpiImageUnlock(m_Disparity));
 
-    // Free resources?
-    CHECK_STATUS(vpiImageUnlock(m_Disparity_));
-
-    Q = m_VideoCalib.reprojectionQ();
     cv::Mat Q32;
     cv::Mat(Q).convertTo(Q32, CV_32F);
 
-    const float dmin = 0.01f;
-    const float dmax = 70.0;
-    cv::Mat valid = (disp32f > dmin) & (disp32f <= dmax);
-    disp32f.setTo(0.0f, ~valid);
+    // Convert to 3d_disp32f, d_xyz;
+    // Allocate output with 3 channels
+    d_disp32f.upload(cvDisparityf32, stream);
 
-    cv::cuda::GpuMat d_disp32f, d_xyz;
-    d_disp32f.upload(disp32f, stream);
+    d_xyz.create(d_disp32f.size(), CV_32FC3);
     cv::cuda::reprojectImageTo3D(d_disp32f, d_xyz, Q32, 3, stream);
-    d_xyz.download(pointCloudMat, stream);
-    stream.waitForCompletion();
+    d_xyz.download(cvPointCloudMat, stream);
+    stream.waitForCompletion();  // Sync
 
-    // if (!pointCloudMat.empty() && pointCloudMat.type() == CV_32FC3) {
-    //     cv::Mat Z;
-    //     cv::extractChannel(pointCloudMat, Z, 2);
+    // Resize the left colour image to match the point-cloud resolution
+    cv::Mat colorResized;
+    cv::resize(rectL, colorResized, cv::Size(w_, h_));
 
-    //     valid &= (Z > 0.1f);
-    //     // optional but recommended:
-    //     valid &= (Z < 60.0f);
+    // Fill in the XYZ coordinates and color
+    ret = cuda::pointCloudToColor(cvPointCloudMat, colorResized, zMap);
+    if (ret < 0) {
+        printf("Failed convert point cloud\n");
+    }
 
-    //     pointCloudMat.setTo(cv::Vec3f(NAN, NAN, NAN), ~valid);
-    // }
+    pointCloudMat = zMap;
 }
 
 
@@ -1173,85 +1147,20 @@ void VisionControls::mainProc() {
     };
 
 
-    // ************** DEBUG ************** 
-
-    int retval = 0;
-
-    // OpenCV objects
+    // Create VPI image wrappers (require a non-empty frame from the camera).
     cv::Mat cvImageLeft, cvImageRight;
-    cv::Mat cvDisparity, cvDisparityu8, cvDisparityf32, cvDisparityColor, cvPointCloudMat;
 
-    cv::Mat zMap(h_, w_, CV_32FC(6));
-
-    // VPI objects
-    VPIStream vpiStream       = NULL;
-    VPIPayload stereo      = NULL;
-
-    VPIImage imgL         = NULL;
-    VPIImage imgR         = NULL;
-    VPIImage imgL_8u      = NULL;
-    VPIImage imgR_8u      = NULL;
-    VPIImage imgL_8u_rect = NULL;
-    VPIImage imgR_8u_rect = NULL;
-    VPIImage imgL_270p    = NULL;
-    VPIImage imgR_270p    = NULL;
-    VPIImage disparity     = NULL;
-    VPIImage confidenceMap = NULL;
-
-    // Image params
-    int32_t W_input  = CAM_WIDTH;
-    int32_t H_input  = CAM_HEIGHT;
-    int32_t W_stereo  = w_;
-    int32_t H_stereo = h_;
-    int32_t FPS = 60;
-    int32_t FLIP_METHOD = 2;
-
-    VPIStereoDisparityEstimatorParams stereoRunTimeParams;
-
-    // Create VPI stream
-    CHECK_STATUS(vpiStreamCreate(0, &vpiStream));
-
-    // Format conversion parameters needed for input pre-processing
-    VPIConvertImageFormatParams convParams;
-    CHECK_STATUS(vpiInitConvertImageFormatParams(&convParams));
-
-    // Init params object
-    CHECK_STATUS(vpiInitStereoDisparityEstimatorParams(&stereoRunTimeParams));
-
-    // Set algorithm parameters to be used. Only values what differs from defaults will be overwritten.
-    VPIStereoDisparityEstimatorCreationParams stereoParams;
-    CHECK_STATUS(vpiInitStereoDisparityEstimatorCreationParams(&stereoParams));
-    // stereoParams.maxDisparity = 64;
-    stereoParams.maxDisparity = 255;
-
-    // Allocate buffers in Y16 format
-    VPIImageFormat inputFormat = VPI_IMAGE_FORMAT_Y16_ER;
-    VPIStatus status;
-    status = vpiImageCreate(W_input, H_input, inputFormat, 0, &imgL_8u);
-    if (status != VPI_SUCCESS) {
-        std::cout << "Failed\r\n";
-        throw("");
-    }
-    CHECK_STATUS(vpiImageCreate(W_input, H_input, inputFormat, 0, &imgR_8u));
-    CHECK_STATUS(vpiImageCreate(W_stereo, H_stereo, inputFormat, 0, &imgL_270p));
-    CHECK_STATUS(vpiImageCreate(W_stereo, H_stereo, inputFormat, 0, &imgR_270p));
-
-    // create stereo estimator object + disparity buffer + confidence buffer
-    CHECK_STATUS(vpiCreateStereoDisparityEstimator(VPI_BACKEND_CUDA, W_stereo, H_stereo, inputFormat, &stereoParams, &stereo));
-    CHECK_STATUS(vpiImageCreate(W_stereo, H_stereo, VPI_IMAGE_FORMAT_S16, 0, &disparity));
-    CHECK_STATUS(vpiImageCreate(W_stereo, H_stereo, VPI_IMAGE_FORMAT_U16, 0, &confidenceMap));
-
-    for (int i = 0; i < 5; i ++) {
+    for (int i = 0; i < 5; i++) {
         // Read once so wrappers are created from non-empty mats (matches test2 flow).
         ret = m_Cam->read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
         if (ret == 0) {
-            std::cout << "Camera opened\r\n";
             break;
         }
 
         std::cout << "Attempt " << i << std::endl;
+        logger->log(Logger::LOG_LVL_INFO, "Camera attempt %d of 5\r\n", i);
         if (i == 5) {
-            std::cout << "Failed to open camera\r\n";
+            logger->log(Logger::LOG_LVL_ERROR, "CamFailed to open camera\r\n");
             return;
         }
 
@@ -1271,103 +1180,13 @@ void VisionControls::mainProc() {
     }
 
     // Wrap cv::Mat in vpiImage
-    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageLeft, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &imgL));
-    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageRight, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &imgR));
+    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageLeft, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &m_ImgL));
+    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageRight, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &m_ImgR));
 
-    // Convert to 3d
+    // Initialise reprojection matrix
     Q = m_VideoCalib.reprojectionQ();
-    const double sx = static_cast<double>(w_) / static_cast<double>(CAM_WIDTH);
-    const double sy = static_cast<double>(h_) / static_cast<double>(CAM_HEIGHT);
 
-    Q(0, 3) *= sx;
-    Q(1, 3) *= sy;
-    Q(2, 3) *= sx;
-    Q(3, 3) *= sx;
-    
     while (m_Running.load()) {
-        ret = m_Cam->read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
-        if (ret != 0) {
-            continue;
-        }      
-        
-        if (frameL.channels() == 4) {
-            cv::cvtColor(frameL, cvImageLeft, cv::COLOR_BGRA2BGR);
-        } else {
-            cvImageLeft = frameL;
-        }
-
-        if (frameR.channels() == 4) {
-            cv::cvtColor(frameR, cvImageRight, cv::COLOR_BGRA2BGR);
-        } else {
-            cvImageRight = frameR;
-        }
-
-        // rectify 
-        cv::Mat rectLBuff, rectRBuff;
-        cv::Mat rectL, rectR;
-        m_VideoCalib.rectify(cvImageLeft, cvImageRight, rectL, rectR);
-
-        vpiImageSetWrappedOpenCVMat(imgL, rectL);
-        vpiImageSetWrappedOpenCVMat(imgR, rectR);
-
-        // Convert to uint8
-        CHECK_STATUS(vpiSubmitConvertImageFormat(vpiStream, VPI_BACKEND_CUDA, imgL, imgL_8u, &convParams));
-        CHECK_STATUS(vpiSubmitConvertImageFormat(vpiStream, VPI_BACKEND_CUDA, imgR, imgR_8u, &convParams));
-
-        // Rescale
-        CHECK_STATUS(vpiSubmitRescale(vpiStream, VPI_BACKEND_CUDA, imgL_8u, imgL_270p, VPI_INTERP_LINEAR, VPI_BORDER_ZERO, 0));
-        CHECK_STATUS(vpiSubmitRescale(vpiStream, VPI_BACKEND_CUDA, imgR_8u, imgR_270p, VPI_INTERP_LINEAR, VPI_BORDER_ZERO, 0));
-
-        // Disparity
-        stereoRunTimeParams.maxDisparity = 255;
-        CHECK_STATUS(vpiSubmitStereoDisparityEstimator(vpiStream, VPI_BACKEND_CUDA, stereo, imgL_270p, imgR_270p, disparity, confidenceMap, &stereoRunTimeParams));
-
-        // Sync
-        CHECK_STATUS(vpiStreamSync(vpiStream));
-
-        // Lock disparity
-        VPIImageData data;
-        CHECK_STATUS(vpiImageLockData(disparity, VPI_LOCK_READ, VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR, &data));
-
-        // vpi image -> cv::Mat
-        CHECK_STATUS(vpiImageDataExportOpenCVMat(data, &cvDisparity));
-
-        // Q10.5 -> float
-        cvDisparity.convertTo(cvDisparityu8, CV_8UC1, 255.0 / (32 * stereoParams.maxDisparity), 0);
-        applyColorMap(cvDisparityu8, cvDisparityColor, cv::COLORMAP_JET);
-
-        // Convcert disparity to float mat
-        cvDisparity.convertTo(cvDisparityf32, CV_32F, 1.0 / (32.0), 0);
-
-        cv::Mat Q32;
-        cv::Mat(Q).convertTo(Q32, CV_32F);
-        
-        // Convert to 3d_disp32f, d_xyz;
-        cv::cuda::Stream stream;
-        cv::cuda::GpuMat d_disp32f, d_xyz;
-        // Allocate output with 3 channels
-        d_disp32f.upload(cvDisparityf32, stream);
-
-        d_xyz.create(d_disp32f.size(), CV_32FC3);
-        cv::cuda::reprojectImageTo3D(d_disp32f, d_xyz, Q32, 3, stream);
-        d_xyz.download(cvPointCloudMat, stream);
-        stream.waitForCompletion();  // Sync
-
-        // Resize the left colour image to match the point-cloud resolution
-        cv::Mat colorResized;
-        cv::resize(rectL, colorResized, cv::Size(w_, h_));
-
-        // Fill in the XYZ coordinates and color
-        ret = cuda::pointCloudToColor(cvPointCloudMat, colorResized, zMap);
-        if (ret < 0) {
-            printf("Failed convert point cloud\n");
-        }
-
-        // Unlock disparity
-        CHECK_STATUS(vpiImageUnlock(disparity));
-        m_VideoStreamer->pushFrame(zMap, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel, Q);
-        continue;
-
         switch(m_CamSettings.streamSelection.load()) {
             case VisionControls::StreamCameraSource:
                 ret = m_Cam->read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
@@ -1399,9 +1218,6 @@ void VisionControls::mainProc() {
                         scaleRectMat(frameStereo, resizedFrame, Q);
                         frameOut = resizedFrame;  // Reference the frame out to the resized frame
                     }
-
-                    // scaleRectMat(frameStereo, resizedFrame, Q);
-                    // frameOut = resizedFrame;  // Reference the frame out to the resized frame
 
                     // Stream disparity frame
                     m_VideoStreamer->pushFrame(frameOut, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel, Q);

@@ -165,7 +165,7 @@ protected:
     void onEthRecv(std::vector<char>& data);
 
     // Stereo frame processing handler
-    void processStereo(cv::Mat& stereoFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
+    void processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
 
     // Generate point cloud image
     void doPointCloud(cv::Mat& dispFrame, cv::Mat& pointCloudMat, cv::Matx44d& Q);
@@ -208,24 +208,17 @@ protected:
     // Frame received flag
     bool m_ReceivingFrame{false};
 
-    VPIStream m_Stream_ = nullptr;
-    VPIPayload m_Payload_ = nullptr;
+    VPIStream  m_VpiStream = nullptr;
+    VPIPayload m_Stereo    = nullptr;
 
-    VPIImageFormat m_StereoFmt_;
-    VPIImageFormat m_DispFmt_;
-
-    // Persistent wrappers around rectified OpenCV mats.
-    VPIImage m_StereoLeftU16  = nullptr;
-    VPIImage m_StereoRightU16 = nullptr;
-    
-    VPIImage m_WrapLeft_ = nullptr;
-    VPIImage m_WrapRight_ = nullptr;
-
-    VPIImage m_Disparity_ = nullptr;
-    VPIImage m_Confidence_ = nullptr;
-
-    // const int w_ = 480;
-    // const int h_ = 270;
+    VPIImage m_ImgL         = nullptr;
+    VPIImage m_ImgR         = nullptr;
+    VPIImage m_ImgL_8u      = nullptr;
+    VPIImage m_ImgR_8u      = nullptr;
+    VPIImage m_ImgL_270p    = nullptr;
+    VPIImage m_ImgR_270p    = nullptr;
+    VPIImage m_Disparity    = nullptr;
+    VPIImage m_ConfidenceMap = nullptr;
 
     const int w_ = 640;
     const int h_ = 480;
