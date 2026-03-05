@@ -82,21 +82,16 @@ protected:
         CmdSelCameraStream,       // select camera stream (Normal or training)
         CmdSetFps,                // set streaming parameters (host IP, port, etc)
         CmdSetQuality,            // Set the stream compresison quality
-        CmdSetNumDisparities,     // Sets the number of disparities
-        CmdSetBlockSize,          // Sets the number of blocks
         
-        CmdSetPreFilterType,      // Sets the pre filter type
-        CmdSetPreFilterSize,      // Sets the pre filter size
-        CmdSetPreFilterCap,       // Sets the pre filter cap
-        CmdSetTextureThreshold,   // Sets the texture threshold
+        // Stereo parameters
+        CmdSetMinDisparities,      // Set maximum disparities
+        CmdSetMaxDisparities,
+        CmdSetConfidenceThreshold,
         CmdSetUniquenessRatio,    // Sets the uniqueness ratio
-        CmdSetSpeckleWindowSize,  // Sets the speckle window size
-        CmdSetSpeckleRange,       // Sets the speckle range
-        CmdSetDisp12MaxDiff,      // Sets the disp12 max diff
-        CmdSetMinDisparity,       // Sets StereoSGM min disparity
         CmdSetP1,                 // Sets StereoSGM P1
         CmdSetP2,                 // Sets StereoSGM P2
-        CmdSetSgbmMode,           // Sets StereoSGM mode
+        CmdSetZMax,
+        CmdSetZMin,
 
         CmdRdParams,              // Command to read all configured parameteres
         CmdClrVideoRec,           // clear video recording buffer
@@ -137,10 +132,22 @@ protected:
         int speckleWindowSize;
         int speckleRange;
         int disp12MaxDiff;
-        int minDisparity = 0;
         int p1 = 0;
         int p2 = 0;
         int sgmMode = cv::cuda::StereoSGM::MODE_HH4;
+
+        // VPI stereo runtime parameters (windowSize intentionally not user-configurable)
+        int maxDisparity = 0;
+        int minDisparity = 0;
+        int confidenceThreshold = 32767;
+        int confidenceType = VPI_STEREO_CONFIDENCE_ABSOLUTE;
+        int vpiQuality = 1;
+        int p2Alpha = 0;
+        float uniqueness = -1.0f;
+        int numPasses = 3;
+
+        float zMax = 10;
+        float zMin = 0;
 
         int mode      = CamModeNormal;
         std::atomic<uint8_t> streamSelection{StreamCameraSource};

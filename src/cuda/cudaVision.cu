@@ -52,9 +52,9 @@ __global__ void pointCloudToColorKernel(const float* __restrict__ pointCloud,
     dst[2] = xyz[2];
 
     // Channels 3-5: BGR colour converted to float [0..255]
-    dst[3] = static_cast<float>(bgr[0]);
+    dst[3] = static_cast<float>(bgr[2]);
     dst[4] = static_cast<float>(bgr[1]);
-    dst[5] = static_cast<float>(bgr[2]);
+    dst[5] = static_cast<float>(bgr[0]);
 }
 
 

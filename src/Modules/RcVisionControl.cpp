@@ -74,6 +74,7 @@ static bool isValidSgmDisparities(int value) {
 
 static constexpr int kHardMaxDisparity = 64;
 static constexpr int kHardWindowSize = 10;
+static constexpr int kPayloadMaxDisparity = 255;
 
 static int clampInt(int value, int lo, int hi) {
     return std::max(lo, std::min(value, hi));
@@ -99,6 +100,25 @@ void VisionControls::sanitizeVpiStereoSettings(VisionControls::CameraSettings &s
 
     // Stored uniquenessRatio is historically [0..30] in this codebase.
     s.uniquenessRatio = clampInt(s.uniquenessRatio, 0, 30);
+
+    // Runtime VPI stereo params (except windowSize).
+    if (s.maxDisparity != 0 && s.maxDisparity != kPayloadMaxDisparity) {
+        s.maxDisparity = 0;
+    }
+    s.confidenceThreshold = clampInt(s.confidenceThreshold, 0, 65535);
+    s.vpiQuality = clampInt(s.vpiQuality, 1, 8);
+    s.confidenceType = clampInt(s.confidenceType,
+                                static_cast<int>(VPI_STEREO_CONFIDENCE_ABSOLUTE),
+                                static_cast<int>(VPI_STEREO_CONFIDENCE_INFERENCE));
+    if (!(s.p2Alpha == 0 || s.p2Alpha == 1 || s.p2Alpha == 2 || s.p2Alpha == 4 || s.p2Alpha == 8)) {
+        s.p2Alpha = 0;
+    }
+    if (s.uniqueness < 0.0f) {
+        s.uniqueness = -1.0f;
+    } else if (s.uniqueness > 1.0f) {
+        s.uniqueness = 1.0f;
+    }
+    s.numPasses = clampInt(s.numPasses, 1, 3);
 }
 
 VisionControls::~VisionControls()
@@ -288,6 +308,15 @@ int VisionControls::saveStreamingProfile(VisionControls::CameraSettings& setting
     profileSettings["p1"               ] = settings.p1;
     profileSettings["p2"               ] = settings.p2;
     profileSettings["sgmMode"          ] = settings.sgmMode;
+    profileSettings["maxDisparity"       ] = settings.maxDisparity;
+    profileSettings["confidenceThreshold"] = settings.confidenceThreshold;
+    profileSettings["confidenceType"     ] = settings.confidenceType;
+    profileSettings["vpiQuality"         ] = settings.vpiQuality;
+    profileSettings["p2Alpha"            ] = settings.p2Alpha;
+    profileSettings["uniqueness"         ] = settings.uniqueness;
+    profileSettings["numPasses"          ] = settings.numPasses;
+    profileSettings["zMax"               ] = settings.zMax;
+    profileSettings["zMin"               ] = settings.zMin;
 
     std::ofstream out(profilePath, std::ios::out | std::ios::trunc);
     if (!out.is_open()) {
@@ -361,6 +390,16 @@ int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& setting
     if (profileSettings.contains("p1")) settings.p1 = profileSettings["p1"].get<int>();
     if (profileSettings.contains("p2")) settings.p2 = profileSettings["p2"].get<int>();
     if (profileSettings.contains("sgmMode")) settings.sgmMode = profileSettings["sgmMode"].get<int>();
+    if (profileSettings.contains("maxDisparity")) settings.maxDisparity = profileSettings["maxDisparity"].get<int>();
+    if (profileSettings.contains("confidenceThreshold")) settings.confidenceThreshold = profileSettings["confidenceThreshold"].get<int>();
+    if (profileSettings.contains("confidenceType")) settings.confidenceType = profileSettings["confidenceType"].get<int>();
+    if (profileSettings.contains("vpiQuality")) settings.vpiQuality = profileSettings["vpiQuality"].get<int>();
+    if (profileSettings.contains("p2Alpha")) settings.p2Alpha = profileSettings["p2Alpha"].get<int>();
+    if (profileSettings.contains("uniqueness")) settings.uniqueness = profileSettings["uniqueness"].get<float>();
+    if (profileSettings.contains("numPasses")) settings.numPasses = profileSettings["numPasses"].get<int>();
+
+    if (profileSettings.contains("zMax")) settings.zMax = profileSettings["zMax"].get<float>();
+    if (profileSettings.contains("zMax")) settings.zMin = profileSettings["zMax"].get<float>();
 
     // Basic sanity (VPI CUDA stereo constraints).
     VisionControls::sanitizeVpiStereoSettings(settings);
@@ -616,7 +655,22 @@ void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudM
     CHECK_STATUS(vpiSubmitRescale(m_VpiStream, VPI_BACKEND_CUDA, m_ImgR_8u, m_ImgR_270p, VPI_INTERP_LINEAR, VPI_BORDER_ZERO, 0));
 
     // Disparity
-    m_StereoParams.maxDisparity = 255;
+    {
+        std::lock_guard<std::mutex> guard(m_StereoMutex);
+        sanitizeVpiStereoSettings(m_CamSettings);
+
+        m_StereoParams.maxDisparity = m_CamSettings.maxDisparity;
+        // m_StereoParams.confidenceThreshold = m_CamSettings.confidenceThreshold;
+        // m_StereoParams.quality = m_CamSettings.vpiQuality;
+        // m_StereoParams.confidenceType = static_cast<VPIStereoDisparityConfidenceType>(m_CamSettings.confidenceType);
+        // m_StereoParams.minDisparity = m_CamSettings.minDisparity;
+        m_StereoParams.confidenceThreshold = m_CamSettings.confidenceThreshold;
+        m_StereoParams.p1 = m_CamSettings.p1;
+        m_StereoParams.p2 = m_CamSettings.p2;
+        // m_StereoParams.p2Alpha = m_CamSettings.p2Alpha;
+        // m_StereoParams.uniqueness = m_CamSettings.uniqueness;
+        // m_StereoParams.numPasses = static_cast<int8_t>(m_CamSettings.numPasses);
+    }
     CHECK_STATUS(vpiSubmitStereoDisparityEstimator(m_VpiStream, VPI_BACKEND_CUDA, m_Stereo, m_ImgL_270p, m_ImgR_270p, m_Disparity, m_ConfidenceMap, &m_StereoParams));
 
     // Sync
@@ -653,6 +707,40 @@ void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudM
     d_xyz.download(cvPointCloudMat, stream);
     stream.waitForCompletion();  // Sync
 
+    {
+        std::vector<cv::Mat> channels(3);
+        cv::split(cvPointCloudMat, channels);
+        cv::Mat X = channels[0], Y = channels[1], Z = channels[2];
+
+        // Finite check (NaN != NaN)
+        cv::Mat finite_mask = (X == X) & (Y == Y) & (Z == Z);
+
+        // Filter out Inf
+        cv::Mat abs_x, abs_y, abs_z;
+        cv::absdiff(X, cv::Scalar(0), abs_x);
+        cv::absdiff(Y, cv::Scalar(0), abs_y);
+        cv::absdiff(Z, cv::Scalar(0), abs_z);
+        finite_mask &= (abs_x < 1e10f) & (abs_y < 1e10f) & (abs_z < 1e10f);
+
+        // Range filter
+        cv::Mat pc_mask = finite_mask
+            & (Z > m_CamSettings.zMin)
+            & (Z < m_CamSettings.zMax)
+            & (abs_x < 12.0f)
+            & (abs_y < 8.0f);
+
+        // Apply mask — zero out invalid points
+        cv::Mat filtered = cv::Mat::zeros(cvPointCloudMat.size(), cvPointCloudMat.type());
+        cvPointCloudMat.copyTo(filtered, pc_mask);
+
+        // Fallback
+        if (cv::countNonZero(pc_mask) == 0) {
+            cvPointCloudMat.copyTo(filtered, finite_mask);
+        }
+
+        cvPointCloudMat = filtered;
+    }
+
     // Resize the left colour image to match the point-cloud resolution
     cv::Mat colorResized;
     cv::resize(rectL, colorResized, cv::Size(w_, h_));
@@ -685,42 +773,37 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
     Logger* logger = Logger::getLoggerInst();
     auto cmdToString = [](uint8_t c) -> const char* {
         switch (c) {
-            case VisionControls::CmdStartStream: return "CmdStartStream";
-            case VisionControls::CmdStopStream: return "CmdStopStream";
-            case VisionControls::CmdSelCameraStream: return "CmdSelCameraStream";
-            case VisionControls::CmdSetFps: return "CmdSetFps";
-            case VisionControls::CmdSetQuality: return "CmdSetQuality";
-            case VisionControls::CmdSetNumDisparities: return "CmdSetNumDisparities";
-            case VisionControls::CmdSetBlockSize: return "CmdSetBlockSize";
-            case VisionControls::CmdSetPreFilterType: return "CmdSetPreFilterType";
-            case VisionControls::CmdSetPreFilterSize: return "CmdSetPreFilterSize";
-            case VisionControls::CmdSetPreFilterCap: return "CmdSetPreFilterCap";
-            case VisionControls::CmdSetTextureThreshold: return "CmdSetTextureThreshold";
-            case VisionControls::CmdSetUniquenessRatio: return "CmdSetUniquenessRatio";
-            case VisionControls::CmdSetSpeckleWindowSize: return "CmdSetSpeckleWindowSize";
-            case VisionControls::CmdSetSpeckleRange: return "CmdSetSpeckleRange";
-            case VisionControls::CmdSetDisp12MaxDiff: return "CmdSetDisp12MaxDiff";
-            case VisionControls::CmdSetMinDisparity: return "CmdSetMinDisparity";
-            case VisionControls::CmdSetP1: return "CmdSetP1";
-            case VisionControls::CmdSetP2: return "CmdSetP2";
-            case VisionControls::CmdSetSgbmMode: return "CmdSetSgbmMode";
-            case VisionControls::CmdRdParams: return "CmdRdParams";
-            case VisionControls::CmdClrVideoRec: return "CmdClrVideoRec";
-            case VisionControls::CmdSaveVideo: return "CmdSaveVideo";
-            case VisionControls::CmdLoadStoredVideos: return "CmdLoadStoredVideos";
-            case VisionControls::CmdLoadSelectedVideo: return "CmdLoadSelectedVideo";
-            case VisionControls::CmdDeleteVideo: return "CmdDeleteVideo";
-            case VisionControls::CmdCalibrationSetState: return "CmdCalibrationSetState";
-            case VisionControls::CmdCalibrationWrtParams: return "CmdCalibrationWrtParams";
-            case VisionControls::CmdCalibrationReset: return "CmdCalibrationReset";
-            case VisionControls::CmdCalibrationSave: return "CmdCalibrationSave";
+            case VisionControls::CmdStartStream:            return "CmdStartStream";
+            case VisionControls::CmdStopStream:             return "CmdStopStream";
+            case VisionControls::CmdSelCameraStream:        return "CmdSelCameraStream";
+            case VisionControls::CmdSetFps:                 return "CmdSetFps";
+            case VisionControls::CmdSetQuality:             return "CmdSetQuality";
+            case VisionControls::CmdSetUniquenessRatio:     return "CmdSetUniquenessRatio";
+            case VisionControls::CmdSetMinDisparities:      return "CmdSetMinDisparities";
+            case VisionControls::CmdSetMaxDisparities:      return "CmdSetMaxDisparities";
+            case VisionControls::CmdSetConfidenceThreshold: return "CmdSetConfidenceThreshold";
+            case VisionControls::CmdSetP1:                  return "CmdSetP1";
+            case VisionControls::CmdSetP2:                  return "CmdSetP2";
+            case VisionControls::CmdSetZMax:                return "CmdSetZMax";
+            case VisionControls::CmdSetZMin:                return "CmdSetZMin";
+            case VisionControls::CmdRdParams:               return "CmdRdParams";
+            case VisionControls::CmdClrVideoRec:            return "CmdClrVideoRec";
+            case VisionControls::CmdSaveVideo:              return "CmdSaveVideo";
+            case VisionControls::CmdLoadStoredVideos:       return "CmdLoadStoredVideos";
+            case VisionControls::CmdLoadSelectedVideo:      return "CmdLoadSelectedVideo";
+            case VisionControls::CmdDeleteVideo:            return "CmdDeleteVideo";
+            case VisionControls::CmdCalibrationSetState:    return "CmdCalibrationSetState";
+            case VisionControls::CmdCalibrationWrtParams:   return "CmdCalibrationWrtParams";
+            case VisionControls::CmdCalibrationReset:       return "CmdCalibrationReset";
+            case VisionControls::CmdCalibrationSave:        return "CmdCalibrationSave";
             default: return "CmdUnknown";
         }
     };
     logger->log(Logger::LOG_LVL_INFO,
-                "VisionControls received command: %s (%u), value[i32]=%d, value[u16]=%u, value[u8]=%u, payloadLen=%u\n",
+                "VisionControls received command: %s (%u), value[i32]=%.3f value[i32]=%d, value[u16]=%u, value[u8]=%u, payloadLen=%u\n",
                 cmdToString(cmd->command),
                 cmd->command,
+                cmd->data.f32,
                 cmd->data.i32,
                 cmd->data.u16,
                 cmd->data.u8,
@@ -788,20 +871,19 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             nlohmann::json jsonResponse;
             jsonResponse["quality"]     = m_VideoStreamer->getQuality();
             jsonResponse["fps"]         = m_VideoStreamer->getFrameRate();
-            jsonResponse["disparities"] = m_CamSettings.numDisparities;
-            jsonResponse["blocks"]      = m_CamSettings.numBlocks;
-            jsonResponse["preFilterType"]    = m_CamSettings.preFilterType;
-            jsonResponse["preFilterSize"]    = m_CamSettings.preFilterSize;
-            jsonResponse["preFilterCap"]     = m_CamSettings.preFilterCap;
-            jsonResponse["textureThreshold"] = m_CamSettings.textureThreshold;
             jsonResponse["uniquenessRatio"]  = m_CamSettings.uniquenessRatio;
-            jsonResponse["speckleWindowSize"]= m_CamSettings.speckleWindowSize;
-            jsonResponse["speckleRange"]     = m_CamSettings.speckleRange;
-            jsonResponse["disp12MaxDiff"]    = m_CamSettings.disp12MaxDiff;
             jsonResponse["minDisparity"]     = m_CamSettings.minDisparity;
             jsonResponse["p1"]               = m_CamSettings.p1;
             jsonResponse["p2"]               = m_CamSettings.p2;
-            jsonResponse["sgmMode"]          = m_CamSettings.sgmMode;
+            jsonResponse["maxDisparity"]        = m_CamSettings.maxDisparity;
+            jsonResponse["confidenceThreshold"] = m_CamSettings.confidenceThreshold;
+            jsonResponse["confidenceType"]      = m_CamSettings.confidenceType;
+            jsonResponse["vpiQuality"]          = m_CamSettings.vpiQuality;
+            jsonResponse["p2Alpha"]             = m_CamSettings.p2Alpha;
+            jsonResponse["uniqueness"]          = m_CamSettings.uniqueness;
+            jsonResponse["numPasses"]           = m_CamSettings.numPasses;
+            jsonResponse["zMax"]                = m_CamSettings.zMax;
+            jsonResponse["zMin"]                = m_CamSettings.zMin;
             responseBuffer.resize(jsonResponse.dump().size());
             std::strncpy(responseBuffer.data(), jsonResponse.dump().c_str(), jsonResponse.dump().size());
             break;;
@@ -819,70 +901,25 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             break;
         }
 
-        case VisionControls::CmdSetNumDisparities: {
-            uint16_t numDisparities = cmd->data.u16;
-
-            std::lock_guard<std::mutex> guard(m_StereoMutex);
-            if (numDisparities != kHardMaxDisparity) {
-                logger->log(Logger::LOG_LVL_WARN,
-                            "Ignoring disparity=%u; hard-coded to %d\n",
-                            numDisparities, kHardMaxDisparity);
-            }
-            m_CamSettings.numDisparities = kHardMaxDisparity;
-            sanitizeVpiStereoSettings(m_CamSettings);
-
-            // maxDisparity is a payload construction parameter; since it's hard-coded,
-            // we keep the payload as-is.
-            logger->log(Logger::LOG_LVL_INFO, "Number of disparities hard-coded to %d\n", kHardMaxDisparity);
-            VisionControls::saveStreamingProfile(m_CamSettings);
-            break;
-        }
-
-        case VisionControls::CmdSetBlockSize: {
-            const uint8_t blockSize = cmd->data.u8;
-            if (blockSize < 5 || (blockSize % 2) == 0) {
-                logger->log(Logger::LOG_LVL_ERROR,
-                            "Invalid block size %u (must be odd and >= 5)\n",
-                            blockSize);
-                return -1;
-            }
-
-            std::lock_guard<std::mutex> guard(m_StereoMutex);
-            m_CamSettings.numBlocks = blockSize;
-            logger->log(Logger::LOG_LVL_INFO, "Setting block size to %u (note: VPI CUDA stereo ignores this)\n", blockSize);
-            VisionControls::saveStreamingProfile(m_CamSettings);
-            break;
-        }
-
-        case VisionControls::CmdSetPreFilterType: {
-            m_CamSettings.preFilterType = cmd->data.i32;
-            VisionControls::saveStreamingProfile(m_CamSettings);
-            break;
-        }
-
-        case VisionControls::CmdSetPreFilterSize: {
-            m_CamSettings.preFilterSize = cmd->data.i32;
-            VisionControls::saveStreamingProfile(m_CamSettings);
-            break;
-        }
-
-        case VisionControls::CmdSetPreFilterCap: {
-            std::lock_guard<std::mutex> guard(m_StereoMutex);
-            m_CamSettings.preFilterCap = clampInt(cmd->data.i32, 1, 63);
-            VisionControls::saveStreamingProfile(m_CamSettings);
-            break;
-        }
-
-        case VisionControls::CmdSetTextureThreshold: {
-            m_CamSettings.textureThreshold = cmd->data.i32;
-            VisionControls::saveStreamingProfile(m_CamSettings);
-            break;
-        }
-
-        case VisionControls::CmdSetMinDisparity: {
+        case VisionControls::CmdSetMinDisparities: {
             std::lock_guard<std::mutex> guard(m_StereoMutex);
             m_CamSettings.minDisparity = clampInt(cmd->data.i32, 0, m_CamSettings.numDisparities);
             sanitizeVpiStereoSettings(m_CamSettings);
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+
+        case VisionControls::CmdSetMaxDisparities: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            m_CamSettings.maxDisparity = clampInt(cmd->data.i32, 0, m_CamSettings.numDisparities);
+            sanitizeVpiStereoSettings(m_CamSettings);
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+
+        case VisionControls::CmdSetConfidenceThreshold: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            m_CamSettings.confidenceThreshold = clampInt(cmd->data.u32, 0, 65535);
             VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
@@ -903,10 +940,24 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             break;
         }
 
-        case VisionControls::CmdSetSgbmMode: {
+        case VisionControls::CmdSetZMax: {
             std::lock_guard<std::mutex> guard(m_StereoMutex);
-            m_CamSettings.sgmMode = cmd->data.i32;
-            logger->log(Logger::LOG_LVL_INFO, "Set SGBM mode to %d (note: VPI CUDA stereo ignores this)\n", m_CamSettings.sgmMode);
+            float setting = cmd->data.f32; 
+            if (setting < m_CamSettings.zMin) {
+                setting = m_CamSettings.zMax;
+            }
+            m_CamSettings.zMax = cmd->data.f32;
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+
+        case VisionControls::CmdSetZMin: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            float setting = cmd->data.f32; 
+            if (setting > m_CamSettings.zMax) {
+                setting = m_CamSettings.zMax;
+            }
+            m_CamSettings.zMin = cmd->data.f32;
             VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
@@ -914,29 +965,9 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
         case VisionControls::CmdSetUniquenessRatio: {
             std::lock_guard<std::mutex> guard(m_StereoMutex);
             m_CamSettings.uniquenessRatio = clampInt(cmd->data.i32, 0, 30);
+            m_CamSettings.uniqueness = static_cast<float>(m_CamSettings.uniquenessRatio) / 100.0f;
             VisionControls::saveStreamingProfile(m_CamSettings);
         break;
-        }
-
-        case VisionControls::CmdSetSpeckleWindowSize: {
-            std::lock_guard<std::mutex> guard(m_StereoMutex);
-            m_CamSettings.speckleWindowSize = clampInt(cmd->data.i32, 0, 300);
-            VisionControls::saveStreamingProfile(m_CamSettings);
-            break;
-        }
-
-        case VisionControls::CmdSetSpeckleRange: {
-            std::lock_guard<std::mutex> guard(m_StereoMutex);
-            m_CamSettings.speckleRange = clampInt(cmd->data.i32, 0, 10);
-            VisionControls::saveStreamingProfile(m_CamSettings);
-            break;
-        }
-
-        case VisionControls::CmdSetDisp12MaxDiff: {
-            std::lock_guard<std::mutex> guard(m_StereoMutex);
-            m_CamSettings.disp12MaxDiff = clampInt(cmd->data.i32, -1, 10);
-            VisionControls::saveStreamingProfile(m_CamSettings);
-            break;
         }
 
         case VisionControls::CmdClrVideoRec:
