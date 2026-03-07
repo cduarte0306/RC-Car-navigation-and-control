@@ -490,7 +490,7 @@ void StereoCam::streamConsumer() {
         start_ = true;
     }
     startCv_.notify_all();
-    
+
     // Gyroscope for timestamping
     Device::GyroScope::GyroData gyroData;
     Device::GyroScope gyroScope_{"/dev/i2c-7"};
@@ -516,9 +516,27 @@ void StereoCam::streamConsumer() {
             auto rightOut = right;
             m_ProducerLeftBuffer.pop();
             m_ProducerRightBuffer.pop();
-            // Get gyro data
-            gyroScope_.getData(gyroData.gx, gyroData.gy, gyroData.gz, 
-                               gyroData.ax, gyroData.ay, gyroData.az);
+
+            int idx = 0;
+            Device::GyroScope::GyroData prevData = gyroData;
+            uint64_t prevAbsDiff = UINT64_MAX;
+            Msg::CircularBuffer<Device::GyroScope::GyroData>& gyroHist = gyroScope_.getDataHistory();
+            for (idx = 0; idx < (int)gyroHist.size(); idx++) {
+                Device::GyroScope::GyroData& histData = gyroHist.peek(idx);
+                uint64_t absDiff = histData.timestamp > left.timestampNs
+                    ? histData.timestamp - left.timestampNs
+                    : left.timestampNs - histData.timestamp;
+                if (absDiff > prevAbsDiff) {
+                    gyroData = prevData;
+                    break;
+                }
+                prevAbsDiff = absDiff;
+                prevData = histData;
+            }
+
+            while (idx--) {
+                gyroHist.pop();
+            }
 
             // Read gyro and append
             m_StereoBuffer.push({{leftOut.frame, rightOut.frame}, gyroData});

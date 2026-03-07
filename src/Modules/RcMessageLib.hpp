@@ -115,6 +115,10 @@ namespace Msg {
             return buffer_[idx].getData();
         }
 
+        const std::vector<T>& getBuffer() const {
+            return buffer_;
+        }
+
         // Checks if the buffer is empty
         bool isEmpty() const {
             return size_ == 0;

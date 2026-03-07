@@ -256,7 +256,7 @@ void VideoStreamer::runStereoMono() {
         }
 
         // Point cloud transmission is hard coded to 5 frames per second deu to bandwith limitations
-        VideoStreamer::throttleFps(static_cast<int>(VideoStreamer::FrameRate::_10Fps));
+        VideoStreamer::throttleFps(static_cast<int>(VideoStreamer::FrameRate::_5Fps));
 
         // For lowest latency, always transmit the newest frame.
         do {

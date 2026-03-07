@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <gpiod.h>
+#include <time.h>
 
 #include "utils/logger.hpp"
 
@@ -236,18 +237,21 @@ int GyroScope::waitFrameSynchReady(int timeoutMs) {
 }
 
 
-int GyroScope::getData(int16_t& gx, int16_t& gy, int16_t& gz, int16_t& ax, int16_t& ay, int16_t& az) {
-    GyroData data;
-    int result = readGyroData(data);
-    if (result == 0) {
-        gx = data.gx;
-        gy = data.gy;
-        gz = data.gz;
-        ax = data.ax;
-        ay = data.ay;
-        az = data.az;
+int GyroScope::getData(int16_t& gx, int16_t& gy, int16_t& gz, int16_t& ax, int16_t& ay, int16_t& az, uint64_t& timestamp) {
+    if (m_GyroBuffer.isEmpty()) {
+        return -1;
     }
-    return result;
+
+    GyroData data = m_GyroBuffer.getHead();
+    gx        = data.gx;
+    gy        = data.gy;
+    gz        = data.gz;
+    ax        = data.ax;
+    ay        = data.ay;
+    az        = data.az;
+    timestamp = data.timestamp;
+
+    return 0;
 }
 
 
@@ -399,20 +403,21 @@ int GyroScope::initializeDevice() {
 
 
 int GyroScope::readGyroData(GyroData& data) {
-    uint8_t rawData[6];
-    if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_GYRO_XOUT_H, rawData, 6) != 0) {
+    uint8_t gyroData[6];
+    if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_GYRO_XOUT_H, gyroData, 6) != 0) {
         return -1;
     }
 
-    if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_ACCEL_XOUT_H, rawData, 6) != 0) {
+    uint8_t accelData[6];
+    if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_ACCEL_XOUT_H, accelData, 6) != 0) {
         return -1;
     }
-    data.gx = (static_cast<int16_t>(rawData[0]) << 8) | rawData[1];
-    data.gy = (static_cast<int16_t>(rawData[2]) << 8) | rawData[3];
-    data.gz = (static_cast<int16_t>(rawData[4]) << 8) | rawData[5];
-    data.ax = (static_cast<int16_t>(rawData[0]) << 8) | rawData[1];
-    data.ay = (static_cast<int16_t>(rawData[2]) << 8) | rawData[3];
-    data.az = (static_cast<int16_t>(rawData[4]) << 8) | rawData[5];
+    data.gx = (static_cast<int16_t>(gyroData[0]) << 8) | gyroData[1];
+    data.gy = (static_cast<int16_t>(gyroData[2]) << 8) | gyroData[3];
+    data.gz = (static_cast<int16_t>(gyroData[4]) << 8) | gyroData[5];
+    data.ax = (static_cast<int16_t>(accelData[0]) << 8) | accelData[1];
+    data.ay = (static_cast<int16_t>(accelData[2]) << 8) | accelData[3];
+    data.az = (static_cast<int16_t>(accelData[4]) << 8) | accelData[5];
     return 0;
 }
 
@@ -420,6 +425,8 @@ int GyroScope::readGyroData(GyroData& data) {
 void GyroScope::pollGyroData(void) {
     // If an interrupt line is configured, use it to block until data-ready.
     // Otherwise fall back to periodic reads.
+    struct timespec now;
+    
     while (m_ThreadCanRun.load()) {
         if (m_IrqRequest) {
             // Use a finite timeout so the thread can exit promptly.
@@ -433,6 +440,9 @@ void GyroScope::pollGyroData(void) {
 
         GyroData data;
         if (readGyroData(data) == 0) {
+            // Grab timestamp
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            data.timestamp = static_cast<int64_t>(now.tv_sec) * 1000000000LL + static_cast<int64_t>(now.tv_nsec);
             m_GyroBuffer.push(data);
         }
 

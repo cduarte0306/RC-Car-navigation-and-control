@@ -257,6 +257,14 @@ int VisionControls::init(void) {
     CHECK_STATUS(vpiImageCreate(w_, h_, VPI_IMAGE_FORMAT_S16, 0, &m_Disparity));
     CHECK_STATUS(vpiImageCreate(w_, h_, VPI_IMAGE_FORMAT_U16, 0, &m_ConfidenceMap));
 
+    cv::Mat cvImageLeft (CAM_HEIGHT, CAM_WIDTH, CV_8UC3);
+    cv::Mat cvImageRight(CAM_HEIGHT, CAM_WIDTH, CV_8UC3);
+
+    // Wrap cv::Mat in vpiImage
+    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageLeft, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &m_ImgL));
+    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageRight, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &m_ImgR));
+
+
     logger->log(Logger::LOG_LVL_INFO, "Vision control module initialized\r\n");
     return 0;
 }
@@ -1176,43 +1184,6 @@ void VisionControls::mainProc() {
         Q(2, 3) *= sx;
         Q(3, 3) *= sx;
     };
-
-
-    // Create VPI image wrappers (require a non-empty frame from the camera).
-    cv::Mat cvImageLeft, cvImageRight;
-
-    for (int i = 0; i < 5; i++) {
-        // Read once so wrappers are created from non-empty mats (matches test2 flow).
-        ret = m_Cam->read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
-        if (ret == 0) {
-            break;
-        }
-
-        std::cout << "Attempt " << i << std::endl;
-        logger->log(Logger::LOG_LVL_INFO, "Camera attempt %d of 5\r\n", i);
-        if (i == 5) {
-            logger->log(Logger::LOG_LVL_ERROR, "CamFailed to open camera\r\n");
-            return;
-        }
-
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-
-    if (frameL.channels() == 4) {
-        cv::cvtColor(frameL, cvImageLeft, cv::COLOR_BGRA2BGR);
-    } else {
-        cvImageLeft = frameL;
-    }
-
-    if (frameR.channels() == 4) {
-        cv::cvtColor(frameR, cvImageRight, cv::COLOR_BGRA2BGR);
-    } else {
-        cvImageRight = frameR;
-    }
-
-    // Wrap cv::Mat in vpiImage
-    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageLeft, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &m_ImgL));
-    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageRight, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &m_ImgR));
 
     // Initialise reprojection matrix
     Q = m_VideoCalib.reprojectionQ();
