@@ -92,6 +92,9 @@ protected:
         CmdSetP2,                 // Sets StereoSGM P2
         CmdSetZMax,
         CmdSetZMin,
+        CmdSetDepthThreshold,
+        CmdSetMinAgreeingPixels,
+        CmdSetColorThreshold,
 
         CmdRdParams,              // Command to read all configured parameteres
         CmdClrVideoRec,           // clear video recording buffer
@@ -145,6 +148,9 @@ protected:
         int p2Alpha = 0;
         float uniqueness = -1.0f;
         int numPasses = 3;
+        float depthThreshold = 0.01f;
+        int   minAgreeingPixels = 20;
+        float colorThreshold = 30.0f;
 
         float zMax = 10;
         float zMin = 0;

@@ -18,7 +18,8 @@ namespace Vision {
 class VideoStreamer {
     public:
 
-    enum class FrameRate : uint8_t {
+    enum class FrameRate : uint16_t {
+        _1Fps  = 1000, // 1 fps
         _5Fps  = 250, // 5 fps
         _10Fps = 100, // 10 Frames per second
         _15Fps = 66,  // 15 frames per second

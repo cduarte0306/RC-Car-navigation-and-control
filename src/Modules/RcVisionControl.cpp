@@ -325,6 +325,9 @@ int VisionControls::saveStreamingProfile(VisionControls::CameraSettings& setting
     profileSettings["numPasses"          ] = settings.numPasses;
     profileSettings["zMax"               ] = settings.zMax;
     profileSettings["zMin"               ] = settings.zMin;
+    profileSettings["depthThreshold"     ] = settings.depthThreshold;
+    profileSettings["minAgreeingPixels"  ] = settings.minAgreeingPixels;
+    profileSettings["colorThreshold"     ] = settings.colorThreshold;
 
     std::ofstream out(profilePath, std::ios::out | std::ios::trunc);
     if (!out.is_open()) {
@@ -405,9 +408,12 @@ int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& setting
     if (profileSettings.contains("p2Alpha")) settings.p2Alpha = profileSettings["p2Alpha"].get<int>();
     if (profileSettings.contains("uniqueness")) settings.uniqueness = profileSettings["uniqueness"].get<float>();
     if (profileSettings.contains("numPasses")) settings.numPasses = profileSettings["numPasses"].get<int>();
+    if (profileSettings.contains("depthThreshold")) settings.depthThreshold = profileSettings["depthThreshold"].get<float>();
+    if (profileSettings.contains("minAgreeingPixels")) settings.minAgreeingPixels = profileSettings["minAgreeingPixels"].get<int>();
+    if (profileSettings.contains("colorThreshold")) settings.colorThreshold = profileSettings["colorThreshold"].get<float>();
 
     if (profileSettings.contains("zMax")) settings.zMax = profileSettings["zMax"].get<float>();
-    if (profileSettings.contains("zMax")) settings.zMin = profileSettings["zMax"].get<float>();
+    if (profileSettings.contains("zMin")) settings.zMin = profileSettings["zMin"].get<float>();
 
     // Basic sanity (VPI CUDA stereo constraints).
     VisionControls::sanitizeVpiStereoSettings(settings);
@@ -617,6 +623,7 @@ void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudM
     cv::cuda::Stream stream;
     cv::cuda::GpuMat d_disp32f, d_xyz;
     cv::Mat zMap(h_, w_, CV_32FC(6));
+    cv::Mat zMapSmooth(h_, w_, CV_32FC(6));
 
     Q = m_VideoCalib.reprojectionQ();
 
@@ -759,7 +766,12 @@ void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudM
         printf("Failed convert point cloud\n");
     }
 
-    pointCloudMat = zMap;
+    ret = cuda::smoothPointCloud(zMap, zMapSmooth, m_CamSettings.depthThreshold, m_CamSettings.minAgreeingPixels, m_CamSettings.colorThreshold);
+    if (ret < 0) {
+        printf("Failed to smooth pointcloud\n");
+    }
+
+    pointCloudMat = zMapSmooth;
 }
 
 
@@ -794,6 +806,9 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             case VisionControls::CmdSetP2:                  return "CmdSetP2";
             case VisionControls::CmdSetZMax:                return "CmdSetZMax";
             case VisionControls::CmdSetZMin:                return "CmdSetZMin";
+            case VisionControls::CmdSetDepthThreshold:      return "CmdSetDepthThreshold";
+            case VisionControls::CmdSetMinAgreeingPixels:   return "CmdSetMinAgreeingPixels";
+            case VisionControls::CmdSetColorThreshold:      return "CmdSetColorThreshold";
             case VisionControls::CmdRdParams:               return "CmdRdParams";
             case VisionControls::CmdClrVideoRec:            return "CmdClrVideoRec";
             case VisionControls::CmdSaveVideo:              return "CmdSaveVideo";
@@ -877,12 +892,12 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
 
         case VisionControls::CmdRdParams: {
             nlohmann::json jsonResponse;
-            jsonResponse["quality"]     = m_VideoStreamer->getQuality();
-            jsonResponse["fps"]         = m_VideoStreamer->getFrameRate();
-            jsonResponse["uniquenessRatio"]  = m_CamSettings.uniquenessRatio;
-            jsonResponse["minDisparity"]     = m_CamSettings.minDisparity;
-            jsonResponse["p1"]               = m_CamSettings.p1;
-            jsonResponse["p2"]               = m_CamSettings.p2;
+            jsonResponse["quality"]             = m_VideoStreamer->getQuality();
+            jsonResponse["fps"]                 = m_VideoStreamer->getFrameRate();
+            jsonResponse["uniquenessRatio"]     = m_CamSettings.uniquenessRatio;
+            jsonResponse["minDisparity"]        = m_CamSettings.minDisparity;
+            jsonResponse["p1"]                  = m_CamSettings.p1;
+            jsonResponse["p2"]                  = m_CamSettings.p2;
             jsonResponse["maxDisparity"]        = m_CamSettings.maxDisparity;
             jsonResponse["confidenceThreshold"] = m_CamSettings.confidenceThreshold;
             jsonResponse["confidenceType"]      = m_CamSettings.confidenceType;
@@ -892,6 +907,9 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             jsonResponse["numPasses"]           = m_CamSettings.numPasses;
             jsonResponse["zMax"]                = m_CamSettings.zMax;
             jsonResponse["zMin"]                = m_CamSettings.zMin;
+            jsonResponse["depthThreshold"]      = m_CamSettings.depthThreshold;
+            jsonResponse["minAgreeingPixels"]   = m_CamSettings.minAgreeingPixels;
+            jsonResponse["colorThreshold"]      = m_CamSettings.colorThreshold;
             responseBuffer.resize(jsonResponse.dump().size());
             std::strncpy(responseBuffer.data(), jsonResponse.dump().c_str(), jsonResponse.dump().size());
             break;;
@@ -970,12 +988,33 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             break;
         }
 
+        case VisionControls::CmdSetDepthThreshold: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            m_CamSettings.depthThreshold = cmd->data.f32;
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+        
+        case VisionControls::CmdSetMinAgreeingPixels: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            m_CamSettings.minAgreeingPixels = cmd->data.i32;
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+
+        case VisionControls::CmdSetColorThreshold: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            m_CamSettings.colorThreshold = cmd->data.f32;
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+
         case VisionControls::CmdSetUniquenessRatio: {
             std::lock_guard<std::mutex> guard(m_StereoMutex);
             m_CamSettings.uniquenessRatio = clampInt(cmd->data.i32, 0, 30);
             m_CamSettings.uniqueness = static_cast<float>(m_CamSettings.uniquenessRatio) / 100.0f;
             VisionControls::saveStreamingProfile(m_CamSettings);
-        break;
+            break;
         }
 
         case VisionControls::CmdClrVideoRec:

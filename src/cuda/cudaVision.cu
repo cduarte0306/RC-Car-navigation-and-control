@@ -58,6 +58,121 @@ __global__ void pointCloudToColorKernel(const float* __restrict__ pointCloud,
 }
 
 
+/**
+ * @brief Surface-aware speckle filter.
+ *
+ *  Every valid pixel finds colour-similar neighbours in a 7×7 window and
+ *  replaces its XYZ with the average of those neighbours.  This normalises
+ *  depth across same-colour surfaces, eliminating inward rays.  The pixel
+ *  keeps its own colour so the visual appearance is unchanged.
+ *
+ *  Pixels that have NO colour-similar neighbours AND fail the depth-consensus
+ *  check (fewer than minAgreeing depth-agreeing neighbours) are considered
+ *  true speckles and zeroed out entirely.
+ */
+__global__ void speckleRejectionKernel(const float* __restrict__ pointCloud,
+                                       const size_t pcStep,
+                                       float* __restrict__ filteredPointCloud,
+                                       const size_t fpcStep,
+                                       const int rows,
+                                       const int cols,
+                                       const float depthThreshold,
+                                       const int   minAgreeing,
+                                       const float colorThreshold) {
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (row >= rows || col >= cols) {
+        return;
+    }
+
+    const int CH = 6;   // CV_32FC(6): X, Y, Z, R, G, B
+    const int halfN = 3; // 7×7 window
+
+    const float* srcRow = reinterpret_cast<const float*>(
+                              reinterpret_cast<const unsigned char*>(pointCloud) + row * pcStep);
+    float*       dstRow = reinterpret_cast<float*>(
+                              reinterpret_cast<unsigned char*>(filteredPointCloud) + row * fpcStep);
+
+    const float* center = srcRow + col * CH;
+    float        centerZ = center[2];
+
+    float* dst = dstRow + col * CH;
+
+    // This function should fill in pixels where point cloud is invalid based on neihboring values. We need 
+    // to iterate throuh every pixel that is 0, we 
+    
+
+    // If center pixel is already invalid, keep it zeroed
+    if (centerZ <= 0.0f) {
+        dst[0] = 0.0f; dst[1] = 0.0f; dst[2] = 0.0f;
+        dst[3] = 0.0f; dst[4] = 0.0f; dst[5] = 0.0f;
+        return;
+    }
+
+    float cR = center[3], cG = center[4], cB = center[5];
+
+    // Single pass: gather colour-similar neighbours AND count depth-agreeing ones
+    float sumX = 0.0f, sumY = 0.0f, sumZ = 0.0f;
+    int colorCount  = 0;
+    int depthAgreeing = 0;
+
+    for (int dy = -halfN; dy <= halfN; ++dy) {
+        int r = row + dy;
+        if (r < 0 || r >= rows) continue;
+
+        const float* nRow = reinterpret_cast<const float*>(
+                                reinterpret_cast<const unsigned char*>(pointCloud) + r * pcStep);
+
+        for (int dx = -halfN; dx <= halfN; ++dx) {
+            if (dx == 0 && dy == 0) continue; // skip self
+            int c = col + dx;
+            if (c < 0 || c >= cols) continue;
+
+            const float* nb = nRow + c * CH;
+            float nZ = nb[2];
+            if (nZ <= 0.0f) continue; // skip invalid
+
+            // Depth consensus
+            if (fabsf(nZ - centerZ) <= depthThreshold) {
+                depthAgreeing++;
+            }
+
+            // Colour similarity — accumulate XYZ for surface averaging
+            float dR = nb[3] - cR;
+            float dG = nb[4] - cG;
+            float dB = nb[5] - cB;
+            float colorDist = sqrtf(dR * dR + dG * dG + dB * dB);
+
+            if (colorDist <= colorThreshold) {
+                sumX += nb[0]; sumY += nb[1]; sumZ += nb[2];
+                colorCount++;
+            }
+        }
+    }
+
+    if (colorCount > 0) {
+        // Snap XYZ to the average of colour-similar neighbours (same surface)
+        // Keep the pixel's own colour unchanged
+        float inv = 1.0f / colorCount;
+        dst[0] = sumX * inv;
+        dst[1] = sumY * inv;
+        dst[2] = sumZ * inv;
+        dst[3] = cR;
+        dst[4] = cG;
+        dst[5] = cB;
+    } else if (depthAgreeing >= minAgreeing) {
+        // No colour matches but depth is consistent — keep as-is
+        dst[0] = center[0]; dst[1] = center[1]; dst[2] = center[2];
+        dst[3] = cR;        dst[4] = cG;        dst[5] = cB;
+    } else {
+        // True speckle: no colour match AND depth is an outlier — remove
+        dst[0] = 0.0f; dst[1] = 0.0f; dst[2] = 0.0f;
+        dst[3] = 0.0f; dst[4] = 0.0f; dst[5] = 0.0f;
+    }
+}
+
+
 int cuda::pointCloudToColor(cv::Mat& pointCloud, cv::Mat& colorFrame, cv::Mat& colorPointCloud) {
     if (pointCloud.type() != CV_32FC3 || colorFrame.type() != CV_8UC3 || colorPointCloud.type() != CV_32FC(6)) {
         return -1; // Unsupported types
@@ -91,6 +206,45 @@ int cuda::pointCloudToColor(cv::Mat& pointCloud, cv::Mat& colorFrame, cv::Mat& c
     // Wait for kernel to finish, then download result
     cudaDeviceSynchronize();
     d_colorPointCloud.download(colorPointCloud);
+
+    return 0;
+}
+
+
+int cuda::smoothPointCloud(cv::Mat& pointCloud, cv::Mat& smoothedPointCloud,
+                           float depthThreshold, int minAgreeing,
+                           float colorThreshold) {
+    if (pointCloud.type() != CV_32FC(6) || smoothedPointCloud.type() != CV_32FC(6)) {
+        return -1; // Unsupported types
+    }
+
+    CV_Assert(pointCloud.size() == smoothedPointCloud.size());
+
+    dim3 block(16, 16);
+    dim3 grid(
+        (pointCloud.cols + block.x - 1) / block.x,
+        (pointCloud.rows + block.y - 1) / block.y
+    );
+
+    // Upload to GPU
+    cv::cuda::GpuMat d_pointCloud(pointCloud);
+    cv::cuda::GpuMat d_smoothedPointCloud(smoothedPointCloud);
+
+    speckleRejectionKernel<<<grid, block>>>(
+        d_pointCloud.ptr<float>(),
+        d_pointCloud.step,
+        d_smoothedPointCloud.ptr<float>(),
+        d_smoothedPointCloud.step,
+        pointCloud.rows,
+        pointCloud.cols,
+        depthThreshold,
+        minAgreeing,
+        colorThreshold
+    );
+
+    // Wait for kernel to finish, then download result
+    cudaDeviceSynchronize();
+    d_smoothedPointCloud.download(smoothedPointCloud);
 
     return 0;
 }
