@@ -17,12 +17,21 @@
 #include "app/video/VideoStereoCalibration.hpp"
 #include "app/video/VideoStreamer.hpp"
 
+#include <opencv2/cudastereo.hpp>
+#include <vpi/OpenCVInterop.hpp>
+  
+#include <vpi/Image.h>
+#include <vpi/Status.h>
+#include <vpi/Stream.h>
+#include <vpi/algo/ConvertImageFormat.h>
+#include <vpi/algo/Rescale.h>
+#include <vpi/algo/StereoDisparity.h>
 
 namespace Modules {
 class VisionControls : public Base, public Adapter::CameraAdapter {
 public:
     VisionControls(int moduleID, std::string name);
-    ~VisionControls() {}
+    ~VisionControls();
 
     virtual int init(void) override;
 
@@ -37,6 +46,9 @@ public:
     // virtual int moduleCommand_(char* pbuf, size_t len) override;
 
     virtual int moduleCommand_(std::vector<char>& buffer) override;
+
+    // Command handlers
+    virtual std::string readStats() override;
     
 protected:
 #pragma pack(push, 1)
@@ -70,22 +82,24 @@ protected:
         CmdSelCameraStream,       // select camera stream (Normal or training)
         CmdSetFps,                // set streaming parameters (host IP, port, etc)
         CmdSetQuality,            // Set the stream compresison quality
-        CmdSetNumDisparities,     // Sets the number of disparities
-        CmdSetBlockSize,          // Sets the number of blocks
         
-        CmdSetPreFilterType,      // Sets the pre filter type
-        CmdSetPreFilterSize,      // Sets the pre filter size
-        CmdSetPreFilterCap,       // Sets the pre filter cap
-        CmdSetTextureThreshold,   // Sets the texture threshold
+        // Stereo parameters
+        CmdSetMinDisparities,      // Set maximum disparities
+        CmdSetMaxDisparities,
+        CmdSetConfidenceThreshold,
         CmdSetUniquenessRatio,    // Sets the uniqueness ratio
-        CmdSetSpeckleWindowSize,  // Sets the speckle window size
-        CmdSetSpeckleRange,       // Sets the speckle range
-        CmdSetDisp12MaxDiff,      // Sets the disp12 max diff
+        CmdSetP1,                 // Sets StereoSGM P1
+        CmdSetP2,                 // Sets StereoSGM P2
+        CmdSetZMax,
+        CmdSetZMin,
+        CmdSetDepthThreshold,
+        CmdSetMinAgreeingPixels,
+        CmdSetColorThreshold,
 
         CmdRdParams,              // Command to read all configured parameteres
         CmdClrVideoRec,           // clear video recording buffer
         CmdSaveVideo,             // save video recording to disks
-        CmdReadStoredVideos,      // Read stored videos from disk
+        CmdLoadStoredVideos,      // Read stored videos from disk
         CmdLoadSelectedVideo,     // load selected video from disk
         CmdDeleteVideo,           // Delete video
         CmdCalibrationSetState,   // Start video calibration
@@ -110,7 +124,7 @@ protected:
     struct CameraSettings {
         int frameRate = 30;
         int quality = 100;
-        int numDisparities = 96;
+        int numDisparities = 128;
         int numBlocks = 15;
 
         int preFilterType;
@@ -121,6 +135,25 @@ protected:
         int speckleWindowSize;
         int speckleRange;
         int disp12MaxDiff;
+        int p1 = 0;
+        int p2 = 0;
+        int sgmMode = cv::cuda::StereoSGM::MODE_HH4;
+
+        // VPI stereo runtime parameters (windowSize intentionally not user-configurable)
+        int maxDisparity = 0;
+        int minDisparity = 0;
+        int confidenceThreshold = 32767;
+        int confidenceType = VPI_STEREO_CONFIDENCE_ABSOLUTE;
+        int vpiQuality = 1;
+        int p2Alpha = 0;
+        float uniqueness = -1.0f;
+        int numPasses = 3;
+        float depthThreshold = 0.01f;
+        int   minAgreeingPixels = 20;
+        float colorThreshold = 30.0f;
+
+        float zMax = 10;
+        float zMin = 0;
 
         int mode      = CamModeNormal;
         std::atomic<uint8_t> streamSelection{StreamCameraSource};
@@ -144,11 +177,8 @@ protected:
     // Receive frame handler
     void onEthRecv(std::vector<char>& data);
 
-    // Frame processing handler
-    void processFrame(cv::Mat& frame);
-
     // Stereo frame processing handler
-    void processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
+    void processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
 
     // Generate point cloud image
     void doPointCloud(cv::Mat& dispFrame, cv::Mat& pointCloudMat, cv::Matx44d& Q);
@@ -158,6 +188,9 @@ protected:
 
     // Load all settings
     static int loadStreamingProfile(CameraSettings& settings);
+
+    // Clamp settings to VPI CUDA stereo constraints.
+    static void sanitizeVpiStereoSettings(CameraSettings& settings);
 
     // Camera source stream handler
     // void processCameraSource(Devices::StereoCam& cam);
@@ -187,6 +220,29 @@ protected:
 
     // Frame received flag
     bool m_ReceivingFrame{false};
+
+    VPIStream  m_VpiStream = nullptr;
+    VPIPayload m_Stereo    = nullptr;
+
+    VPIImage m_ImgL         = nullptr;
+    VPIImage m_ImgR         = nullptr;
+    VPIImage m_ImgL_8u      = nullptr;
+    VPIImage m_ImgR_8u      = nullptr;
+    VPIImage m_ImgL_270p    = nullptr;
+    VPIImage m_ImgR_270p    = nullptr;
+    VPIImage m_Disparity    = nullptr;
+    VPIImage m_ConfidenceMap = nullptr;
+
+    const int w_ = 640;
+    const int h_ = 480;
+
+    uint64_t backend_ = 0;
+
+    VPIStereoDisparityEstimatorCreationParams m_CreateParams;
+
+    VPIStereoDisparityEstimatorParams m_StereoParams;
+
+    VPIConvertImageFormatParams m_ConvParams;
 
     // Receive frame buffer
     cv::Mat m_ReceivedFrame;

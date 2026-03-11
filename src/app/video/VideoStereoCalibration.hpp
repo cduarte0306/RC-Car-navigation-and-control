@@ -80,6 +80,18 @@ public:
     int DoCalibration(cv::Mat& leftBgr, cv::Mat& rightBgr);
 
     /**
+     * @brief Starts calibration and expecting frames
+     * 
+     */
+    void SetCalibrationMode() {
+      m_Calibrated = false;
+    }
+
+    bool GetCalibMode() const {
+      return m_Calibrated;
+    }
+
+    /**
      * @brief Perform video calibration
      * 
      * @param frameL Left stereo frame
@@ -233,7 +245,7 @@ private:
     std::vector<std::vector<cv::Point2f>> m_ImagePointsR;
     std::vector<std::vector<cv::Point3f>> m_ObjectPoints;
     cv::Size m_ImageSize;
-    bool m_Calibrated{false};
+    bool m_Calibrated{true};
     double m_LastRmsError{0.0};
 
     nlohmann::json m_CalibrationStatsBank;

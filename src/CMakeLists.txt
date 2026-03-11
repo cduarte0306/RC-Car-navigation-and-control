@@ -4,6 +4,8 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 set(SOURCE
     main.cpp
     utils/logger.cpp
+    cuda/cudaVision.cu
+    cuda/include/cudaVision.hpp
     Modules/cli.hpp
     Modules/cli.cpp
     Modules/RcBase.cpp
@@ -55,6 +57,21 @@ find_library(GPIOD_LIBRARY gpiod)
 
 add_executable(${PROJECT_NAME} ${SOURCE})
 
+# Jetson Orin Nano typically: 87
+# You can also set this to "native" in newer CMake, but 87 is explicit.
+set_target_properties(${PROJECT_NAME} PROPERTIES
+  CUDA_ARCHITECTURES 87
+)
+
+# If you have multiple .cu files or device symbols crossing TUs, enable this:
+set_target_properties(${PROJECT_NAME} PROPERTIES
+  CUDA_SEPARABLE_COMPILATION ON
+)
+
+find_package(CUDAToolkit REQUIRED)
+
+target_link_libraries(${PROJECT_NAME} PRIVATE CUDA::cudart)
+
 option(RC_CAR_ENABLE_JETSON_MULTIMEDIA "Enable Jetson multimedia (Argus/NvBuf) integration when libraries are available" ON)
 
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -63,6 +80,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src/Devices/network_interface
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/cuda/include
     ${CMAKE_SOURCE_DIR}/src/lib
     ${CMAKE_SOURCE_DIR}/src/Modules
     ${OPENCV_INCLUDE_DIRS}
@@ -148,6 +166,15 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${GSTAPP_LIBRARIES}
     ${GSTVIDEO_LIBRARIES}
     ${GPIOD_LIBRARIES}
+    nvvpi
+)
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+    "${VPI_ROOT}/include"
+)
+
+target_link_directories(${PROJECT_NAME} PRIVATE
+    "${VPI_ROOT}/lib/aarch64-linux-gnu"
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

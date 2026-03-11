@@ -92,6 +92,29 @@ int StereoCam::start(uint32_t w, uint32_t h, uint32_t fps) {
 }
 
 
+void StereoCam::ApplyStereoFixedControls(
+      Argus::IRequest* iRequest,
+      Argus::ISourceSettings* iSource,
+      uint64_t exposureNs,
+      float gain,
+      bool lockAwb
+      ) {
+    using namespace Argus;
+
+    // 1) Force manual exposure+gain (min=max)
+    iSource->setExposureTimeRange(Range<uint64_t>(exposureNs, exposureNs));
+    iSource->setGainRange(Range<float>(gain, gain));
+
+    // 2) Lock AE/AWB via AutoControlSettings
+    IAutoControlSettings* iACS =
+        interface_cast<IAutoControlSettings>(iRequest->getAutoControlSettings());
+    if (iACS) {
+        iACS->setAeLock(true);
+        iACS->setAwbLock(lockAwb);
+    } 
+}
+
+
 int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
     std::vector<CameraDevice*> devices;
     iProvider_->getCameraDevices(&devices);
@@ -166,7 +189,7 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
     iEglSettings->setResolution(Size2D<uint32_t>(w_, h_));
     iEglSettings->setPixelFormat(PIXEL_FMT_YCbCr_420_888);
     iEglSettings->setEGLDisplay(EGL_NO_DISPLAY);
-    iEglSettings->setMode(EGL_STREAM_MODE_MAILBOX);
+    iEglSettings->setMode(EGL_STREAM_MODE_FIFO);
     iEglSettings->setMetadataEnable(true);
     // iEglSettings->setMetadataEnabled(true);
 
@@ -192,6 +215,14 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
     }
     iSource->setFrameDurationRange(Range<uint64_t>(frameDuration, frameDuration));
 
+    // const uint64_t fixedExposureNs = 5'000'000ULL; // 5 ms
+    // const float fixedGain = 8.0f;
+
+    // const uint64_t safeExposureNs = std::min<uint64_t>(fixedExposureNs, frameDuration - 1);
+
+    // ApplyStereoFixedControls(iRequest, iSource, safeExposureNs, fixedGain, /*lockAwb=*/true);
+
+
     // Cap exposure time to the frame period to prevent long exposures from lowering FPS.
     // (This API is exposed on ISourceSettings in this Argus SDK.)
     {
@@ -204,7 +235,6 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
     }
 
     if (iSessions_[index]->repeat(requests_[index].get()) != STATUS_OK) return -1;
-
     started_ = true;
     return 0;
 }
@@ -266,19 +296,25 @@ int StereoCam::close() {
 
 
 int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t& yGyro, int16_t& zGyro, int16_t& xAccel, int16_t& yAccel, int16_t& zAccel) {
-    if (!started_) return -1;
+    if (!started_) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Camera is not opened\n");
+        return -1;
+    }
 
     constexpr uint32_t timeoutMs = 1000;
     auto startTime = std::chrono::steady_clock::now();
 
     // If you can, replace this with a blocking condition variable from your CircularBuffer.
     while (m_StereoBuffer.isEmpty()) {
-        auto elapsed = std::chrono::steady_clock::now() - startTime;
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() > timeoutMs) {
-            return -1;  // Timeout
-        }
+        // auto elapsed = std::chrono::steady_clock::now() - startTime;
+        // if (std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() > timeoutMs) {
+        //     return -1;  // Timeout
+        // }
         std::this_thread::sleep_for(std::chrono::microseconds(100));
-        if (!m_ThreadCanRun.load()) return -1;
+        if (!m_ThreadCanRun.load())  {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Camera thread is not running\n");
+            return -1;
+        }
     }
 
     auto& frames = m_StereoBuffer.getHead();
@@ -454,7 +490,7 @@ void StereoCam::streamConsumer() {
         start_ = true;
     }
     startCv_.notify_all();
-    
+
     // Gyroscope for timestamping
     Device::GyroScope::GyroData gyroData;
     Device::GyroScope gyroScope_{"/dev/i2c-7"};
@@ -473,17 +509,36 @@ void StereoCam::streamConsumer() {
 
         const uint64_t absDiff = static_cast<uint64_t>(timeDiff < 0 ? -timeDiff : timeDiff);
         if (absDiff <= THRESH_NS) {
+            m_TimestampDiffNs_ = absDiff;
+
             // Aligned: pop both and publish.
-            FrameObject leftOut = left;
-            FrameObject rightOut = right;
+            auto leftOut = left;
+            auto rightOut = right;
             m_ProducerLeftBuffer.pop();
             m_ProducerRightBuffer.pop();
 
-            // Get gyro data
-            gyroScope_.getData(gyroData.gx, gyroData.gy, gyroData.gz, 
-                               gyroData.ax, gyroData.ay, gyroData.az);
+            int idx = 0;
+            Device::GyroScope::GyroData prevData = gyroData;
+            uint64_t prevAbsDiff = UINT64_MAX;
+            Msg::CircularBuffer<Device::GyroScope::GyroData>& gyroHist = gyroScope_.getDataHistory();
+            for (idx = 0; idx < (int)gyroHist.size(); idx++) {
+                Device::GyroScope::GyroData& histData = gyroHist.peek(idx);
+                uint64_t absDiff = histData.timestamp > left.timestampNs
+                    ? histData.timestamp - left.timestampNs
+                    : left.timestampNs - histData.timestamp;
+                if (absDiff > prevAbsDiff) {
+                    gyroData = prevData;
+                    break;
+                }
+                prevAbsDiff = absDiff;
+                prevData = histData;
+            }
 
-            // Read gyro and appen 
+            while (idx--) {
+                gyroHist.pop();
+            }
+
+            // Read gyro and append
             m_StereoBuffer.push({{leftOut.frame, rightOut.frame}, gyroData});
         } else {
             // Not aligned: drop the older frame (smaller timestamp) to catch up.

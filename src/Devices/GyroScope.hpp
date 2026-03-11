@@ -28,6 +28,7 @@ public:
     ~GyroScope();
 
     struct GyroData {
+        uint64_t timestamp; // Unix timestamp
         int16_t ax;
         int16_t ay;
         int16_t az;
@@ -56,7 +57,11 @@ public:
      * @param az Reference to store Z-axis accel data
      * @return int Status code
      */
-    int getData(int16_t& gx, int16_t& gy, int16_t& gz, int16_t& ax, int16_t& ay, int16_t& az);
+    int getData(int16_t& gx, int16_t& gy, int16_t& gz, int16_t& ax, int16_t& ay, int16_t& az, uint64_t& timestamp);
+
+    Msg::CircularBuffer<GyroData>& getDataHistory(void) {
+        return m_GyroBuffer;
+    }
 private:
     /**
      * @brief Initialize the I2C communication

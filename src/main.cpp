@@ -43,6 +43,7 @@ int main(int argc, char* argv[]) {
 
     cli->createAdapter<Adapter::MotorAdapter>();
     cli->createAdapter<Adapter::CommsAdapter>();
+    cli->createAdapter<Adapter::CameraAdapter>();
 
     rcTelemetry->createAdapter<Adapter::CommsAdapter>();
 
@@ -53,6 +54,7 @@ int main(int argc, char* argv[]) {
     commandController->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     cli->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
     cli->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
+    cli->moduleBind<Adapter::CameraAdapter>(rcVision->getInputAdapter());
     rcVision->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     rcVision->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
     rcVision->moduleBind<Adapter::TlmAdapter>(rcTelemetry->getInputAdapter());

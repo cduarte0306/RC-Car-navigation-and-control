@@ -6,6 +6,15 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/dnn.hpp>
 #include <opencv2/core/cuda.hpp>
+
+#include <vpi/OpenCVInterop.hpp>
+#include <vpi/Image.h>
+#include <vpi/Status.h>
+#include <vpi/Stream.h>
+#include <vpi/algo/ConvertImageFormat.h>
+#include <vpi/algo/Rescale.h>
+#include <vpi/algo/StereoDisparity.h>
+
 #if __has_include(<opencv2/cudaimgcodecs.hpp>)
 #include <opencv2/cudaimgcodecs.hpp>
 #define RCVC_HAVE_CUDAIMGCODECS 1
@@ -34,18 +43,99 @@
 #include <iostream>
 #include <memory>
 
+#include "cudaVision.hpp"
+
+
 #define STREAM_PORT 5005
 
 #define MODEL_PATH  "/opt/rc-car/models/model-small.onnx"
 
+#define CHECK_STATUS(STMT)                                                                  \
+    do                                                                                      \
+    {                                                                                       \
+        VPIStatus status = (STMT);                                                          \
+        if (status != VPI_SUCCESS)                                                          \
+        {                                                                                   \
+            char buffer[VPI_MAX_STATUS_MESSAGE_LENGTH];                                     \
+            vpiGetLastStatusMessage(buffer, sizeof(buffer));                                \
+            std::ostringstream ss;                                                          \
+            ss << "line " << __LINE__ << " " << vpiStatusGetName(status) << ": " << buffer; \
+            throw std::runtime_error(ss.str());                                             \
+        }                                                                                   \
+    } while (0);
 
+    
 const char* StorageLocation = "/data/calibration-data/streaming-profile.json";
 
-static cv::Ptr<cv::cuda::StereoBM> stereoBM = nullptr;
-static cv::cuda::GpuMat d_left, d_right, d_disp;
-static cv::cuda::Stream stream;
+namespace {
+static bool isValidSgmDisparities(int value) {
+    return value == 64 || value == 128 || value == 256;
+}
+
+static constexpr int kHardMaxDisparity = 64;
+static constexpr int kHardWindowSize = 10;
+static constexpr int kPayloadMaxDisparity = 255;
+
+static int clampInt(int value, int lo, int hi) {
+    return std::max(lo, std::min(value, hi));
+}
+
+}
 
 namespace Modules {
+void VisionControls::sanitizeVpiStereoSettings(VisionControls::CameraSettings &s)
+{
+    // Hard-coded for now (must match payload creation params).
+    s.numDisparities = kHardMaxDisparity;
+
+    // VPI CUDA stereo requires minDisparity in [0, maxDisparity].
+    s.minDisparity = clampInt(s.minDisparity, 0, s.numDisparities);
+
+    // VPI CUDA penalty constraints: P1 > 0, P2 >= P1, P2 < 256.
+    // If profile contains legacy OpenCV values (thousands), reset to VPI-friendly defaults.
+    if (s.p1 <= 0 || s.p1 > 255) s.p1 = 3;
+    if (s.p2 <= 0 || s.p2 > 255) s.p2 = 48;
+    s.p1 = clampInt(s.p1, 1, 255);
+    s.p2 = clampInt(s.p2, s.p1, 255);
+
+    // Stored uniquenessRatio is historically [0..30] in this codebase.
+    s.uniquenessRatio = clampInt(s.uniquenessRatio, 0, 30);
+
+    // Runtime VPI stereo params (except windowSize).
+    if (s.maxDisparity != 0 && s.maxDisparity != kPayloadMaxDisparity) {
+        s.maxDisparity = 0;
+    }
+    s.confidenceThreshold = clampInt(s.confidenceThreshold, 0, 65535);
+    s.vpiQuality = clampInt(s.vpiQuality, 1, 8);
+    s.confidenceType = clampInt(s.confidenceType,
+                                static_cast<int>(VPI_STEREO_CONFIDENCE_ABSOLUTE),
+                                static_cast<int>(VPI_STEREO_CONFIDENCE_INFERENCE));
+    if (!(s.p2Alpha == 0 || s.p2Alpha == 1 || s.p2Alpha == 2 || s.p2Alpha == 4 || s.p2Alpha == 8)) {
+        s.p2Alpha = 0;
+    }
+    if (s.uniqueness < 0.0f) {
+        s.uniqueness = -1.0f;
+    } else if (s.uniqueness > 1.0f) {
+        s.uniqueness = 1.0f;
+    }
+    s.numPasses = clampInt(s.numPasses, 1, 3);
+}
+
+VisionControls::~VisionControls()
+{
+    // Best-effort cleanup; VPI destroy functions are NULL-safe.
+    if (m_ImgL)          { vpiImageDestroy(m_ImgL);          m_ImgL          = nullptr; }
+    if (m_ImgR)          { vpiImageDestroy(m_ImgR);          m_ImgR          = nullptr; }
+    if (m_ImgL_8u)       { vpiImageDestroy(m_ImgL_8u);       m_ImgL_8u       = nullptr; }
+    if (m_ImgR_8u)       { vpiImageDestroy(m_ImgR_8u);       m_ImgR_8u       = nullptr; }
+    if (m_ImgL_270p)     { vpiImageDestroy(m_ImgL_270p);     m_ImgL_270p     = nullptr; }
+    if (m_ImgR_270p)     { vpiImageDestroy(m_ImgR_270p);     m_ImgR_270p     = nullptr; }
+    if (m_Disparity)     { vpiImageDestroy(m_Disparity);     m_Disparity     = nullptr; }
+    if (m_ConfidenceMap) { vpiImageDestroy(m_ConfidenceMap); m_ConfidenceMap = nullptr; }
+    if (m_Stereo)        { vpiPayloadDestroy(m_Stereo);      m_Stereo        = nullptr; }
+    if (m_VpiStream)     { vpiStreamDestroy(m_VpiStream);    m_VpiStream     = nullptr; }
+}
+
 VisionControls::VisionControls(int moduleID, std::string name) :
     Base(moduleID, name), Adapter::CameraAdapter(name) {
     Logger* logger = Logger::getLoggerInst();
@@ -138,15 +228,42 @@ int VisionControls::init(void) {
     m_VideoStreamer->setStreamFrameRate(static_cast<Vision::VideoStreamer::FrameRate>(m_CamSettings.frameRate));
     
     m_VideoRecorder.setFrameRate(Vision::VideoRecording::FrameRate::_30Fps);
-    stereoBM = cv::cuda::createStereoBM(m_CamSettings.numDisparities, m_CamSettings.numBlocks);
-    stereoBM->setPreFilterType(m_CamSettings.preFilterType);
-    stereoBM->setPreFilterSize(m_CamSettings.preFilterSize);
-    stereoBM->setPreFilterCap(m_CamSettings.preFilterCap);
-    stereoBM->setTextureThreshold(m_CamSettings.textureThreshold);
-    stereoBM->setUniquenessRatio(m_CamSettings.uniquenessRatio);
-    stereoBM->setSpeckleWindowSize(m_CamSettings.speckleWindowSize);
-    stereoBM->setSpeckleRange(m_CamSettings.speckleRange);
-    stereoBM->setDisp12MaxDiff(m_CamSettings.disp12MaxDiff);
+
+    // Create VPI stream
+    CHECK_STATUS(vpiStreamCreate(0, &m_VpiStream));
+    backend_ = VPI_BACKEND_CUDA;
+
+    // Initialise format-conversion, stereo runtime, and stereo creation params
+    CHECK_STATUS(vpiInitConvertImageFormatParams(&m_ConvParams));
+    CHECK_STATUS(vpiInitStereoDisparityEstimatorParams(&m_StereoParams));
+    CHECK_STATUS(vpiInitStereoDisparityEstimatorCreationParams(&m_CreateParams));
+
+    VisionControls::sanitizeVpiStereoSettings(m_CamSettings);
+
+    // Set creation parameters
+    m_CreateParams.maxDisparity     = 255;
+    m_CreateParams.downscaleFactor  = 1;
+    m_CreateParams.includeDiagonals = 1;
+
+    // Allocate input image buffers in Y16_ER format
+    const VPIImageFormat inputFormat = VPI_IMAGE_FORMAT_Y16_ER;
+    CHECK_STATUS(vpiImageCreate(CAM_WIDTH, CAM_HEIGHT, inputFormat, 0, &m_ImgL_8u));
+    CHECK_STATUS(vpiImageCreate(CAM_WIDTH, CAM_HEIGHT, inputFormat, 0, &m_ImgR_8u));
+    CHECK_STATUS(vpiImageCreate(w_, h_, inputFormat, 0, &m_ImgL_270p));
+    CHECK_STATUS(vpiImageCreate(w_, h_, inputFormat, 0, &m_ImgR_270p));
+
+    // Create stereo disparity estimator + output buffers
+    CHECK_STATUS(vpiCreateStereoDisparityEstimator(backend_, w_, h_, inputFormat, &m_CreateParams, &m_Stereo));
+    CHECK_STATUS(vpiImageCreate(w_, h_, VPI_IMAGE_FORMAT_S16, 0, &m_Disparity));
+    CHECK_STATUS(vpiImageCreate(w_, h_, VPI_IMAGE_FORMAT_U16, 0, &m_ConfidenceMap));
+
+    cv::Mat cvImageLeft (CAM_HEIGHT, CAM_WIDTH, CV_8UC3);
+    cv::Mat cvImageRight(CAM_HEIGHT, CAM_WIDTH, CV_8UC3);
+
+    // Wrap cv::Mat in vpiImage
+    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageLeft, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &m_ImgL));
+    CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageRight, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &m_ImgR));
+
 
     logger->log(Logger::LOG_LVL_INFO, "Vision control module initialized\r\n");
     return 0;
@@ -195,6 +312,22 @@ int VisionControls::saveStreamingProfile(VisionControls::CameraSettings& setting
     profileSettings["speckleWindowSize"] = settings.speckleWindowSize;
     profileSettings["speckleRange"     ] = settings.speckleRange;
     profileSettings["disp12MaxDiff"    ] = settings.disp12MaxDiff;
+    profileSettings["minDisparity"     ] = settings.minDisparity;
+    profileSettings["p1"               ] = settings.p1;
+    profileSettings["p2"               ] = settings.p2;
+    profileSettings["sgmMode"          ] = settings.sgmMode;
+    profileSettings["maxDisparity"       ] = settings.maxDisparity;
+    profileSettings["confidenceThreshold"] = settings.confidenceThreshold;
+    profileSettings["confidenceType"     ] = settings.confidenceType;
+    profileSettings["vpiQuality"         ] = settings.vpiQuality;
+    profileSettings["p2Alpha"            ] = settings.p2Alpha;
+    profileSettings["uniqueness"         ] = settings.uniqueness;
+    profileSettings["numPasses"          ] = settings.numPasses;
+    profileSettings["zMax"               ] = settings.zMax;
+    profileSettings["zMin"               ] = settings.zMin;
+    profileSettings["depthThreshold"     ] = settings.depthThreshold;
+    profileSettings["minAgreeingPixels"  ] = settings.minAgreeingPixels;
+    profileSettings["colorThreshold"     ] = settings.colorThreshold;
 
     std::ofstream out(profilePath, std::ios::out | std::ios::trunc);
     if (!out.is_open()) {
@@ -264,19 +397,30 @@ int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& setting
     if (profileSettings.contains("speckleWindowSize")) settings.speckleWindowSize = profileSettings["speckleWindowSize"].get<int>();
     if (profileSettings.contains("speckleRange")) settings.speckleRange = profileSettings["speckleRange"].get<int>();
     if (profileSettings.contains("disp12MaxDiff")) settings.disp12MaxDiff = profileSettings["disp12MaxDiff"].get<int>();
+    if (profileSettings.contains("minDisparity")) settings.minDisparity = profileSettings["minDisparity"].get<int>();
+    if (profileSettings.contains("p1")) settings.p1 = profileSettings["p1"].get<int>();
+    if (profileSettings.contains("p2")) settings.p2 = profileSettings["p2"].get<int>();
+    if (profileSettings.contains("sgmMode")) settings.sgmMode = profileSettings["sgmMode"].get<int>();
+    if (profileSettings.contains("maxDisparity")) settings.maxDisparity = profileSettings["maxDisparity"].get<int>();
+    if (profileSettings.contains("confidenceThreshold")) settings.confidenceThreshold = profileSettings["confidenceThreshold"].get<int>();
+    if (profileSettings.contains("confidenceType")) settings.confidenceType = profileSettings["confidenceType"].get<int>();
+    if (profileSettings.contains("vpiQuality")) settings.vpiQuality = profileSettings["vpiQuality"].get<int>();
+    if (profileSettings.contains("p2Alpha")) settings.p2Alpha = profileSettings["p2Alpha"].get<int>();
+    if (profileSettings.contains("uniqueness")) settings.uniqueness = profileSettings["uniqueness"].get<float>();
+    if (profileSettings.contains("numPasses")) settings.numPasses = profileSettings["numPasses"].get<int>();
+    if (profileSettings.contains("depthThreshold")) settings.depthThreshold = profileSettings["depthThreshold"].get<float>();
+    if (profileSettings.contains("minAgreeingPixels")) settings.minAgreeingPixels = profileSettings["minAgreeingPixels"].get<int>();
+    if (profileSettings.contains("colorThreshold")) settings.colorThreshold = profileSettings["colorThreshold"].get<float>();
 
-    // Basic sanity
-    if (settings.numDisparities < 8 || (settings.numDisparities % 8) != 0) settings.numDisparities = 96;
-    if (settings.numBlocks < 5 || (settings.numBlocks % 2) == 0) settings.numBlocks = 15;
+    if (profileSettings.contains("zMax")) settings.zMax = profileSettings["zMax"].get<float>();
+    if (profileSettings.contains("zMin")) settings.zMin = profileSettings["zMin"].get<float>();
+
+    // Basic sanity (VPI CUDA stereo constraints).
+    VisionControls::sanitizeVpiStereoSettings(settings);
     if (settings.quality < 1 || settings.quality > 100) settings.quality = 100;
     if (settings.frameRate < 1 || settings.frameRate > 120) settings.frameRate = 30;
     if (settings.preFilterSize < 5 || (settings.preFilterSize % 2) == 0) settings.preFilterSize = 9;
-    if (settings.preFilterCap < 1 || settings.preFilterCap > 63) settings.preFilterCap = 31;
     if (settings.textureThreshold < 0) settings.textureThreshold = 10;
-    if (settings.uniquenessRatio < 0) settings.uniquenessRatio = 15;
-    if (settings.speckleWindowSize < 0) settings.speckleWindowSize = 0;
-    if (settings.speckleRange < 0) settings.speckleRange = 0;
-    if (settings.disp12MaxDiff < 0) settings.disp12MaxDiff = -1;
 
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO,
                                  "Loaded video streaming profile from: %s\n",
@@ -465,138 +609,169 @@ void VisionControls::decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameE
  * 
  * @param stereoFrame Input/output stereo frame pair
  */
-void VisionControls::processStereo(cv::Mat& stereoFrame, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q) {
-    using namespace std;
-    using namespace cv;
-    using namespace dnn;
-
+void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q) {
     cv::Mat& frameL = stereoFramePair.first;
     cv::Mat& frameR = stereoFramePair.second;
 
-    // Build grayscale inputs robustly (StereoCam frames can be BGRA).
-    cv::Mat grayL, grayR;
-    if (frameL.channels() == 1) {
-        grayL = frameL;
-    } else if (frameL.channels() == 4) {
-        cv::cvtColor(frameL, grayL, cv::COLOR_BGRA2GRAY);
-    } else {
-        cv::cvtColor(frameL, grayL, cv::COLOR_BGR2GRAY);
-    }
+    static double sx = static_cast<double>(w_) / static_cast<double>(CAM_WIDTH);
+    static double sy = static_cast<double>(h_) / static_cast<double>(CAM_HEIGHT);
 
-    if (frameR.channels() == 1) {
-        grayR = frameR;
-    } else if (frameR.channels() == 4) {
-        cv::cvtColor(frameR, grayR, cv::COLOR_BGRA2GRAY);
-    } else {
-        cv::cvtColor(frameR, grayR, cv::COLOR_BGR2GRAY);
-    }
+    int ret = -1;
+    cv::Mat cvImageLeft, cvImageRight;
+    cv::Mat cvDisparity, cvDisparityu8, cvDisparityf32, cvDisparityColor, cvPointCloudMat;
 
-    // Apply calibration before disparity: undistort + rectify into rectified grayscale frames.
-    cv::Mat rectL, rectR;
-    m_VideoCalib.rectify(grayL, grayR, rectL, rectR);
+    cv::cuda::Stream stream;
+    cv::cuda::GpuMat d_disp32f, d_xyz;
+    cv::Mat zMap(h_, w_, CV_32FC(6));
+    cv::Mat zMapSmooth(h_, w_, CV_32FC(6));
 
-    cv::Mat disparity;
-    // cv::cuda::* algorithms require cuda::GpuMat/HostMem. Passing cv::Mat triggers
-    // InputArray::getGpuMat() and throws "getGpuMat is available only for cuda::GpuMat".
-    d_left.upload(rectL, stream);
-    d_right.upload(rectR, stream);
-    std::lock_guard<std::mutex> guard(m_StereoMutex);
-
-    try {
-        stereoBM->compute(d_left, d_right, d_disp, stream);
-    } catch (cv::Exception& e) {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Stereo conversion failed: %s\n", e.what());
-        m_CamSettings.numDisparities = 96;
-        stereoBM.reset();
-        stereoBM = cv::cuda::createStereoBM(m_CamSettings.numDisparities, m_CamSettings.numBlocks);
-    }
-
-    d_disp.download(disparity, stream);
-    stream.waitForCompletion();
-
-    if (disparity.empty()) {
-        stereoFrame.release();
-        return;
-    }
-
-    // Send raw disparity as 16-bit single-channel PNG-friendly format.
-    // StereoBM outputs fixed-point disparity (typically scaled by 16) and may be signed.
-    if (disparity.type() == CV_16U) {
-        stereoFrame = disparity;
-        return;
-    }
-
-    cv::Mat disp16s;
-    int type = disparity.type();
-    if (type == CV_16S) {
-        disp16s = disparity;
-    } else {
-        disparity.convertTo(disp16s, CV_16S);
-    }
-
-    cv::Mat dispClamped16s;
-    cv::max(disp16s, 0, dispClamped16s);
-
-    cv::Mat disp16u;
-    dispClamped16s.convertTo(disp16u, CV_16U);
-
-    stereoFrame = disp16u;
-
-    // Read the reprojection matrix
     Q = m_VideoCalib.reprojectionQ();
-}
 
+    // Scale Q Matrix
+    Q(0, 3) *= sx;
+    Q(1, 3) *= sy;
+    Q(2, 3) *= sx;
+    Q(3, 3) *= sx;    
 
-/**
- * @brief Process disparity frame into point cloud
- * 
- * @param dispFrame 
- */
-void VisionControls::doPointCloud(cv::Mat& dispFrame, cv::Mat& pointCloudMat, cv::Matx44d& Q) {
-    // Q is the reprojection matrix
-    cv::Mat Q64(Q);   // CV_64F 4x4
-    cv::Mat Q32;
-    Q64.convertTo(Q32, CV_32F);
+    cv::Mat grayL, grayR;
+    if (frameL.channels() == 1)      grayL = frameL;
+    else if (frameL.channels() == 4) cv::cvtColor(frameL, grayL, cv::COLOR_BGRA2GRAY);
+    else                             cv::cvtColor(frameL, grayL, cv::COLOR_BGR2GRAY);
 
-    cv::Mat disp32f;
-    dispFrame.convertTo(disp32f, CV_32F, 1.0 / 16.0);
+    if (frameR.channels() == 1)      grayR = frameR;
+    else if (frameR.channels() == 4) cv::cvtColor(frameR, grayR, cv::COLOR_BGRA2GRAY);
+    else                             cv::cvtColor(frameR, grayR, cv::COLOR_BGR2GRAY);
 
-    cv::cuda::GpuMat d_disparity, d_3dImage;
-    d_disparity.upload(disp32f);
-    cv::cuda::reprojectImageTo3D(d_disparity, d_3dImage, Q32, 3, stream);
-    d_3dImage.download(pointCloudMat);
-    stream.waitForCompletion();
-    
-    // Convert floating point to uint16_t    
-    int x = pointCloudMat.cols / 2;
-    int y = pointCloudMat.rows / 2;
-    cv::Vec3f xyz = pointCloudMat.at<cv::Vec3f>(y, x);
-    float Z = xyz[2]; // meters (if your calibration square size was meters)
-}
-
-
-/**
- * @brief Process a frame (placeholder for future processing)
- * 
- * @param frame Input/output frame
- */
-void VisionControls::processFrame(cv::Mat& frame) {
-    using namespace std;
-    using namespace cv;
-    using namespace dnn;
-
-    switch (m_CamSettings.mode) {
-        case VisionControls::CamModeNormal:
-            /* code */
-            break;
-
-        case VisionControls::CamModeDisparity:
-            
-            break;
-
-        default:
-            break;
+    if (frameL.channels() == 4) {
+        cv::cvtColor(frameL, cvImageLeft, cv::COLOR_BGRA2BGR);
+    } else {
+        cvImageLeft = frameL;
     }
+    if (frameR.channels() == 4) {
+        cv::cvtColor(frameR, cvImageRight, cv::COLOR_BGRA2BGR);
+    } else {
+        cvImageRight = frameR;
+    }
+
+    // rectify 
+    cv::Mat rectLBuff, rectRBuff;
+    cv::Mat rectL, rectR;
+    m_VideoCalib.rectify(cvImageLeft, cvImageRight, rectL, rectR);
+
+    vpiImageSetWrappedOpenCVMat(m_ImgL, rectL);
+    vpiImageSetWrappedOpenCVMat(m_ImgR, rectR);
+
+    // Convert to uint8
+    CHECK_STATUS(vpiSubmitConvertImageFormat(m_VpiStream, VPI_BACKEND_CUDA, m_ImgL, m_ImgL_8u, &m_ConvParams));
+    CHECK_STATUS(vpiSubmitConvertImageFormat(m_VpiStream, VPI_BACKEND_CUDA, m_ImgR, m_ImgR_8u, &m_ConvParams));
+
+    // Rescale
+    CHECK_STATUS(vpiSubmitRescale(m_VpiStream, VPI_BACKEND_CUDA, m_ImgL_8u, m_ImgL_270p, VPI_INTERP_LINEAR, VPI_BORDER_ZERO, 0));
+    CHECK_STATUS(vpiSubmitRescale(m_VpiStream, VPI_BACKEND_CUDA, m_ImgR_8u, m_ImgR_270p, VPI_INTERP_LINEAR, VPI_BORDER_ZERO, 0));
+
+    // Disparity
+    {
+        std::lock_guard<std::mutex> guard(m_StereoMutex);
+        sanitizeVpiStereoSettings(m_CamSettings);
+
+        m_StereoParams.maxDisparity = m_CamSettings.maxDisparity;
+        // m_StereoParams.confidenceThreshold = m_CamSettings.confidenceThreshold;
+        // m_StereoParams.quality = m_CamSettings.vpiQuality;
+        // m_StereoParams.confidenceType = static_cast<VPIStereoDisparityConfidenceType>(m_CamSettings.confidenceType);
+        // m_StereoParams.minDisparity = m_CamSettings.minDisparity;
+        m_StereoParams.confidenceThreshold = m_CamSettings.confidenceThreshold;
+        m_StereoParams.p1 = m_CamSettings.p1;
+        m_StereoParams.p2 = m_CamSettings.p2;
+        // m_StereoParams.p2Alpha = m_CamSettings.p2Alpha;
+        // m_StereoParams.uniqueness = m_CamSettings.uniqueness;
+        // m_StereoParams.numPasses = static_cast<int8_t>(m_CamSettings.numPasses);
+    }
+    CHECK_STATUS(vpiSubmitStereoDisparityEstimator(m_VpiStream, VPI_BACKEND_CUDA, m_Stereo, m_ImgL_270p, m_ImgR_270p, m_Disparity, m_ConfidenceMap, &m_StereoParams));
+
+    // Sync
+    CHECK_STATUS(vpiStreamSync(m_VpiStream));
+
+    // Lock disparity
+    VPIImageData data;
+    CHECK_STATUS(vpiImageLockData(m_Disparity, VPI_LOCK_READ, VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR, &data));
+
+    // vpi image -> cv::Mat
+    CHECK_STATUS(vpiImageDataExportOpenCVMat(data, &cvDisparity));
+
+    // Q10.5 -> float
+    cvDisparity.convertTo(cvDisparityu8, CV_8UC1, 255.0 / (32 * m_CreateParams.maxDisparity), 0);
+    applyColorMap(cvDisparityu8, cvDisparityColor, cv::COLORMAP_JET);
+
+    disparityFrame = cvDisparityColor;
+
+    // Convert disparity to float mat
+    cvDisparity.convertTo(cvDisparityf32, CV_32F, 1.0 / (32.0), 0);
+
+    // Unlock disparity BEFORE any further VPI/CUDA work on m_Disparity
+    CHECK_STATUS(vpiImageUnlock(m_Disparity));
+
+    cv::Mat Q32;
+    cv::Mat(Q).convertTo(Q32, CV_32F);
+
+    // Convert to 3d_disp32f, d_xyz;
+    // Allocate output with 3 channels
+    d_disp32f.upload(cvDisparityf32, stream);
+
+    d_xyz.create(d_disp32f.size(), CV_32FC3);
+    cv::cuda::reprojectImageTo3D(d_disp32f, d_xyz, Q32, 3, stream);
+    d_xyz.download(cvPointCloudMat, stream);
+    stream.waitForCompletion();  // Sync
+
+    {
+        std::vector<cv::Mat> channels(3);
+        cv::split(cvPointCloudMat, channels);
+        cv::Mat X = channels[0], Y = channels[1], Z = channels[2];
+
+        // Finite check (NaN != NaN)
+        cv::Mat finite_mask = (X == X) & (Y == Y) & (Z == Z);
+
+        // Filter out Inf
+        cv::Mat abs_x, abs_y, abs_z;
+        cv::absdiff(X, cv::Scalar(0), abs_x);
+        cv::absdiff(Y, cv::Scalar(0), abs_y);
+        cv::absdiff(Z, cv::Scalar(0), abs_z);
+        finite_mask &= (abs_x < 1e10f) & (abs_y < 1e10f) & (abs_z < 1e10f);
+
+        // Range filter
+        cv::Mat pc_mask = finite_mask
+            & (Z > m_CamSettings.zMin)
+            & (Z < m_CamSettings.zMax)
+            & (abs_x < 12.0f)
+            & (abs_y < 8.0f);
+
+        // Apply mask — zero out invalid points
+        cv::Mat filtered = cv::Mat::zeros(cvPointCloudMat.size(), cvPointCloudMat.type());
+        cvPointCloudMat.copyTo(filtered, pc_mask);
+
+        // Fallback
+        if (cv::countNonZero(pc_mask) == 0) {
+            cvPointCloudMat.copyTo(filtered, finite_mask);
+        }
+
+        cvPointCloudMat = filtered;
+    }
+
+    // Resize the left colour image to match the point-cloud resolution
+    cv::Mat colorResized;
+    cv::resize(rectL, colorResized, cv::Size(w_, h_));
+
+    // Fill in the XYZ coordinates and color
+    ret = cuda::pointCloudToColor(cvPointCloudMat, colorResized, zMap);
+    if (ret < 0) {
+        printf("Failed convert point cloud\n");
+    }
+
+    ret = cuda::smoothPointCloud(zMap, zMapSmooth, m_CamSettings.depthThreshold, m_CamSettings.minAgreeingPixels, m_CamSettings.colorThreshold);
+    if (ret < 0) {
+        printf("Failed to smooth pointcloud\n");
+    }
+
+    pointCloudMat = zMapSmooth;
 }
 
 
@@ -616,7 +791,46 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
 
     std::vector<char> responseBuffer;
     Logger* logger = Logger::getLoggerInst();
-    logger->log(Logger::LOG_LVL_INFO, "VisionControls received command: %d\n", cmd->command);
+    auto cmdToString = [](uint8_t c) -> const char* {
+        switch (c) {
+            case VisionControls::CmdStartStream:            return "CmdStartStream";
+            case VisionControls::CmdStopStream:             return "CmdStopStream";
+            case VisionControls::CmdSelCameraStream:        return "CmdSelCameraStream";
+            case VisionControls::CmdSetFps:                 return "CmdSetFps";
+            case VisionControls::CmdSetQuality:             return "CmdSetQuality";
+            case VisionControls::CmdSetUniquenessRatio:     return "CmdSetUniquenessRatio";
+            case VisionControls::CmdSetMinDisparities:      return "CmdSetMinDisparities";
+            case VisionControls::CmdSetMaxDisparities:      return "CmdSetMaxDisparities";
+            case VisionControls::CmdSetConfidenceThreshold: return "CmdSetConfidenceThreshold";
+            case VisionControls::CmdSetP1:                  return "CmdSetP1";
+            case VisionControls::CmdSetP2:                  return "CmdSetP2";
+            case VisionControls::CmdSetZMax:                return "CmdSetZMax";
+            case VisionControls::CmdSetZMin:                return "CmdSetZMin";
+            case VisionControls::CmdSetDepthThreshold:      return "CmdSetDepthThreshold";
+            case VisionControls::CmdSetMinAgreeingPixels:   return "CmdSetMinAgreeingPixels";
+            case VisionControls::CmdSetColorThreshold:      return "CmdSetColorThreshold";
+            case VisionControls::CmdRdParams:               return "CmdRdParams";
+            case VisionControls::CmdClrVideoRec:            return "CmdClrVideoRec";
+            case VisionControls::CmdSaveVideo:              return "CmdSaveVideo";
+            case VisionControls::CmdLoadStoredVideos:       return "CmdLoadStoredVideos";
+            case VisionControls::CmdLoadSelectedVideo:      return "CmdLoadSelectedVideo";
+            case VisionControls::CmdDeleteVideo:            return "CmdDeleteVideo";
+            case VisionControls::CmdCalibrationSetState:    return "CmdCalibrationSetState";
+            case VisionControls::CmdCalibrationWrtParams:   return "CmdCalibrationWrtParams";
+            case VisionControls::CmdCalibrationReset:       return "CmdCalibrationReset";
+            case VisionControls::CmdCalibrationSave:        return "CmdCalibrationSave";
+            default: return "CmdUnknown";
+        }
+    };
+    logger->log(Logger::LOG_LVL_INFO,
+                "VisionControls received command: %s (%u), value[i32]=%.3f value[i32]=%d, value[u16]=%u, value[u8]=%u, payloadLen=%u\n",
+                cmdToString(cmd->command),
+                cmd->command,
+                cmd->data.f32,
+                cmd->data.i32,
+                cmd->data.u16,
+                cmd->data.u8,
+                cmd->payloadLen);
 
     switch (cmd->command) 
     {
@@ -678,25 +892,31 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
 
         case VisionControls::CmdRdParams: {
             nlohmann::json jsonResponse;
-            jsonResponse["quality"]     = m_VideoStreamer->getQuality();
-            jsonResponse["fps"]         = m_VideoStreamer->getFrameRate();
-            jsonResponse["disparities"] = m_CamSettings.numDisparities;
-            jsonResponse["blocks"]      = m_CamSettings.numBlocks;
-            jsonResponse["preFilterType"]    = m_CamSettings.preFilterType;
-            jsonResponse["preFilterSize"]    = m_CamSettings.preFilterSize;
-            jsonResponse["preFilterCap"]     = m_CamSettings.preFilterCap;
-            jsonResponse["textureThreshold"] = m_CamSettings.textureThreshold;
-            jsonResponse["uniquenessRatio"]  = m_CamSettings.uniquenessRatio;
-            jsonResponse["speckleWindowSize"]= m_CamSettings.speckleWindowSize;
-            jsonResponse["speckleRange"]     = m_CamSettings.speckleRange;
-            jsonResponse["disp12MaxDiff"]    = m_CamSettings.disp12MaxDiff;
+            jsonResponse["quality"]             = m_VideoStreamer->getQuality();
+            jsonResponse["fps"]                 = m_VideoStreamer->getFrameRate();
+            jsonResponse["uniquenessRatio"]     = m_CamSettings.uniquenessRatio;
+            jsonResponse["minDisparity"]        = m_CamSettings.minDisparity;
+            jsonResponse["p1"]                  = m_CamSettings.p1;
+            jsonResponse["p2"]                  = m_CamSettings.p2;
+            jsonResponse["maxDisparity"]        = m_CamSettings.maxDisparity;
+            jsonResponse["confidenceThreshold"] = m_CamSettings.confidenceThreshold;
+            jsonResponse["confidenceType"]      = m_CamSettings.confidenceType;
+            jsonResponse["vpiQuality"]          = m_CamSettings.vpiQuality;
+            jsonResponse["p2Alpha"]             = m_CamSettings.p2Alpha;
+            jsonResponse["uniqueness"]          = m_CamSettings.uniqueness;
+            jsonResponse["numPasses"]           = m_CamSettings.numPasses;
+            jsonResponse["zMax"]                = m_CamSettings.zMax;
+            jsonResponse["zMin"]                = m_CamSettings.zMin;
+            jsonResponse["depthThreshold"]      = m_CamSettings.depthThreshold;
+            jsonResponse["minAgreeingPixels"]   = m_CamSettings.minAgreeingPixels;
+            jsonResponse["colorThreshold"]      = m_CamSettings.colorThreshold;
             responseBuffer.resize(jsonResponse.dump().size());
             std::strncpy(responseBuffer.data(), jsonResponse.dump().c_str(), jsonResponse.dump().size());
             break;;
         }
 
         case VisionControls::CmdSetQuality: {
-            int ret = m_VideoStreamer->setJpegQuality(cmd->data.u8);
+            int ret = m_VideoStreamer->setJpegQuality(cmd->data.i32);
             if (ret < 0) {
                 logger->log(Logger::LOG_LVL_ERROR, "Failed to set quality: %d\n", cmd->data.u8);
             }
@@ -707,94 +927,93 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             break;
         }
 
-        case VisionControls::CmdSetNumDisparities: {
-            uint8_t numDisparities = cmd->data.u8;
-
-            if (numDisparities < 8 || (numDisparities % 8) != 0) {
-                logger->log(Logger::LOG_LVL_ERROR,
-                            "Invalid disparity value %u (must be >= 8 and divisible by 8)\n",
-                            numDisparities);
-                return -1;
-            }
-
+        case VisionControls::CmdSetMinDisparities: {
             std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM->setNumDisparities(numDisparities);
-            m_CamSettings.numDisparities = numDisparities;
-            logger->log(Logger::LOG_LVL_INFO, "Setting number of disparities to %u\n", numDisparities);
+            m_CamSettings.minDisparity = clampInt(cmd->data.i32, 0, m_CamSettings.numDisparities);
+            sanitizeVpiStereoSettings(m_CamSettings);
             VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
 
-        case VisionControls::CmdSetBlockSize: {
-            const uint8_t blockSize = cmd->data.u8;
-            if (blockSize < 5 || (blockSize % 2) == 0) {
-                logger->log(Logger::LOG_LVL_ERROR,
-                            "Invalid block size %u (must be odd and >= 5)\n",
-                            blockSize);
-                return -1;
-            }
-
+        case VisionControls::CmdSetMaxDisparities: {
             std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM->setBlockSize(blockSize);
-            m_CamSettings.numBlocks = blockSize;
-            logger->log(Logger::LOG_LVL_INFO, "Setting block size to %u\n", blockSize);
+            m_CamSettings.maxDisparity = clampInt(cmd->data.i32, 0, m_CamSettings.numDisparities);
+            sanitizeVpiStereoSettings(m_CamSettings);
             VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
 
-        case VisionControls::CmdSetPreFilterType: {
+        case VisionControls::CmdSetConfidenceThreshold: {
             std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM->setPreFilterType(cmd->data.u8);
-            m_CamSettings.preFilterType = cmd->data.u8;
+            m_CamSettings.confidenceThreshold = clampInt(cmd->data.u32, 0, 65535);
+            VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
 
-        case VisionControls::CmdSetPreFilterSize: {
+        case VisionControls::CmdSetP1: {
             std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM->setPreFilterSize(cmd->data.u8);
-            m_CamSettings.preFilterSize = cmd->data.u8;
+            m_CamSettings.p1 = clampInt(cmd->data.i32, 1, 255);
+            if (m_CamSettings.p2 < m_CamSettings.p1) m_CamSettings.p2 = m_CamSettings.p1;
+            VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
 
-        case VisionControls::CmdSetPreFilterCap: {
+        case VisionControls::CmdSetP2: {
             std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM->setPreFilterCap(cmd->data.u8);
-            m_CamSettings.preFilterCap= cmd->data.u8;
+            m_CamSettings.p2 = clampInt(cmd->data.i32, 1, 255);
+            if (m_CamSettings.p2 < m_CamSettings.p1) m_CamSettings.p2 = m_CamSettings.p1;
+            VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
 
-        case VisionControls::CmdSetTextureThreshold: {
+        case VisionControls::CmdSetZMax: {
             std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM->setTextureThreshold(cmd->data.u16);
-            m_CamSettings.textureThreshold = cmd->data.u16;
+            float setting = cmd->data.f32; 
+            if (setting < m_CamSettings.zMin) {
+                setting = m_CamSettings.zMax;
+            }
+            m_CamSettings.zMax = cmd->data.f32;
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+
+        case VisionControls::CmdSetZMin: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            float setting = cmd->data.f32; 
+            if (setting > m_CamSettings.zMax) {
+                setting = m_CamSettings.zMax;
+            }
+            m_CamSettings.zMin = cmd->data.f32;
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+
+        case VisionControls::CmdSetDepthThreshold: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            m_CamSettings.depthThreshold = cmd->data.f32;
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+        
+        case VisionControls::CmdSetMinAgreeingPixels: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            m_CamSettings.minAgreeingPixels = cmd->data.i32;
+            VisionControls::saveStreamingProfile(m_CamSettings);
+            break;
+        }
+
+        case VisionControls::CmdSetColorThreshold: {
+            std::lock_guard<std::mutex> guard(m_StereoMutex);
+            m_CamSettings.colorThreshold = cmd->data.f32;
+            VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
 
         case VisionControls::CmdSetUniquenessRatio: {
             std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM->setUniquenessRatio(cmd->data.u8);
-            m_CamSettings.uniquenessRatio = cmd->data.u8;
-            break;
-        }
-
-        case VisionControls::CmdSetSpeckleWindowSize: {
-            std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM->setSpeckleWindowSize(cmd->data.u8);
-            m_CamSettings.speckleWindowSize = cmd->data.u8;
-            break;
-        }
-        
-        case VisionControls::CmdSetSpeckleRange: {
-            std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM->setSpeckleRange(cmd->data.u8);
-            m_CamSettings.speckleRange = cmd->data.u8;
-            break;
-        }
-
-        case VisionControls::CmdSetDisp12MaxDiff: {
-            std::lock_guard<std::mutex> guard(m_StereoMutex);
-            stereoBM->setDisp12MaxDiff(cmd->data.u8);
-            m_CamSettings.disp12MaxDiff = cmd->data.u8;
+            m_CamSettings.uniquenessRatio = clampInt(cmd->data.i32, 0, 30);
+            m_CamSettings.uniqueness = static_cast<float>(m_CamSettings.uniquenessRatio) / 100.0f;
+            VisionControls::saveStreamingProfile(m_CamSettings);
             break;
         }
 
@@ -821,7 +1040,7 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
             break;
         }
 
-        case VisionControls::CmdReadStoredVideos: {
+        case VisionControls::CmdLoadStoredVideos: {
             logger->log(Logger::LOG_LVL_INFO, "Loading stored videos from disk\n");
             std::vector<std::string> videoFiles = m_VideoRecorder.listRecordedFiles();
             std::stringstream ss;
@@ -918,6 +1137,16 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
 }
 
 
+std::string VisionControls::readStats() {
+    std::stringstream ss;
+
+    ss << "Camera stats: " << "\r\n" << m_VideoCalib.getCurrentCalibrationStats().dump(4) << "\r\n"
+         << "Video stream stats: " << "\r\n" << m_Cam->getTimestampDiffNs() << " nanoseconds" << "\r\n";
+    
+    return ss.str();
+}
+
+
 /**
  * @brief Thread timer handler
  * 
@@ -954,6 +1183,8 @@ void VisionControls::mainProc() {
     int16_t xAccel, yAccel, zAccel;
     int16_t xGyro, yGyro, zGyro;
     cv::Matx44d Q;
+    
+    cv::Mat frameOut;
 
     auto scaleRectMat = [this, _resizeWidth, _resizeHeight](cv::Mat& frame, cv::Mat& resizedFrame, cv::Matx44d& Q) -> void {
         if (frame.empty()) {
@@ -977,7 +1208,7 @@ void VisionControls::mainProc() {
         cv::resize(frame, resizedFrame, cv::Size(dstW, dstH), 0.0, 0.0, interp);
 
         // If we're resizing an already-computed disparity map, disparity must scale with x-resolution.
-        // StereoBM outputs fixed-point disparity (d*16).
+        // m_stereoBM outputs fixed-point disparity (d*16).
         if ((frame.type() == CV_16U || frame.type() == CV_16S) && resizedFrame.type() == frame.type()) {
             cv::Mat scaled;
             resizedFrame.convertTo(scaled, CV_32F);
@@ -993,6 +1224,9 @@ void VisionControls::mainProc() {
         Q(3, 3) *= sx;
     };
 
+    // Initialise reprojection matrix
+    Q = m_VideoCalib.reprojectionQ();
+
     while (m_Running.load()) {
         switch(m_CamSettings.streamSelection.load()) {
             case VisionControls::StreamCameraSource:
@@ -1004,16 +1238,18 @@ void VisionControls::mainProc() {
                 stereoFramePair = std::make_pair(frameL, frameR);
                 if (m_CamSettings.calibrationMode.load()) {
                     m_VideoCalib.DoCalibration(frameL, frameR);
-                    m_VideoStreamer->pushFrame(stereoFramePair);
+
+                    if (!frameL.empty() && !frameR.empty()) {
+                        cv::hconcat(frameL, frameR, frameOut);
+                        // Change to grayscale
+                        auto Q = m_VideoCalib.reprojectionQ();
+                        m_VideoStreamer->pushFrame(frameOut, Q);
+                    }
                 } else {
-                    cv::Mat frameOut;
                     cv::Mat pointCloud;
 
                     // Extract the disparity frame
-                    processStereo(frameStereo, stereoFramePair, Q);
-
-                    // Convert to point cloud for local processing
-                    doPointCloud(frameStereo, pointCloud, Q);                    
+                    processStereo(frameStereo, pointCloud, stereoFramePair, Q);             
 
                     // Select the frame base on the ethernet link status
                     if (m_EthAdapter->ethLinkDetected.load()) {
@@ -1038,7 +1274,6 @@ void VisionControls::mainProc() {
                     continue;
                 }
                 frameSim = simFrame;
-                processFrame(frameSim);
                 m_VideoStreamer->pushFrame(frameSim);
                 break;
             }
