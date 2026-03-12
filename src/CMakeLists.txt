@@ -35,6 +35,8 @@ set(SOURCE
     Devices/Pwm.hpp
     Devices/network_interface/UdpServer.cpp
     Devices/network_interface/UdpServer.hpp
+    Devices/network_interface/TcpServer.hpp
+    Devices/network_interface/TcpServer.cpp
     Devices/RegisterMap.hpp
     Devices/RegisterMap.cpp
     Devices/GyroScope.cpp

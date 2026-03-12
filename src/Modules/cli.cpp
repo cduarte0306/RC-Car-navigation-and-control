@@ -38,11 +38,6 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
         throw("Failed to open TTY interface");
     }
 
-    this->writeIface("\033[2J\033[H");
-    this->writeIface("\r\n*************************RC Car CLI Interface*************************\r\n");
-    this->writeIface("Software version: %u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
-    this->writeIface("Please enter \"help\" to list available commands\r\n");
-
     const CliCommandBinding cmdBindings[] = {
         (CliCommandBinding){
             "read-psoc",
@@ -262,6 +257,13 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
 AppCLI::~AppCLI() {
 }
 
+int AppCLI::init(void) {
+    m_CliAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::TcpAdapterType, CLI_PORT, 0, "lo", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_CliAdapter->setParent(this->getName());
+
+    return 0;
+}
+
 int AppCLI::stop(void) {
     // Stop main loop and close TTY
     if (fd >= 0) {
@@ -279,16 +281,31 @@ void AppCLI::mainProc() {
     embeddedCliReceiveChar(this->CLI, '\n');
     embeddedCliProcess(this->CLI);
 
+    this->writeIface("\033[2J\033[H");
+    this->writeIface("\r\n*************************RC Car CLI Interface*************************\r\n");
+    this->writeIface("Software version: %u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
+    this->writeIface("Please enter \"help\" to list available commands\r\n");
+
+    this->CommsAdapter->startReceive(
+        *m_CliAdapter,
+        [this](std::vector<char>& data) {
+            std::lock_guard<std::mutex> lock(this->mutex);
+            std::copy(data.begin(), data.end(), std::back_inserter(this->cmdBuffer));
+
+            // Submit all characters to the CLI
+            {
+                std::lock_guard<std::mutex> lock(this->mutex);
+                for (char c : this->cmdBuffer) {
+                    embeddedCliReceiveChar(this->CLI, c);
+                }
+                this->cmdBuffer.clear();
+            }
+            embeddedCliProcess(this->CLI);  
+        }, false
+    );
+
     while (true) {
-        int ret = read(this->fd, buffer, sizeof(buffer));
-        if (ret < 0) {
-            std::cerr << "Error reading from TTY" << std::endl;
-            continue;
-        }
-        for (int i = 0; i < ret; ++i) {
-            embeddedCliReceiveChar(this->CLI, buffer[i]);
-        }
-        embeddedCliProcess(this->CLI);
+        
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
@@ -351,11 +368,10 @@ int AppCLI::writeIface(const char* format, ...) {
         std::cerr << "Error formatting string" << std::endl;
         return -1;
     }
-    int ret = write(this->fd, buffer, len);
-    if (ret < 0) {
-        std::cerr << "Error writing to TTY" << std::endl;
-        return -1;
-    }
+
+    // Write over ethernet
+    std::vector<uint8_t> data(buffer, buffer + len);
+    int ret = m_CliAdapter->send(data.data(), data.size());
     return ret;
 }
 }

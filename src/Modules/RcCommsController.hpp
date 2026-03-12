@@ -6,6 +6,7 @@
 #include "RcBase.hpp"
 
 #include "Devices/network_interface/UdpServer.hpp"
+#include "Devices/network_interface/TcpServer.hpp"
 
 using namespace std;
 using namespace Adapter;
@@ -39,7 +40,10 @@ public:
     virtual void mainProc();
 
     // Opens network adapters
-    virtual int configureAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
+    virtual int configureUDPAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
+
+    // Opens TCP network adapters
+    virtual int configureTCPAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
 
     // Override startReceive_ to route incoming data via UDP
     virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true) override;
@@ -72,7 +76,7 @@ protected:
         double txRate;
         double rxRate;
         std::string moduleName;
-        std::unique_ptr<Network::UdpServer> socket;
+        std::unique_ptr<Network::Sockets> socket;
         Adapter::CommsAdapter::NetworkAdapter* netAdapter = nullptr;
     };
 
@@ -83,10 +87,10 @@ protected:
     constexpr static uint32_t WlanHandshakePort = 8193;
     
     // Map of UDP sockets by adapter ID
-    std::unordered_map<int, NetStats> m_UdpSockets;
+    std::unordered_map<int, NetStats> m_OpenedSockets;
 
     // Map of adapter name to non-owning socket pointers
-    std::unordered_map<std::string, Network::UdpServer*> m_AdapterMap;
+    std::unordered_map<std::string, Network::Sockets*> m_AdapterMap;
 
     // Ethernet adapter known host
     std::string m_EthHostIP;  // Ethernet known host
@@ -95,7 +99,7 @@ protected:
     std::string m_WlanHostIP; // WLAN known host
 
     // Non-owning pointer to the primary socket (first configured adapter)
-    Network::UdpServer* m_UdpSocket{nullptr};
+    Network::Sockets* m_UdpSocket{nullptr};
 
     // WLAN socket for handshaking
     std::shared_ptr<Network::UdpServer> m_WlanSocket{nullptr};

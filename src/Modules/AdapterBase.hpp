@@ -287,10 +287,16 @@ namespace Adapter {
             MaxUDPPacketSize = 65507
         };
 
+        enum {
+            UdpAdapterType = 1,
+            TcpAdapterType = 2
+        };
+
         struct NetworkAdapter {
             NetworkAdapter(const std::string& adapter_,  int sPort_, int dPort_, size_t bufferSize_=2048) : adapter(adapter_), sPort(sPort_), dPort(dPort_), bufferSize(bufferSize_) {}
             ~NetworkAdapter() {}
             std::function<int(std::string, const uint8_t*, size_t)> sendCallback = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallbackTcp = nullptr;
             std::function<void(void)> OnEthDetected = nullptr;
             std::function<std::string()> hostResolver = nullptr;
             int id = -1;
@@ -306,9 +312,16 @@ namespace Adapter {
             bool broadcast = false;
             int adapterType = -1;
 
-            int send(const uint8_t* data, size_t length, std::string destIp="") {
+            int send(const uint8_t* data, size_t length, std::string destIp) {
                 if (sendCallback) {
                     return sendCallback(destIp, data, length);
+                }
+                return -1;
+            }
+
+            int send(const uint8_t* data, size_t length) {
+                if (sendCallbackTcp) {
+                    return sendCallbackTcp(data, length);
                 }
                 return -1;
             }
@@ -384,8 +397,13 @@ namespace Adapter {
             return 0;
         }
 
-        virtual std::unique_ptr<NetworkAdapter> createNetworkAdapter(const std::string& callerName, int sPort, int dPort, std::string adapter, size_t bufferSize=2048, bool broadcast=false) {
-            return openAdapterCommand(callerName, sPort, dPort, adapter, bufferSize, broadcast);  // Pass the calling module's name to the sink adapter's openAdapter
+        virtual std::unique_ptr<NetworkAdapter> createNetworkAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, std::string adapter, size_t bufferSize=2048, bool broadcast=false) {
+            if (type == UdpAdapterType) {
+                return openAdapterCommand(callerName, sPort, dPort, adapter, bufferSize, broadcast);
+            } else if (type == TcpAdapterType) {
+                return openTcpAdapterCommand(callerName, sPort, dPort, adapter, bufferSize, broadcast);
+            }
+            return nullptr;
         }
 
         /**
@@ -413,6 +431,8 @@ namespace Adapter {
         // callable to request data transmit; now includes caller identity
         std::function<int(const uint8_t*, size_t)                                                       > transmitDataCommand   = nullptr;
         std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, const std::string&, size_t, bool)> openAdapterCommand    = nullptr;
+        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, const std::string&, size_t, bool)> openTcpAdapterCommand = nullptr;
+
         std::function<int (const char* pbuf, size_t len)                                                > recvDataCallback      = nullptr;
         std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)> dataReceivedCommand = nullptr;
         std::function<std::string(NetworkAdapter& adapter)> hostIPQueryCommand = nullptr;
@@ -449,6 +469,10 @@ namespace Adapter {
             };
 
             this->openAdapterCommand = [adapter](const std::string& parent, int sPort, int dPort, const std::string& adpName, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
+                return adapter->openAdapter_(parent, sPort, dPort, adpName, bufferSize, broadcast);
+            };
+
+            this->openTcpAdapterCommand = [adapter](const std::string& parent, int sPort, int dPort, const std::string& adpName, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
                 return adapter->openAdapter_(parent, sPort, dPort, adpName, bufferSize, broadcast);
             };
             
@@ -535,12 +559,29 @@ namespace Adapter {
             netAdapter->broadcast = broadcast;
 
             // Configure the adapter on the derived comms driver
-            const int cfgStatus = configureAdapter(*netAdapter, netAdapter->id);
+            const int cfgStatus = configureUDPAdapter(*netAdapter, netAdapter->id);
             if (cfgStatus != 0) {
                 std::string msg("Failed to configure adapter " + adapter + " for parent " + parent + "\n");
             }
 
             return netAdapter;
+        }
+
+
+        /**
+         * @brief Open a TCP adapter for a given parent module
+         * 
+         * @param parent Identifier of the parent module requesting the adapter
+         * @param sPort Source port number for the adapter
+         * @param dPort Destination port number for the adapter
+         * @param adapter Adapter identifier or name
+         * @return int Status code of the operation
+         */
+        virtual std::unique_ptr<NetworkAdapter> openTcpAdapter_(const std::string& parent,  int sPort, int dPort, const std::string& adapter, size_t bufferSize, bool broadcast) {
+            // Default implementation doesn't know how to route - subclasses
+            // (e.g. a network comms controller) should override this method
+            // and use `caller` to pick the fastest transmit path.
+            return nullptr;
         }
 
         
@@ -551,7 +592,18 @@ namespace Adapter {
          * @param adapter Adapter identifier or name
          * @return int Status code of the operation
          */
-        virtual int configureAdapter(NetworkAdapter& netAdapter, int adapterIdx) {
+        virtual int configureUDPAdapter(NetworkAdapter& netAdapter, int adapterIdx) {
+            return 0;
+        }
+
+        /**
+         * @brief Configure a TCP adapter for a given port
+         * 
+         * @param port Port number for the adapter
+         * @param adapter Adapter identifier or name
+         * @return int Status code of the operation
+         */
+        virtual int configureTCPAdapter(NetworkAdapter& netAdapter, int adapterIdx) {
             return 0;
         }
     };
