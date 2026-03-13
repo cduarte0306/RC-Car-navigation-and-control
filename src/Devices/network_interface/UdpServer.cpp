@@ -166,6 +166,9 @@ void UdpServer::startReceive_(void) {
                     std::copy(dataReceived.begin(), dataReceived.end(), m_RecvBuffer.begin());
                     m_HostIP = remoteEndpoint.address().to_string();
                     if (!m_HostFound) {
+                        if (dport_ == 0) {
+                            dport_ = remoteEndpoint.port();
+                        }
                         logger->log(Logger::LOG_LVL_INFO, "Host found: %s:%d\n", m_HostIP.c_str(), remoteEndpoint.port());
                         m_HostFound = true;
                     }
@@ -203,7 +206,7 @@ UdpServer::~UdpServer() {
  * @return false Transmission failed
  */
 bool UdpServer::transmit(uint8_t* pBuf, size_t length, std::string& ip) {
-    if (pBuf == nullptr || length == 0 || ip.length() == 0) {
+    if (pBuf == nullptr || length == 0 || ip.length() == 0 || dport_ == 0) {
         return false;
     }
 

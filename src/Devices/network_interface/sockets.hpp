@@ -20,21 +20,31 @@
 
 using boost::asio::ip::udp;
 
+namespace Network {
+
 class Sockets {
 public:
     Sockets(boost::asio::io_context& io_context, unsigned short port) : socket_(io_context) {
 
     }
-    
+
     virtual ~Sockets() {
 
     }
 
     virtual bool transmit(uint8_t* pBuf, size_t length, std::string& ip) {
-        return true;   
+        return true;
     }
 
-    virtual bool receive(uint8_t* pBuf, size_t length, bool ) {
+    virtual bool transmit(uint8_t* pBuf, size_t length) {
+        return true;
+    }
+
+    virtual bool transmit(const std::vector<uint8_t>& data) {
+        return true;
+    }
+
+    virtual bool receive(uint8_t* pBuf, size_t length ) {
         return true;
     }
 
@@ -129,5 +139,6 @@ protected:
     size_t m_RxBytes = 0;
 };
 
+} // namespace Network
 
 #endif
