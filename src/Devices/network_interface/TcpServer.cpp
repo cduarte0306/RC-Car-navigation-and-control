@@ -65,6 +65,7 @@ TcpServer::TcpServer(boost::asio::io_context& io_context, std::string adapter, s
 
     boost::asio::ip::tcp::endpoint listen_endpoint(boost::asio::ip::make_address(ipAddress), sport_);
     acceptor_.open(listen_endpoint.protocol());
+    acceptor_.set_option(boost::asio::socket_base::reuse_address(true));
     acceptor_.bind(listen_endpoint);
     acceptor_.listen();
     logger->log(Logger::LOG_LVL_INFO, "Opened TCP socket: %s:%d\r\n", ipAddress.c_str(), sport_);
@@ -106,7 +107,17 @@ int TcpServer::acceptConnection() {
     m_HostIP = clientEndpoint.address().to_string();
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Client connected: %s:%d\r\n", m_HostIP.c_str(), clientEndpoint.port());
+
+    if (connectionEstablishedCallback_) {
+        connectionEstablishedCallback_();
+    }
+
     return 0;
+}
+
+
+void TcpServer::onConnectionEstablished(std::function<void()> callback) {
+    connectionEstablishedCallback_ = std::move(callback);
 }
 
 

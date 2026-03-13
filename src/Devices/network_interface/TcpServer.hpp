@@ -24,8 +24,10 @@ public:
     virtual void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_, bool asyncTx=true) override;
 
     int acceptConnection();
-    
+    void onConnectionEstablished(std::function<void()> callback);
+
 private:
+    std::function<void()> connectionEstablishedCallback_;
     void startReceive_(void);
     
     boost::asio::ip::tcp::acceptor acceptor_;

@@ -263,6 +263,13 @@ void NetworkComms::configureReceiveCallback(NetworkAdapter& adapter, std::functi
         return;
     }
 
+    if (adapter.onConnected) {
+        auto* tcp = dynamic_cast<Network::TcpServer*>(it->second.socket.get());
+        if (tcp) {
+            tcp->onConnectionEstablished(adapter.onConnected);
+        }
+    }
+
     // Start listening for inbound payloads using the provided handler
     it->second.socket->startReceive(std::move(dataReceivedCommand_), asyncTx);
 }

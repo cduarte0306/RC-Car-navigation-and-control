@@ -29,15 +29,11 @@
 #define CMD_BUFFER_SIZE     (32u)                   // To store current input that is not yet sent as command
 #define HISTORY_BUFFER_SIZE (4 * CMD_BUFFER_SIZE)   // To store previous commands
 
-#define CLI_PORT            (65000)
+#define CLI_PORT            (8001)
 
 namespace Modules
 {
 AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
-    if (this->openInterface() < 0) {
-        throw("Failed to open TTY interface");
-    }
-
     const CliCommandBinding cmdBindings[] = {
         (CliCommandBinding){
             "read-psoc",
@@ -242,7 +238,8 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
     // Override the writeChar function to send output over UDP
     CLI->writeChar = [](EmbeddedCli *cli, char c ) {
         AppCLI* _cli = static_cast<AppCLI*>(cli->appContext);
-        int ret = write(_cli->fd, &c, 1);
+        std::vector<char> data = {c};
+        int ret = _cli->m_CliAdapter->send(reinterpret_cast<const uint8_t*>(data.data()), data.size());
         Logger* logger = Logger::getLoggerInst();
         if (ret < 0) {
             logger->log(Logger::LOG_LVL_ERROR, "%s, %s, Error writing to TTY\r\n", __func__, __LINE__);
@@ -276,37 +273,32 @@ int AppCLI::stop(void) {
 
 void AppCLI::mainProc() {
     uint8_t buffer[128];
+    bool connected = false;
         
     // Simulate the enter key press to show the invitation prompt
     embeddedCliReceiveChar(this->CLI, '\n');
     embeddedCliProcess(this->CLI);
 
-    this->writeIface("\033[2J\033[H");
-    this->writeIface("\r\n*************************RC Car CLI Interface*************************\r\n");
-    this->writeIface("Software version: %u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
-    this->writeIface("Please enter \"help\" to list available commands\r\n");
+    m_CliAdapter->onConnected = [this]() {
+        this->writeIface("\033[2J\033[H");
+        this->writeIface("\r\n*************************RC Car CLI Interface*************************\r\n");
+        this->writeIface("Software version: %u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
+        this->writeIface("Please enter \"help\" to list available commands\r\n");
+    };
 
     this->CommsAdapter->startReceive(
         *m_CliAdapter,
         [this](std::vector<char>& data) {
             std::lock_guard<std::mutex> lock(this->mutex);
-            std::copy(data.begin(), data.end(), std::back_inserter(this->cmdBuffer));
-
-            // Submit all characters to the CLI
-            {
-                std::lock_guard<std::mutex> lock(this->mutex);
-                for (char c : this->cmdBuffer) {
-                    embeddedCliReceiveChar(this->CLI, c);
-                }
-                this->cmdBuffer.clear();
+            for (char c : data) {
+                embeddedCliReceiveChar(this->CLI, c);
             }
-            embeddedCliProcess(this->CLI);  
+            embeddedCliProcess(this->CLI);
         }, false
     );
-
+    
     while (true) {
-        
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 }
 

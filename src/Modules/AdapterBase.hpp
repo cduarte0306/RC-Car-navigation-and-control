@@ -298,6 +298,7 @@ namespace Adapter {
             std::function<int(std::string, const uint8_t*, size_t)> sendCallback = nullptr;
             std::function<int(const uint8_t*, size_t)> sendCallbackTcp = nullptr;
             std::function<void(void)> OnEthDetected = nullptr;
+            std::function<void()> onConnected = nullptr;
             std::function<std::string()> hostResolver = nullptr;
             int id = -1;
             int typeID = -1;
@@ -473,7 +474,7 @@ namespace Adapter {
             };
 
             this->openTcpAdapterCommand = [adapter](const std::string& parent, int sPort, int dPort, const std::string& adpName, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
-                return adapter->openAdapter_(parent, sPort, dPort, adpName, bufferSize, broadcast);
+                return adapter->openTcpAdapter_(parent, sPort, dPort, adpName, bufferSize, broadcast);
             };
             
             this->dataReceivedCommand = [adapter](NetworkAdapter& netAdp, std::function<void(std::vector<char>&)> callback, bool asyncTx) -> int {
@@ -578,10 +579,30 @@ namespace Adapter {
          * @return int Status code of the operation
          */
         virtual std::unique_ptr<NetworkAdapter> openTcpAdapter_(const std::string& parent,  int sPort, int dPort, const std::string& adapter, size_t bufferSize, bool broadcast) {
-            // Default implementation doesn't know how to route - subclasses
-            // (e.g. a network comms controller) should override this method
-            // and use `caller` to pick the fastest transmit path.
-            return nullptr;
+            std::pair<std::string, std::string> adapterDesc(parent, adapter);
+            m_RegisteredCallers.push_back(adapterDesc);
+
+            // If we have previously bound this caller adapter into adapterMap
+            // (via AdapterBase::bind), cache a direct pointer for fast lookup
+            auto it = adapterMap.find(parent);
+            if (it != adapterMap.end() && it->second) {
+                CommsAdapter* boundAdapter = reinterpret_cast<CommsAdapter*>(it->second);
+                m_CallerAdapterMap[parent] = boundAdapter;
+            }
+
+            std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapter, sPort, dPort, bufferSize);
+            adapterCounter++;
+            netAdapter->id = adapterCounter;  // assign unique ID
+            netAdapter->setParent(parent);    // set the parent module name
+            netAdapter->broadcast = broadcast;
+
+            // Configure the adapter on the derived comms driver
+            const int cfgStatus = configureTCPAdapter(*netAdapter, netAdapter->id);
+            if (cfgStatus != 0) {
+                std::string msg("Failed to configure adapter " + adapter + " for parent " + parent + "\n");
+            }
+
+            return netAdapter;
         }
 
         
