@@ -21,6 +21,8 @@ set(SOURCE
     Modules/RcVisionControl.hpp
     Modules/RcCarTelemetry.cpp
     Modules/RcCarTelemetry.hpp
+    app/motor/MotorLogController.cpp
+    app/motor/MotorLogController.hpp
     app/video/VideoFrame.cpp
     app/video/VideoFrame.hpp
     app/video/VideoStreamer.cpp

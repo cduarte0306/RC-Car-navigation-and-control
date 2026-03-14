@@ -29,7 +29,7 @@ private:
     EmbeddedCli *CLI = nullptr;
     int fd = -1;
 
-    int openInterface();
+    
     int writeIface(const char* format, ...);
 };
 }

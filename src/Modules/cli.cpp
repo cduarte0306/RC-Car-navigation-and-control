@@ -304,41 +304,6 @@ void AppCLI::mainProc() {
 
 
 /**
- * @brief Opens the TTY interface
- * 
- * @return int File descriptor of opened TTY, or -1 on error
- */
-int AppCLI::openInterface() {
-    this->fd = open(this->tty, O_RDWR | O_NOCTTY | O_NDELAY);
-    if (fd == -1) {
-        std::cerr << "Failed to open " << this->tty << std::endl;
-        return -1;
-    }
-
-    fcntl(fd, F_SETFL, 0); // Blocking read
-
-    struct termios options;
-    tcgetattr(fd, &options);
-
-    cfsetispeed(&options, B115200);
-    cfsetospeed(&options, B115200);
-
-    options.c_cflag |= (CLOCAL | CREAD); // Enable receiver, ignore modem control lines
-    options.c_cflag &= ~PARENB;          // No parity
-    options.c_cflag &= ~CSTOPB;          // 1 stop bit
-    options.c_cflag &= ~CSIZE;           // Clear current char size mask
-    options.c_cflag |= CS8;              // 8 data bits
-
-    options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG); // Raw input
-    options.c_iflag &= ~(IXON | IXOFF | IXANY);         // No software flow control
-    options.c_oflag &= ~OPOST;                          // Raw output
-
-    tcsetattr(fd, TCSANOW, &options);
-    return fd;
-}
-
-
-/**
  * @brief Writes formatted data to the TTY interface
  * 
  * @param format String format

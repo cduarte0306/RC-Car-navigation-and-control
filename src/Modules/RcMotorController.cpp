@@ -6,6 +6,7 @@
 #include <algorithm>
 #include "utils/logger.hpp"
 #include <nlohmann/json.hpp>
+#include "app/motor/MotorLogController.hpp"
 #include "Devices/RegisterMap.hpp"
 
 
@@ -243,6 +244,7 @@ void MotorController::pollTlmData(void) {
 void MotorController::mainProc() {
     Logger* logger = Logger::getLoggerInst();
     m_isControllerConnected = false;
+    Motor::MotorLogController logController; // Start the motor log controller to capture low-level logs from the motor controller
 
     // Main processing loop for the motor controller
     while (m_Running.load()) {
