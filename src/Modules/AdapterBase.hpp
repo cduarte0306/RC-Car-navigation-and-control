@@ -313,16 +313,12 @@ namespace Adapter {
             bool broadcast = false;
             int adapterType = -1;
 
-            int send(const uint8_t* data, size_t length, std::string destIp) {
-                if (sendCallback) {
-                    return sendCallback(destIp, data, length);
-                }
-                return -1;
-            }
-
-            int send(const uint8_t* data, size_t length) {
+            int send(const uint8_t* data, size_t length, std::string destIp="") {
                 if (sendCallbackTcp) {
                     return sendCallbackTcp(data, length);
+                }
+                else if (sendCallback) {
+                    return sendCallback(destIp, data, length);
                 }
                 return -1;
             }
