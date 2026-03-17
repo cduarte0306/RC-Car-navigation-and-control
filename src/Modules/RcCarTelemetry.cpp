@@ -7,9 +7,13 @@
 #include <chrono>
 #include <thread>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 
 
 namespace Modules {
+static nlohmann::json tempTlm;
+
 RcCarTelemetry::RcCarTelemetry(int moduleID, std::string name) : Modules::Base(moduleID, name), Adapter::TlmAdapter(name) {
 }
 
@@ -21,6 +25,8 @@ int RcCarTelemetry::init(void) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create telemetry transmission adapter\r\n");
         return -1;
     }
+
+    setPeriod(1000);
 
     logger->log(Logger::LOG_LVL_INFO, "Telemetry module initialized\r\n");
     return 0;
@@ -83,7 +89,29 @@ int RcCarTelemetry::publishTelemetry_(const std::string& sourceName, const uint8
 }
 
 
+void RcCarTelemetry::OnTimer() {
+    // Read CPU temperature
+    const std::vector<std::pair<std::string, std::string>> zones = {
+        {"/sys/devices/virtual/thermal/thermal_zone0/temp", "CPU_TEMP"},
+        {"/sys/devices/virtual/thermal/thermal_zone1/temp", "GPU_TEMP"},
+        {"/sys/devices/virtual/thermal/thermal_zone2/temp", "SOC_TEMP"},
+    };
+
+    for (const auto& [path, label] : zones) {
+        std::ifstream file(path);
+        if (!file.is_open()) continue;
+
+        int raw;
+        file >> raw;
+
+        // Data is millicelcius
+        tempTlm[label] = raw / 1000.0;
+    }
+}
+
+
 /**
+ * 
  * @brief Main processing loop
  * 
  */
@@ -106,6 +134,12 @@ void RcCarTelemetry::mainProc() {
         while (!m_TlmBuffer.isEmpty()) {
             std::lock_guard<std::mutex> lock(m_txMutex);
             nlohmann::json tlmData = m_TlmBuffer.getHead();
+            
+            // Append temperature telemetry
+            for (auto& [key, value] : tempTlm.items()) {
+                tlmData[key] = value;
+            }
+            
             m_TlmBuffer.pop();
             std::string payload = tlmData.dump();
             m_TxAdapter->send(

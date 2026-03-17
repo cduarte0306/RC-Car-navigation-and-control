@@ -772,6 +772,7 @@ void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudM
     }
 
     pointCloudMat = zMapSmooth;
+    // pointCloudMat = zMap;
 }
 
 

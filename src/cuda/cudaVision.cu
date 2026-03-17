@@ -218,6 +218,11 @@ int cuda::smoothPointCloud(cv::Mat& pointCloud, cv::Mat& smoothedPointCloud,
         return -1; // Unsupported types
     }
 
+    if (minAgreeing = 0) {
+        smoothedPointCloud = pointCloud;
+        return 0;
+    }
+
     CV_Assert(pointCloud.size() == smoothedPointCloud.size());
 
     dim3 block(16, 16);
