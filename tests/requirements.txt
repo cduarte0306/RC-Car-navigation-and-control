@@ -1,0 +1,10 @@
+opencv-python
+numpy
+numba
+torch
+torchvision
+onnxruntime
+onnx
+scipy
+matplotlib
+openmim

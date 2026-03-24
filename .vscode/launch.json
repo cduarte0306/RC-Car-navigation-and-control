@@ -19,6 +19,20 @@
           "ignoreFailures": true }
       ],
       "externalConsole": false
+    },
+    {
+      "name" : "Debug lane-detection test",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/tests/lane-detection/lane-detection.py",
+      "console": "integratedTerminal"
+    },
+    {
+      "name" : "Debug ML lane-detection test",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/tests/lane-detection/lane-detection-ml.py",
+      "console": "integratedTerminal"
     }
   ]
 }
