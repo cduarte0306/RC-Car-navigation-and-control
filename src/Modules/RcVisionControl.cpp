@@ -6,6 +6,10 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/dnn.hpp>
 #include <opencv2/core/cuda.hpp>
+#include <opencv2/cudafilters.hpp>
+#include <opencv2/cudaarithm.hpp>
+#include <opencv2/cudaimgproc.hpp>
+#include <opencv2/cudawarping.hpp>
 
 #include <vpi/OpenCVInterop.hpp>
 #include <vpi/Image.h>
@@ -42,11 +46,13 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <math.h>
 
 #include "cudaVision.hpp"
 
 
 #define STREAM_PORT 5005
+#define STREAM_IN_PORT 5006
 
 #define MODEL_PATH  "/opt/rc-car/models/model-small.onnx"
 
@@ -158,14 +164,16 @@ int VisionControls::init(void) {
     Logger* logger = Logger::getLoggerInst();
     // Initialize the network adapters
     m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
-    m_EthAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, STREAM_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_EthAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, STREAM_IN_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_SimVideoAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, STREAM_IN_PORT, 0, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
 
     m_TxAdapter->setParent(this->getName());
     m_EthAdapter->setParent(this->getName());
+    m_SimVideoAdapter->setParent(this->getName());
 
-    if (!m_TxAdapter || !m_EthAdapter) {
+    if (!m_TxAdapter || !m_EthAdapter || !m_SimVideoAdapter) {
         logger->log(Logger::LOG_LVL_WARN, "Failed to create vision network adapters\r\n");
-        return -1;
+        throw std::runtime_error("Failed to create vision network adapters");
     }
 
     // Create the streamer only once the TX adapter exists; otherwise we'd bind a dangling reference.
@@ -209,7 +217,7 @@ int VisionControls::init(void) {
 
     // Start receiving frames
     this->CommsAdapter->startReceive(
-        *m_EthAdapter,
+        *m_SimVideoAdapter,
         std::bind(&VisionControls::onEthRecv, this, std::placeholders::_1),
         false);
 
@@ -777,6 +785,94 @@ void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudM
 
 
 /**
+ * @brief Process lane detection for regular camera frames
+ * 
+ * @param frame Left camera frame reference
+ */
+void VisionControls::processLaneDetection(cv::Mat& frame, cv::Mat& dst) {
+    constexpr int    BLUR_K          = 15;
+    constexpr double BLUR_SIGMA      = 5.0;
+    constexpr int    MORPH_SIZE      = 25;
+    constexpr int    MIN_BLOB_AREA   = 20000;
+
+    cv::cuda::Stream stream;
+    cv::cuda::GpuMat d_frame, d_frameResized, d_hsv, d_hsvBlur;
+
+    // resize the frame
+    d_frame.upload(frame, stream);
+
+    const int interp = (frame.depth() == CV_16U || frame.depth() == CV_16S) ? cv::INTER_NEAREST : cv::INTER_LINEAR;
+    cv::cuda::resize(d_frame, d_frameResized, cv::Size(640, 360), 0.0, 0.0, interp, stream);
+
+    // --- GPU: upload + BGR→HSV + blur (3-ch, for color segmentation) ---
+    cv::cuda::cvtColor(d_frameResized, d_hsv, cv::COLOR_BGR2HSV, 0, stream);
+
+    auto hsvBlurFilter = cv::cuda::createGaussianFilter(
+        CV_8UC3, CV_8UC3, cv::Size(BLUR_K, BLUR_K), BLUR_SIGMA);
+    hsvBlurFilter->apply(d_hsv, d_hsvBlur, stream);
+
+    // --- GPU: grayscale + blur (1-ch, for sidewalk mask application) ---
+    cv::cuda::GpuMat d_gray, d_grayBlur;
+    cv::cuda::cvtColor(d_frameResized, d_gray, cv::COLOR_BGR2GRAY, 0, stream);
+
+    auto grayBlurFilter = cv::cuda::createGaussianFilter(
+        CV_8UC1, CV_8UC1, cv::Size(BLUR_K, BLUR_K), BLUR_SIGMA);
+    grayBlurFilter->apply(d_gray, d_grayBlur, stream);
+
+    stream.waitForCompletion();
+
+    // --- CPU: inRange (not available in CUDA module) ---
+    cv::Mat hsvBlur, grayBlur;
+    d_hsvBlur.download(hsvBlur);
+    d_grayBlur.download(grayBlur);
+
+    cv::Mat sidewalkMask, grassMask;
+    cv::inRange(hsvBlur, cv::Scalar(5,  0,   150), cv::Scalar(30, 50,  255), sidewalkMask);
+    cv::inRange(hsvBlur, cv::Scalar(25, 40,  0),   cv::Scalar(85, 255, 255), grassMask);
+
+    cv::cuda::GpuMat d_sidewalkMask, d_grayMasked;
+    d_sidewalkMask.upload(sidewalkMask, stream);
+    cv::cuda::bitwise_and(d_grayBlur, d_grayBlur, d_grayMasked, d_sidewalkMask, stream);
+    cv::cuda::threshold(d_grayMasked, d_grayMasked, 0, 255, cv::THRESH_BINARY, stream);
+
+    cv::Mat morphKernel = cv::getStructuringElement(
+        cv::MORPH_ELLIPSE, cv::Size(MORPH_SIZE, MORPH_SIZE));
+    auto morphFilter = cv::cuda::createMorphologyFilter(
+        cv::MORPH_CLOSE, CV_8UC1, morphKernel);
+    morphFilter->apply(d_grayMasked, d_grayMasked, stream);
+
+    stream.waitForCompletion();
+
+    cv::Mat grayMasked;
+    d_grayMasked.download(grayMasked);
+
+    cv::Mat invMasked;
+    cv::bitwise_not(grayMasked, invMasked);
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(invMasked, contours, cv::RETR_CCOMP, cv::CHAIN_APPROX_SIMPLE);
+    for (const auto& cnt : contours) {
+        if (cv::contourArea(cnt) < MIN_BLOB_AREA)
+            cv::drawContours(grayMasked, std::vector<std::vector<cv::Point>>{cnt}, -1, 255, -1);
+    }
+
+    cv::cuda::GpuMat d_grayMaskedFinal, d_overlay, d_result;
+    d_grayMaskedFinal.upload(grayMasked, stream);
+    stream.waitForCompletion();
+
+    d_overlay = cv::cuda::GpuMat(d_frameResized.size(), d_frameResized.type(), cv::Scalar::all(0));
+    d_overlay.setTo(cv::Scalar(0, 255, 0), d_grayMaskedFinal);
+
+    cv::cuda::addWeighted(d_frameResized, 0.7, d_overlay, 0.3, 0, d_result, -1, stream);
+    
+    // Upscale back to original size
+    cv::cuda::resize(d_result, d_result, frame.size(), 0.0, 0.0, cv::INTER_LINEAR, stream);
+
+    stream.waitForCompletion();
+    d_result.download(dst);
+}
+
+
+/**
  * @brief Module command handler
  * 
  * @param pbuf Pointer to command buffer
@@ -1274,7 +1370,15 @@ void VisionControls::mainProc() {
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     continue;
                 }
-                frameSim = simFrame;
+                // Do lane detection
+                std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
+                processLaneDetection(simFrame, frameSim);
+
+                std::chrono::steady_clock::time_point endTime = std::chrono::steady_clock::now();
+                auto processingTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
+                // logger->log(Logger::LOG_LVL_INFO, "Lane detection processing time: %lld ms\n", processingTime);
+                // std::cout << "Lane detection processing time: " << processingTime << " ms" << std::endl;
+
                 m_VideoStreamer->pushFrame(frameSim);
                 break;
             }

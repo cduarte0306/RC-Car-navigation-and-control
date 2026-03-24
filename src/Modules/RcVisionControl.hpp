@@ -180,8 +180,8 @@ protected:
     // Stereo frame processing handler
     void processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
 
-    // Generate point cloud image
-    void doPointCloud(cv::Mat& dispFrame, cv::Mat& pointCloudMat, cv::Matx44d& Q);
+    // Lane detection
+    void processLaneDetection(cv::Mat& frame, cv::Mat& dst);
 
     // Save the streaming profile parameters
     static int saveStreamingProfile(CameraSettings& settings);
@@ -244,6 +244,8 @@ protected:
 
     VPIConvertImageFormatParams m_ConvParams;
 
+    cv::cuda::GpuMat m_dHoughLines;
+
     // Receive frame buffer
     cv::Mat m_ReceivedFrame;
 
@@ -255,6 +257,9 @@ protected:
 
     // Reception port
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_EthAdapter{nullptr};
+
+    // Training video input port
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_SimVideoAdapter{nullptr};
 
     // Video recorder
     Vision::VideoRecording m_VideoRecorder;
