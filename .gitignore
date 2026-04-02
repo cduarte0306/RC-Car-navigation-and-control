@@ -16,3 +16,4 @@ docs/
 test/
 **/video/
 venv/
+*.engine

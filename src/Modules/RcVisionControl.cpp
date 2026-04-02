@@ -72,6 +72,7 @@
 
     
 const char* StorageLocation = "/data/calibration-data/streaming-profile.json";
+static const char* onnxPath = "/home/models/lanenet.onnx";
 
 namespace {
 static bool isValidSgmDisparities(int value) {
@@ -179,6 +180,8 @@ int VisionControls::init(void) {
     // Create the streamer only once the TX adapter exists; otherwise we'd bind a dangling reference.
     m_VideoStreamer = std::make_unique<Vision::VideoStreamer>(*m_TxAdapter, *m_EthAdapter, 100);
 
+    m_LaneNet = std::make_unique<Vision::LaneNet>(onnxPath);
+
     bool useCuda = false;
 
 #ifdef HAVE_OPENCV_CUDAARITHM
@@ -272,6 +275,15 @@ int VisionControls::init(void) {
     CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageLeft, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &m_ImgL));
     CHECK_STATUS(vpiImageCreateWrapperOpenCVMat(cvImageRight, VPI_IMAGE_FORMAT_BGR8, VPI_BACKEND_CUDA, &m_ImgR));
 
+    // Load model
+    m_Net = cv::dnn::readNet(onnxPath);
+    if (m_Net.empty()) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to load DNN model at %s\n", onnxPath);
+        return -1;
+    }
+
+    m_Net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
+    m_Net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
 
     logger->log(Logger::LOG_LVL_INFO, "Vision control module initialized\r\n");
     return 0;
@@ -790,85 +802,7 @@ void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudM
  * @param frame Left camera frame reference
  */
 void VisionControls::processLaneDetection(cv::Mat& frame, cv::Mat& dst) {
-    constexpr int    BLUR_K          = 15;
-    constexpr double BLUR_SIGMA      = 5.0;
-    constexpr int    MORPH_SIZE      = 25;
-    constexpr int    MIN_BLOB_AREA   = 20000;
-
-    cv::cuda::Stream stream;
-    cv::cuda::GpuMat d_frame, d_frameResized, d_hsv, d_hsvBlur;
-
-    // resize the frame
-    d_frame.upload(frame, stream);
-
-    const int interp = (frame.depth() == CV_16U || frame.depth() == CV_16S) ? cv::INTER_NEAREST : cv::INTER_LINEAR;
-    cv::cuda::resize(d_frame, d_frameResized, cv::Size(640, 360), 0.0, 0.0, interp, stream);
-
-    // --- GPU: upload + BGR→HSV + blur (3-ch, for color segmentation) ---
-    cv::cuda::cvtColor(d_frameResized, d_hsv, cv::COLOR_BGR2HSV, 0, stream);
-
-    auto hsvBlurFilter = cv::cuda::createGaussianFilter(
-        CV_8UC3, CV_8UC3, cv::Size(BLUR_K, BLUR_K), BLUR_SIGMA);
-    hsvBlurFilter->apply(d_hsv, d_hsvBlur, stream);
-
-    // --- GPU: grayscale + blur (1-ch, for sidewalk mask application) ---
-    cv::cuda::GpuMat d_gray, d_grayBlur;
-    cv::cuda::cvtColor(d_frameResized, d_gray, cv::COLOR_BGR2GRAY, 0, stream);
-
-    auto grayBlurFilter = cv::cuda::createGaussianFilter(
-        CV_8UC1, CV_8UC1, cv::Size(BLUR_K, BLUR_K), BLUR_SIGMA);
-    grayBlurFilter->apply(d_gray, d_grayBlur, stream);
-
-    stream.waitForCompletion();
-
-    // --- CPU: inRange (not available in CUDA module) ---
-    cv::Mat hsvBlur, grayBlur;
-    d_hsvBlur.download(hsvBlur);
-    d_grayBlur.download(grayBlur);
-
-    cv::Mat sidewalkMask, grassMask;
-    cv::inRange(hsvBlur, cv::Scalar(5,  0,   150), cv::Scalar(30, 50,  255), sidewalkMask);
-    cv::inRange(hsvBlur, cv::Scalar(25, 40,  0),   cv::Scalar(85, 255, 255), grassMask);
-
-    cv::cuda::GpuMat d_sidewalkMask, d_grayMasked;
-    d_sidewalkMask.upload(sidewalkMask, stream);
-    cv::cuda::bitwise_and(d_grayBlur, d_grayBlur, d_grayMasked, d_sidewalkMask, stream);
-    cv::cuda::threshold(d_grayMasked, d_grayMasked, 0, 255, cv::THRESH_BINARY, stream);
-
-    cv::Mat morphKernel = cv::getStructuringElement(
-        cv::MORPH_ELLIPSE, cv::Size(MORPH_SIZE, MORPH_SIZE));
-    auto morphFilter = cv::cuda::createMorphologyFilter(
-        cv::MORPH_CLOSE, CV_8UC1, morphKernel);
-    morphFilter->apply(d_grayMasked, d_grayMasked, stream);
-
-    stream.waitForCompletion();
-
-    cv::Mat grayMasked;
-    d_grayMasked.download(grayMasked);
-
-    cv::Mat invMasked;
-    cv::bitwise_not(grayMasked, invMasked);
-    std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(invMasked, contours, cv::RETR_CCOMP, cv::CHAIN_APPROX_SIMPLE);
-    for (const auto& cnt : contours) {
-        if (cv::contourArea(cnt) < MIN_BLOB_AREA)
-            cv::drawContours(grayMasked, std::vector<std::vector<cv::Point>>{cnt}, -1, 255, -1);
-    }
-
-    cv::cuda::GpuMat d_grayMaskedFinal, d_overlay, d_result;
-    d_grayMaskedFinal.upload(grayMasked, stream);
-    stream.waitForCompletion();
-
-    d_overlay = cv::cuda::GpuMat(d_frameResized.size(), d_frameResized.type(), cv::Scalar::all(0));
-    d_overlay.setTo(cv::Scalar(0, 255, 0), d_grayMaskedFinal);
-
-    cv::cuda::addWeighted(d_frameResized, 0.7, d_overlay, 0.3, 0, d_result, -1, stream);
-    
-    // Upscale back to original size
-    cv::cuda::resize(d_result, d_result, frame.size(), 0.0, 0.0, cv::INTER_LINEAR, stream);
-
-    stream.waitForCompletion();
-    d_result.download(dst);
+    m_LaneNet->infer(frame, dst);
 }
 
 
@@ -1264,6 +1198,10 @@ void VisionControls::OnTimer(void) {
 void VisionControls::mainProc() {
     Logger* logger = Logger::getLoggerInst();
 
+    // Initialize lane net mode
+    m_LaneNet->init();
+    logger->log(Logger::LOG_LVL_INFO, "Loaded lane net model\r\n");
+
     // Devices::StereoCam cam(0, 1);
     cv::Mat frameL;
     cv::Mat frameR;
@@ -1346,7 +1284,12 @@ void VisionControls::mainProc() {
                     cv::Mat pointCloud;
 
                     // Extract the disparity frame
+                    std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
+
                     processStereo(frameStereo, pointCloud, stereoFramePair, Q);             
+                    std::chrono::steady_clock::time_point endTime = std::chrono::steady_clock::now();
+                    auto processingTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
+                    // std::cout << "Lane detection processing time: " << processingTime << " ms" << std::endl;
 
                     // Select the frame base on the ethernet link status
                     if (m_EthAdapter->ethLinkDetected.load()) {

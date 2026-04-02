@@ -16,6 +16,7 @@
 #include "app/video/VideoRecording.hpp"
 #include "app/video/VideoStereoCalibration.hpp"
 #include "app/video/VideoStreamer.hpp"
+#include "app/video/VideoLaneNet.hpp"
 
 #include <opencv2/cudastereo.hpp>
 #include <vpi/OpenCVInterop.hpp>
@@ -246,6 +247,8 @@ protected:
 
     cv::cuda::GpuMat m_dHoughLines;
 
+    cv::dnn::Net m_Net;
+
     // Receive frame buffer
     cv::Mat m_ReceivedFrame;
 
@@ -265,6 +268,8 @@ protected:
     Vision::VideoRecording m_VideoRecorder;
 
     std::unique_ptr<Vision::VideoStreamer> m_VideoStreamer{nullptr};
+
+    std::unique_ptr<Vision::LaneNet> m_LaneNet{nullptr};
 
     // Stereo camera object
     std::unique_ptr<Devices::StereoCam> m_Cam{nullptr};

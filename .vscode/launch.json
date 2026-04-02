@@ -33,6 +33,14 @@
       "request": "launch",
       "program": "${workspaceFolder}/tests/lane-detection/lane-detection-ml.py",
       "console": "integratedTerminal"
+    },
+    {
+      "name" : "Debug Tensor RT lane-detection test",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/tests/tensorRT/lane-detection-tensor-rt.py",
+      "console": "integratedTerminal",
+      "args": ["--model", "/home/cduarte0306/repos/AnyLaneNET/lanenet.onnx", "--video", "/home/cduarte0306/repos/AnyLaneNET/src/video/video.MOV"]
     }
   ]
 }
