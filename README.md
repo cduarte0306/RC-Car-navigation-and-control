@@ -50,3 +50,6 @@ mim download mmsegmentation --config deeplabv3plus_r101-d8_4xb2-80k_cityscapes-5
 
 #### 3. Run it
 python test_sidewalk_cityscapes.py --input your_video.MOV --model-size small
+
+### Diagram
+<img width="271" height="825" alt="image" src="https://github.com/user-attachments/assets/009a22b3-0706-4b36-97f1-5b67818c2270" />
