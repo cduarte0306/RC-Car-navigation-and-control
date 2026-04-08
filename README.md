@@ -51,5 +51,6 @@ mim download mmsegmentation --config deeplabv3plus_r101-d8_4xb2-80k_cityscapes-5
 #### 3. Run it
 python test_sidewalk_cityscapes.py --input your_video.MOV --model-size small
 
-### Diagram
+# Architecture Overview
+* At the center of the RC Car's main computing module sits the NVIDIA Jetson Orin Nano, capable of parallel computations for real-time image processing and machine learning workloads.
 <img width="271" height="825" alt="image" src="https://github.com/user-attachments/assets/009a22b3-0706-4b36-97f1-5b67818c2270" />
