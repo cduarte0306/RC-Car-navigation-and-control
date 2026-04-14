@@ -66,6 +66,15 @@ namespace Adapter {
             return moduleWriteCmdVector(buffer);
         }
 
+        virtual int cliCommand(std::vector<std::string>& buffer) {
+             if (!moduleCliCmd) {
+                std::cout << "Module CLI command error\r\n";
+                return -1;
+            }
+
+             return moduleCliCmd(buffer);
+        }
+
         /**
          * @brief Add a module name to the bound modules list
          * 
@@ -88,6 +97,7 @@ namespace Adapter {
         std::list<std::string> boundModules;
         std::unordered_map<std::string, AdapterBase*> adapterMap;
         std::function< int(char* pbuf, size_t len) > moduleWriteCmd = nullptr;
+        std::function< int(std::vector<std::string>&) > moduleCliCmd = nullptr;
         std::function< int(std::vector<char>&)     > moduleWriteCmdVector = nullptr;
         std::function< int(char* pbuf, size_t len) > moduleWriteAsyncCmd = nullptr;
         std::function<std::string(void)> readStatsCommand = nullptr;
@@ -107,6 +117,11 @@ namespace Adapter {
 
         virtual int moduleCommandAsync_(char* pbuf, size_t len) {
             (void)pbuf; (void)len;
+            return -1;
+        }
+
+        virtual int moduleCliCmd_(std::vector<std::string>& buffer) {
+            (void)buffer;
             return -1;
         }
     };
@@ -216,7 +231,7 @@ namespace Adapter {
 
         virtual std::string readModuleStats_(void) {
             // Implementation for setting motor direction
-            return 0;
+            return "";
         };
     };
 
@@ -262,6 +277,10 @@ namespace Adapter {
 
             this->moduleWriteCmdVector = [adapter](std::vector<char>& buffer) {
                 return adapter->moduleCommand_(buffer);
+            };
+
+            this->moduleCliCmd = [adapter](std::vector<std::string>& buffer) {
+                return adapter->moduleCliCmd_(buffer);
             };
 
             this->readStatsCommand = [adapter]() -> std::string {

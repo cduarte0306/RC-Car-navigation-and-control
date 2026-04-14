@@ -31,8 +31,12 @@ set(SOURCE
     app/video/VideoRecording.hpp
     app/video/VideoStereoCalibration.cpp
     app/video/VideoStereoCalibration.hpp
+    app/video/VideoStereo.hpp
+    app/video/VideoStereo.cpp
     app/video/VideoLaneNet.hpp
     app/video/VideoLaneNet.cpp
+    app/ml/TensorRTEngine.hpp
+    app/ml/TensorRTEngine.cpp
     Devices/peripheralDriver.hpp
     Devices/peripheralDriver.cpp
     Devices/Pwm.cpp

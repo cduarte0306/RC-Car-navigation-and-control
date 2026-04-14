@@ -17,16 +17,9 @@
 #include "app/video/VideoStereoCalibration.hpp"
 #include "app/video/VideoStreamer.hpp"
 #include "app/video/VideoLaneNet.hpp"
+#include "app/video/VideoStereo.hpp"
 
 #include <opencv2/cudastereo.hpp>
-#include <vpi/OpenCVInterop.hpp>
-  
-#include <vpi/Image.h>
-#include <vpi/Status.h>
-#include <vpi/Stream.h>
-#include <vpi/algo/ConvertImageFormat.h>
-#include <vpi/algo/Rescale.h>
-#include <vpi/algo/StereoDisparity.h>
 
 namespace Modules {
 class VisionControls : public Base, public Adapter::CameraAdapter {
@@ -47,6 +40,8 @@ public:
     // virtual int moduleCommand_(char* pbuf, size_t len) override;
 
     virtual int moduleCommand_(std::vector<char>& buffer) override;
+
+    virtual int moduleCliCmd_(std::vector<std::string>& buffer) override;
 
     // Command handlers
     virtual std::string readStats() override;
@@ -144,7 +139,7 @@ protected:
         int maxDisparity = 0;
         int minDisparity = 0;
         int confidenceThreshold = 32767;
-        int confidenceType = VPI_STEREO_CONFIDENCE_ABSOLUTE;
+        int confidenceType = 0;
         int vpiQuality = 1;
         int p2Alpha = 0;
         float uniqueness = -1.0f;
@@ -163,8 +158,8 @@ protected:
         cv::Size chessboardSize{9, 6}; // inner corners (cols, rows)
     } m_CamSettings;
 
-    static constexpr int CAM_WIDTH  = 1280;
-    static constexpr int CAM_HEIGHT = 720;
+    static constexpr int CAM_WIDTH  = 640;
+    static constexpr int CAM_HEIGHT = 480;
 
     // Parent main proc override
     virtual void mainProc() override;
@@ -183,6 +178,9 @@ protected:
 
     // Lane detection
     void processLaneDetection(cv::Mat& frame, cv::Mat& dst);
+
+    // Frame storage handler
+    void storeFrame(const cv::Mat& frameL, const cv::Mat& frameR);
 
     // Save the streaming profile parameters
     static int saveStreamingProfile(CameraSettings& settings);
@@ -222,29 +220,6 @@ protected:
     // Frame received flag
     bool m_ReceivingFrame{false};
 
-    VPIStream  m_VpiStream = nullptr;
-    VPIPayload m_Stereo    = nullptr;
-
-    VPIImage m_ImgL         = nullptr;
-    VPIImage m_ImgR         = nullptr;
-    VPIImage m_ImgL_8u      = nullptr;
-    VPIImage m_ImgR_8u      = nullptr;
-    VPIImage m_ImgL_270p    = nullptr;
-    VPIImage m_ImgR_270p    = nullptr;
-    VPIImage m_Disparity    = nullptr;
-    VPIImage m_ConfidenceMap = nullptr;
-
-    const int w_ = 640;
-    const int h_ = 480;
-
-    uint64_t backend_ = 0;
-
-    VPIStereoDisparityEstimatorCreationParams m_CreateParams;
-
-    VPIStereoDisparityEstimatorParams m_StereoParams;
-
-    VPIConvertImageFormatParams m_ConvParams;
-
     cv::cuda::GpuMat m_dHoughLines;
 
     cv::dnn::Net m_Net;
@@ -271,6 +246,8 @@ protected:
 
     std::unique_ptr<Vision::LaneNet> m_LaneNet{nullptr};
 
+    std::unique_ptr<Vision::VideoStereo> m_VideoStereo{nullptr};
+
     // Stereo camera object
     std::unique_ptr<Devices::StereoCam> m_Cam{nullptr};
     
@@ -279,6 +256,9 @@ protected:
 
     // Incoming frame assembler
     Vision::VideoFrame m_StreamInFrame;
+
+    // Flag marking whether we should save frames
+    bool m_SaveFrames = false;
 
     // Frame ID
     uint32_t m_FrameID = 0;

@@ -189,7 +189,7 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
     iEglSettings->setResolution(Size2D<uint32_t>(w_, h_));
     iEglSettings->setPixelFormat(PIXEL_FMT_YCbCr_420_888);
     iEglSettings->setEGLDisplay(EGL_NO_DISPLAY);
-    iEglSettings->setMode(EGL_STREAM_MODE_FIFO);
+    iEglSettings->setMode(EGL_STREAM_MODE_MAILBOX);
     iEglSettings->setMetadataEnable(true);
     // iEglSettings->setMetadataEnabled(true);
 
@@ -301,19 +301,19 @@ int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t
         return -1;
     }
 
-    constexpr uint32_t timeoutMs = 1000;
+    constexpr uint32_t timeoutMs = 5000;
     auto startTime = std::chrono::steady_clock::now();
 
-    // If you can, replace this with a blocking condition variable from your CircularBuffer.
-    while (m_StereoBuffer.isEmpty()) {
-        // auto elapsed = std::chrono::steady_clock::now() - startTime;
-        // if (std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() > timeoutMs) {
-        //     return -1;  // Timeout
-        // }
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
-        if (!m_ThreadCanRun.load())  {
-            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Camera thread is not running\n");
-            return -1;
+    // Wait until frame is ready (producer will notify when a new synchronized frame is available)
+    {
+        std::unique_lock<std::mutex> lk(m_FrameReadyMtx_);
+        m_FrameReadyCv_.wait_for(lk, std::chrono::milliseconds(timeoutMs), [this] {
+            return !m_StereoBuffer.isEmpty() || !m_ThreadCanRun.load();
+        });
+
+        if (m_StereoBuffer.isEmpty()) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Timeout waiting for camera frame\n");
+            return -1;  // Timeout
         }
     }
 
@@ -483,6 +483,7 @@ void StereoCam::streamProducer(CamIdx idx, Msg::CircularBuffer<FrameObject>& pro
 
 void StereoCam::streamConsumer() {
     const uint64_t THRESH_NS = 10ULL * 1000 * 1000; // 5 ms
+    static std::chrono::steady_clock::time_point timeLast = std::chrono::steady_clock::now();
 
     // Release producers at (nearly) the same time
     {
@@ -540,12 +541,29 @@ void StereoCam::streamConsumer() {
 
             // Read gyro and append
             m_StereoBuffer.push({{leftOut.frame, rightOut.frame}, gyroData});
+
+            // Notify any waiting readers that a new synchronized frame is available
+            {
+                std::lock_guard<std::mutex> lk(m_FrameReadyMtx_);
+                m_FrameReadyCv_.notify_all();
+            }
+
+            timeLast = std::chrono::steady_clock::now();
         } else {
             // Not aligned: drop the older frame (smaller timestamp) to catch up.
             if (timeDiff < 0) {
                 m_ProducerLeftBuffer.pop();
             } else {
                 m_ProducerRightBuffer.pop();
+            }
+
+            // Log if we're dropping frames too often, which may indicate a problem with the cameras or synchronization.
+            if (std::chrono::steady_clock::now() - timeLast > std::chrono::seconds(5)) {
+                Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN,
+                                             "Dropping frame from camera %d to maintain sync (time diff: %lld ns)\n",
+                                             timeDiff < 0 ? static_cast<int>(CamIdx::CamLeft) : static_cast<int>(CamIdx::CamRight),
+                                             timeDiff);
+                timeLast = std::chrono::steady_clock::now();
             }
         }
     }
