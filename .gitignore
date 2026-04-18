@@ -14,5 +14,7 @@ CMakeUserPresets.json
 build/
 docs/
 test/
-**/video/
+/test/**/video/
 venv/
+*.engine
+*.MOV*

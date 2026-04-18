@@ -7,6 +7,7 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
 
+#include "utils/logger.hpp"
 #include <nlohmann/json.hpp>
 
 namespace Vision {
@@ -18,6 +19,15 @@ public:
     ~VideoStereoCalib() = default;
 
     int storeCalibrationProfile();
+
+    /**
+     * @brief Start a new calibration session, clearing any previously collected samples and results.
+     * 
+     */
+    void startCalibration() {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Starting new calibration session\n");
+        m_Calibrated = false;
+    }
 
     void resetCalibrationSession();
     std::size_t numCollectedSamples() const;
@@ -82,9 +92,12 @@ public:
     /**
      * @brief Starts calibration and expecting frames
      * 
+     * @param state true to start calibration, false to stop calibration
+     * 
      */
-    void SetCalibrationMode() {
-      m_Calibrated = false;
+    void SetCalibrationMode(bool state) {
+      Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Setting calibration mode: %s\n", state ? "ON" : "OFF");
+      m_Calibrated = !state;
     }
 
     bool GetCalibMode() const {

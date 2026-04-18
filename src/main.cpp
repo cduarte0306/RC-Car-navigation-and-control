@@ -8,6 +8,8 @@
 #include "utils/logger.hpp"
 #include "version.h"
 
+#include "app/ml/TensorRTEngine.hpp"
+
 #include "Modules/RcMessageLib.hpp"
 #include "Modules/AdapterBase.hpp"
 #include "Modules/RcBase.hpp"
@@ -19,8 +21,15 @@
 
 
 int main(int argc, char* argv[]) {
+    int ret;
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "RC Car navigation and control V%u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
+
+    ret = TensorRTEngine::createEngineFile("/home/models/lanenet/lanenet.onnx", "/data/model-engines/lanenet.engine");
+    if (ret != 0) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to create engine file for lanenet.onnx\r\n");
+        return -1;
+    }
 
     std::unique_ptr<Modules::MotorController  > motorController   = std::make_unique<Modules::MotorController>(Modules::MOTOR_CONTROLLER, "MainMotorController");
     std::unique_ptr<Modules::NetworkComms     > networkComms      = std::make_unique<Modules::NetworkComms>(Modules::WIRELESS_COMMS, "MainNetworkComms");

@@ -31,6 +31,12 @@ set(SOURCE
     app/video/VideoRecording.hpp
     app/video/VideoStereoCalibration.cpp
     app/video/VideoStereoCalibration.hpp
+    app/video/VideoStereo.hpp
+    app/video/VideoStereo.cpp
+    app/video/VideoLaneNet.hpp
+    app/video/VideoLaneNet.cpp
+    app/ml/TensorRTEngine.hpp
+    app/ml/TensorRTEngine.cpp
     Devices/peripheralDriver.hpp
     Devices/peripheralDriver.cpp
     Devices/Pwm.cpp
@@ -171,6 +177,26 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${GSTVIDEO_LIBRARIES}
     ${GPIOD_LIBRARIES}
     nvvpi
+)
+
+find_library(NVINFER_LIBRARY
+    NAMES nvinfer
+    HINTS "${CMAKE_SYSROOT}/usr/lib"
+)
+
+find_library(NVONNXPARSER_LIBRARY
+    NAMES nvonnxparser
+    HINTS "${CMAKE_SYSROOT}/usr/lib"
+)
+
+if (NVINFER_LIBRARY AND NVONNXPARSER_LIBRARY)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${NVINFER_LIBRARY} ${NVONNXPARSER_LIBRARY})
+else()
+    message(WARNING "TensorRT libs not found (nvinfer/nvonnxparser); TRT inference unavailable")
+endif()
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+    "${CMAKE_SYSROOT}/usr/include"  # NvInfer.h is here directly
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

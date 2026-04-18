@@ -8,3 +8,4 @@ onnx
 scipy
 matplotlib
 openmim
+tensorrt
