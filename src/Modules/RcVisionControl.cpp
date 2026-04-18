@@ -203,7 +203,7 @@ int VisionControls::init(void) {
 
     VisionControls::sanitizeVpiStereoSettings(m_CamSettings);
 
-    if (m_VideoStereo->init(CAM_WIDTH, CAM_HEIGHT) != 0) {
+    if (m_VideoStereo->init(CAM_WIDTH, CAM_HEIGHT, CAM_WIDTH, CAM_HEIGHT) != 0) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize VideoStereo module\r\n");
         throw std::runtime_error("Failed to initialize VideoStereo module");
     }
@@ -945,6 +945,8 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
         }
 
         case VisionControls::CmdCalibrationSetState:
+            m_CamSettings.calibrationMode = cmd->data.u8;
+            m_VideoCalib.SetCalibrationMode(cmd->data.u8);
             break;
 
         case VisionControls::CmdCalibrationWrtParams: {
@@ -958,7 +960,8 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
                 return -1;
             }
 
-            m_VideoCalib.SetCalibrationMode();
+            // Enable calibation mode
+            m_VideoCalib.SetCalibrationMode(true);
             break;
         }
 

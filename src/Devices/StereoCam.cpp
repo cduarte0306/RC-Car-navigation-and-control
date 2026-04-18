@@ -101,7 +101,8 @@ void StereoCam::ApplyStereoFixedControls(
       ) {
     using namespace Argus;
 
-    // 1) Force manual exposure+gain (min=max)
+    // 1) Force manual exposure+gain (min=max) — both cameras MUST use identical
+    //    values to prevent brightness mismatch on a non-hardware-synced pair.
     iSource->setExposureTimeRange(Range<uint64_t>(exposureNs, exposureNs));
     iSource->setGainRange(Range<float>(gain, gain));
 
@@ -110,8 +111,19 @@ void StereoCam::ApplyStereoFixedControls(
         interface_cast<IAutoControlSettings>(iRequest->getAutoControlSettings());
     if (iACS) {
         iACS->setAeLock(true);
-        iACS->setAwbLock(lockAwb);
-    } 
+
+        // Disable auto WB entirely — locking AWB is unreliable on non-synced
+        // pairs because each camera may auto-converge to a different point
+        // before the lock takes effect.  With AWB_MODE_OFF the ISP applies a
+        // fixed (identity) color correction, guaranteeing both cameras match.
+        if (lockAwb) {
+            iACS->setAwbMode(AWB_MODE_OFF);
+        }
+    }
+
+    // NOTE: ISP denoise and edge enhancement ideally should be disabled for
+    // stereo (they destroy texture VPI needs for matching), but the Argus Ext
+    // headers are not available on this L4T version.
 }
 
 
@@ -215,24 +227,15 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
     }
     iSource->setFrameDurationRange(Range<uint64_t>(frameDuration, frameDuration));
 
-    // const uint64_t fixedExposureNs = 5'000'000ULL; // 5 ms
-    // const float fixedGain = 8.0f;
+    const uint64_t fixedExposureNs = 5'000'000ULL; // 5 ms
+    const float fixedGain = 8.0f;
 
-    // const uint64_t safeExposureNs = std::min<uint64_t>(fixedExposureNs, frameDuration - 1);
+    const uint64_t safeExposureNs = std::min<uint64_t>(fixedExposureNs, frameDuration - 1);
 
-    // ApplyStereoFixedControls(iRequest, iSource, safeExposureNs, fixedGain, /*lockAwb=*/true);
+    ApplyStereoFixedControls(iRequest, iSource, safeExposureNs, fixedGain, /*lockAwb=*/true);
 
-
-    // Cap exposure time to the frame period to prevent long exposures from lowering FPS.
-    // (This API is exposed on ISourceSettings in this Argus SDK.)
-    {
-        const uint64_t expMin = (selectedExpRange.min() > 0) ? selectedExpRange.min() : 1ULL;
-        const uint64_t expMaxMode = (selectedExpRange.max() > 0) ? selectedExpRange.max() : frameDuration;
-        const uint64_t expMax = std::min<uint64_t>(expMaxMode, frameDuration);
-        if (expMin <= expMax) {
-            iSource->setExposureTimeRange(Range<uint64_t>(expMin, expMax));
-        }
-    }
+    // NOTE: Do NOT override exposure range after ApplyStereoFixedControls —
+    // it forces min==max to guarantee both cameras expose identically.
 
     if (iSessions_[index]->repeat(requests_[index].get()) != STATUS_OK) return -1;
     started_ = true;
@@ -482,7 +485,7 @@ void StereoCam::streamProducer(CamIdx idx, Msg::CircularBuffer<FrameObject>& pro
 
 
 void StereoCam::streamConsumer() {
-    const uint64_t THRESH_NS = 10ULL * 1000 * 1000; // 5 ms
+    const uint64_t THRESH_NS = 10ULL * 1000 * 1000; // 10 ms
     static std::chrono::steady_clock::time_point timeLast = std::chrono::steady_clock::now();
 
     // Release producers at (nearly) the same time
