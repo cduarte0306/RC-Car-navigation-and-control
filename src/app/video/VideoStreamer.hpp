@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <thread>
+#include <condition_variable>
 #include <opencv2/opencv.hpp>
 
 #include "Modules/AdapterBase.hpp"
@@ -438,6 +439,10 @@ private:
      * 
      */
     Msg::CircularBuffer<std::pair<cv::Mat, cv::Mat>> m_BufferStereo;
+
+    std::condition_variable m_BufferStereoCv;
+    std::mutex m_BufferStereoMtx;
+
 
     // Msg::CircularBuffer<
     std::atomic<bool> m_Running{false};

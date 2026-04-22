@@ -218,7 +218,7 @@ int cuda::smoothPointCloud(cv::Mat& pointCloud, cv::Mat& smoothedPointCloud,
         return -1; // Unsupported types
     }
 
-    if (minAgreeing = 0) {
+    if (minAgreeing == 0) {
         smoothedPointCloud = pointCloud;
         return 0;
     }

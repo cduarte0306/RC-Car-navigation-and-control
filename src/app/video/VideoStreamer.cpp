@@ -176,6 +176,12 @@ void VideoStreamer::pushFrame(const cv::Mat& frame, cv::Matx44d& Q) {
     payload.stereoFrame = frame;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
     m_Buffer.push(payload);
+
+    // Notify any waiting readers that a new frame is available
+    {
+        std::lock_guard<std::mutex> lk(m_BufferStereoMtx);
+        m_BufferStereoCv.notify_all();
+    }
 }
 
 
@@ -186,6 +192,12 @@ void VideoStreamer::pushFrame(const cv::Mat& frame) {
     payload.stereoFrame = frame;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
     m_Buffer.push(payload);
+
+    // Notify any waiting readers that a new frame is available
+    {
+        std::lock_guard<std::mutex> lk(m_BufferStereoMtx);
+        m_BufferStereoCv.notify_all();
+    }
 }
 
 
@@ -200,12 +212,17 @@ void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
 
 void VideoStreamer::runMono() {
     while (m_Running) {
-        if (m_Buffer.isEmpty()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-            continue;
+        // Wait until it's time to send the next frame based on the configured frame rate.
+        {
+            std::unique_lock<std::mutex> lk(m_BufferStereoMtx);
+            m_BufferStereoCv.wait_for(lk, std::chrono::milliseconds(1), [this] {
+                return !m_Buffer.isEmpty() || !m_Running.load();
+            });
         }
 
         VideoStreamer::throttleFps(frameIntervalMs.load());
+
+        if (m_Buffer.isEmpty()) continue;
 
         // For lowest latency, always transmit the newest frame.
         stereoPayload bufPayload;
@@ -224,12 +241,16 @@ void VideoStreamer::runStereo() {
     std::pair<cv::Mat, cv::Mat> stereoFrames;
 
     while (m_Running) {
-        if (m_BufferStereo.isEmpty()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-            continue;
+        {
+            std::unique_lock<std::mutex> lk(m_BufferStereoMtx);
+            m_BufferStereoCv.wait_for(lk, std::chrono::milliseconds(1), [this] {
+                return !m_BufferStereo.isEmpty() || !m_Running.load();
+            });
         }
 
         VideoStreamer::throttleFps(frameIntervalMs.load());
+
+        if (m_BufferStereo.isEmpty()) continue;
 
         // For lowest latency, always transmit the newest stereo pair.
         do {
@@ -257,6 +278,8 @@ void VideoStreamer::runStereoMono() {
 
         // Point cloud transmission is hard coded to 5 frames per second deu to bandwith limitations
         VideoStreamer::throttleFps(static_cast<int>(VideoStreamer::FrameRate::_5Fps));
+
+        if (m_BufferStereoMono.isEmpty()) continue;
 
         // For lowest latency, always transmit the newest frame.
         do {

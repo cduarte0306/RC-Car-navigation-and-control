@@ -144,6 +144,9 @@ int VideoStereoCalib::configureFromJson(const std::string& jsonStr) {
         return -1;
     }
     const nlohmann::json& root = *parsed;
+    m_ImagePointsL.clear();
+    m_ImagePointsR.clear();
+    m_ObjectPoints.clear();
 
     // output_view.show_overlays
     if (root.contains("output_view") && root["output_view"].is_object()) {
@@ -227,7 +230,6 @@ void VideoStereoCalib::resetCalibrationSession() {
     m_ImagePointsR.clear();
     m_ObjectPoints.clear();
     m_ImageSize = {};
-    m_Calibrated = false;
     m_LastRmsError = 0.0;
 }
 
@@ -679,11 +681,11 @@ int VideoStereoCalib::DoCalibration(cv::Mat& leftBgr,
         return -1;
     }
     if (!(squareSize > 0.0)) {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Invalid square size: %f\n", squareSize);
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Invalid square size: %f\n", squareSize);
         return -1;
     }
     if (targetSamples < 5) {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "targetSamples too small: %zu\n", targetSamples);
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "targetSamples too small: %zu\n", targetSamples);
         return -1;
     }
 

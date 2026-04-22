@@ -14,23 +14,6 @@
 
 namespace Vision {
 VideoRecording::VideoRecording() {
-	// Load from filepath
-	const std::filesystem::path videoConfigPath = std::filesystem::path(VideoStoragePath) / "video-config.json";
-	std::ifstream fileIn(videoConfigPath);
-	std::thread loadThread;
-	
-	if (fileIn.is_open()) {
-		nlohmann::json videoLoadConfig;
-		fileIn >> videoLoadConfig;
-		if (videoLoadConfig.contains("path")) {
-			m_VideoPath = videoLoadConfig["path"].get<std::string>();
-			loadThread = std::thread([this]() {
-				loadFile(m_VideoPath);	
-			});
-			
-			loadThread.detach();
-		}
-	}
 }
 
 
@@ -40,7 +23,18 @@ VideoRecording::~VideoRecording() {
 
 
 void VideoRecording::start() {
-	// Placeholder for future background worker; currently a no-op.
+	// Load from filepath
+	const std::filesystem::path videoConfigPath = std::filesystem::path(VideoStoragePath) / "video-config.json";
+	std::ifstream fileIn(videoConfigPath);
+	
+	if (fileIn.is_open()) {
+		nlohmann::json videoLoadConfig;
+		fileIn >> videoLoadConfig;
+		if (videoLoadConfig.contains("path")) {
+			m_VideoPath = videoLoadConfig["path"].get<std::string>();
+			loadFile(m_VideoPath);
+		}
+	}
 }
 
 

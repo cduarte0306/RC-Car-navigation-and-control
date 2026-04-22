@@ -178,6 +178,23 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
             }
         },
         (CliCommandBinding){
+            "save-snapshot",
+            
+            "Saves a snapshot from the camera\r\n"
+                "\t\tsave-snapshot\r\n",
+            
+            false, this,
+            
+            [](EmbeddedCli *cli, char *args, void *context) {
+                (void)cli;
+                (void)args;
+                AppCLI* _cli = static_cast<AppCLI*>(context);
+                _cli->writeIface("Enabling video streaming...\r\n");
+                std::vector<std::string> buffer = {"save-snapshot"};
+                _cli->CameraAdapter->cliCommand(buffer);
+            }
+        },
+        (CliCommandBinding){
             "reboot-cpu",
             
             "Reboots CPU after shutting off all RC car components\r\n"

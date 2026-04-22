@@ -169,7 +169,9 @@ private:
     Msg::CircularBuffer<std::pair<std::pair<cv::Mat, cv::Mat>, Device::GyroScope::GyroData>> m_StereoBuffer{4};
 
     std::mutex startMtx_;
+    std::mutex m_FrameReadyMtx_;
     std::condition_variable startCv_;
+    std::condition_variable m_FrameReadyCv_;
     bool start_ = false;
     std::atomic<bool> m_ThreadCanRun{true};
 
