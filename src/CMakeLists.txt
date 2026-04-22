@@ -79,8 +79,9 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 )
 
 find_package(CUDAToolkit REQUIRED)
+find_package(OpenSSL REQUIRED)
 
-target_link_libraries(${PROJECT_NAME} PRIVATE CUDA::cudart)
+target_link_libraries(${PROJECT_NAME} PRIVATE CUDA::cudart OpenSSL::Crypto)
 
 option(RC_CAR_ENABLE_JETSON_MULTIMEDIA "Enable Jetson multimedia (Argus/NvBuf) integration when libraries are available" ON)
 

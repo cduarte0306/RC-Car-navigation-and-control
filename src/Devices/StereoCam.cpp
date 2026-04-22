@@ -232,7 +232,7 @@ int StereoCam::openCamera_(size_t index, uint32_t sensorId) {
 
     const uint64_t safeExposureNs = std::min<uint64_t>(fixedExposureNs, frameDuration - 1);
 
-    ApplyStereoFixedControls(iRequest, iSource, safeExposureNs, fixedGain, /*lockAwb=*/true);
+    // ApplyStereoFixedControls(iRequest, iSource, safeExposureNs, fixedGain, /*lockAwb=*/true);
 
     // NOTE: Do NOT override exposure range after ApplyStereoFixedControls —
     // it forces min==max to guarantee both cameras expose identically.

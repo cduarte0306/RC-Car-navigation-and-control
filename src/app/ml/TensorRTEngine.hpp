@@ -75,6 +75,15 @@ public:
     void setName(const char* name) { m_Name = name; }
 
 protected:
+
+    /**
+     * @brief Calculates MD5 checksum of .onnx file
+     * 
+     * @param fileName ONNX file path
+     * @return std::string Resultant checksum (Hex)
+     */
+    static std::string calculateMd5checksum(std::string& fileName);
+
     const char* m_OnnxPath   = nullptr;
     const char* m_EnginePath = nullptr;  // explicit override; if null, derived from m_OnnxPath
 

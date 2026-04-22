@@ -1,10 +1,13 @@
 #include "TensorRTEngine.hpp"
 #include "utils/logger.hpp"
+#include <openssl/md5.h>
 
 #include <fstream>
 #include <filesystem>
 #include <vector>
 #include <cuda_runtime_api.h>
+#include <openssl/md5.h>
+
 
 
 void TrtLogger::log(Severity severity, const char* msg) noexcept {
@@ -79,16 +82,34 @@ int TensorRTEngine::init(void) {
 int TensorRTEngine::createEngineFile(const char* onnxModelPath, const char* enginePath, bool enableFP16) {
     using namespace nvonnxparser;
     Logger* logger = Logger::getLoggerInst();
-
-    if (std::filesystem::exists(enginePath)) {
-        logger->log(Logger::LOG_LVL_INFO, "Engine file already exists at %s. Skipping engine creation.\r\n", enginePath);
-        return 0;
-    }
+    bool recompileEngineFile = false;
 
     // Check if the directory for the destination engine file exists, if not create it
     std::filesystem::path engineFilePath(enginePath);
     if (!std::filesystem::exists(engineFilePath.parent_path())) {
         std::filesystem::create_directories(engineFilePath.parent_path());
+    } else if (std::filesystem::exists(enginePath)) {
+        // Check if the onnx file checksum matches the store checksum
+        std::string istrm;
+        std::string calcChecksum;
+        std::ifstream file((std::filesystem::path(enginePath).parent_path()/std::filesystem::path(enginePath).stem()).generic_string() + std::string(".md5"));
+        if (file.is_open()) {
+            file >> istrm;
+            std::string onnxFile(onnxModelPath);
+            calcChecksum = calculateMd5checksum(onnxFile);
+            if (istrm != calcChecksum) {
+                logger->log(Logger::LOG_LVL_INFO, "New checksum on ONNX model detected. Re-compiling engine file...\r\n");
+                std::filesystem::remove(enginePath);  // We remove the engine file to force a to re-compile
+                recompileEngineFile = true;
+            }
+        } else {
+            recompileEngineFile = true;
+        }
+    }
+
+    if (std::filesystem::exists(enginePath) && !recompileEngineFile) {
+        logger->log(Logger::LOG_LVL_INFO, "Engine file already exists...\r\n");
+        return 0;
     }
 
     logger->log(Logger::LOG_LVL_INFO, "No engine file found at %s. Generating...\r\n", enginePath);
@@ -170,5 +191,46 @@ int TensorRTEngine::createEngineFile(const char* onnxModelPath, const char* engi
     delete config;
     delete builder;
 
+    std::string modelPath(onnxModelPath);
+    std::string md5sum = calculateMd5checksum(modelPath);
+
+    // Write the checksum to the models/ directory
+    std::ofstream md5File((std::filesystem::path(enginePath).parent_path()/std::filesystem::path(enginePath).stem()).generic_string() + std::string(".md5"));
+    if (md5File.is_open()) {
+        md5File << std::hex << md5sum;
+        md5File.close();   
+    }
+
     return 0;
+}
+
+
+std::string TensorRTEngine::calculateMd5checksum(std::string& fileName) {
+    // Check checksum file on ONNX to make sure no changes where made. If different, then we must rebuild the engine.
+    std::filesystem::path onnxPath = fileName;
+    std::filesystem::path path = onnxPath.parent_path();
+    std::filesystem::path name = path.stem();
+    path = path / name;
+    
+    std::ofstream engineChecksum;
+    std::stringstream ss;
+    
+    unsigned char result[MD5_DIGEST_LENGTH];
+    MD5_CTX mdContext;
+    MD5_Init(&mdContext);        
+
+    std::ifstream file(fileName, std::ios::binary);
+    if (!file) return "";
+
+    char buffer[4096];
+    while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0) {
+        MD5_Update(&mdContext, buffer, file.gcount());
+    }
+
+    MD5_Final(result, &mdContext);
+    
+    for(int i = 0; i < MD5_DIGEST_LENGTH; i++)
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)result[i];
+
+    return ss.str();
 }
