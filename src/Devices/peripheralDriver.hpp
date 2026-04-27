@@ -22,9 +22,20 @@ public:
         val_type_t accelerationX; // Acceleration in X axis
         val_type_t accelerationY; // Acceleration in Y axis
         val_type_t accelerationZ; // Acceleration in Z axis
+        val_type_t gyroX;         // Gyro data in X axis
+        val_type_t gyroY;         // Gyro data in Y axis
+        val_type_t gyroZ;         // Gyro data in Z axis
         val_type_t magneticX;     // Magnetic field in X axis
         val_type_t magneticY;     // Magnetic field in Y axis
         val_type_t magneticZ;     // Magnetic field in Z axis
+        
+        // Sensor health fields
+        val_type_t sensorFStatus;  // Front sensor status
+        val_type_t sensorLStatus;  // Left sensor status
+        val_type_t sensorRStatus;  // Right sensor status
+
+        val_type_t imuStatus;      // Gyro data in X axis
+        val_type_t encoderStatus;  // Temperature in degree Celsius
     } psocDataStruct;
 
     typedef enum
@@ -79,7 +90,14 @@ private:
         MAG_Z,
         
         REG_TEMPERATURE,
+
+        REG_SENSOR_F_STATUS,
+        REG_SENSOR_L_STATUS,
+        REG_SENSOR_R_STATUS,
         
+        REG_ENCODER_STATUS,
+        REG_IMU_STATUS,
+
         REG_RO_END
     } registerEnumsReadOnly;
 

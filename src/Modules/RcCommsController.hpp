@@ -6,6 +6,7 @@
 #include "RcBase.hpp"
 
 #include "Devices/network_interface/UdpServer.hpp"
+#include "Devices/network_interface/TcpServer.hpp"
 
 using namespace std;
 using namespace Adapter;
@@ -13,13 +14,11 @@ using namespace Adapter;
 namespace Modules {
 class NetworkComms : public Base, public Adapter::CommsAdapter {
 public:
+
     NetworkComms(int moduleID, std::string name);
     ~NetworkComms();
 
-    virtual int init(void) override {
-        // Implementation to initialize the motor controller
-        return 0;
-    }
+    virtual int init(void) override;
 
     virtual int stop(void) override {
         // Implementation to stop the motor controller
@@ -29,40 +28,22 @@ public:
     Adapter::AdapterBase* getInputAdapter() override {
         return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CommsAdapter*>(this));
     }
-protected:
-    enum {
-        CMD_NOOP,
-        CMD_FWD_DIR,
-        CMD_STEER,
-    };
-
-    typedef struct __attribute__((__packed__))
-    {
-        uint32_t   sequence_id;
-        uint16_t   msg_length;
-
-        struct __attribute__((__packed__))
-        {
-            uint8_t    command;
-            val_type_t data;
-        } payload;
-    } ClientReq_t;
-
-    typedef struct __attribute__((__packed__)) {
-        val_type_t data;
-        uint8_t state;    
-    } reply_t;
 
     // Override moduleCommand to handle incoming commands
     virtual int moduleCommand(char* pbuf, size_t len) override {
         return 0;
     }
 
+    virtual void OnTimer(void);
+
     // Main Process
     virtual void mainProc();
 
     // Opens network adapters
-    virtual int configureAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
+    virtual int configureUDPAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
+
+    // Opens TCP network adapters
+    virtual int configureTCPAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
 
     // Override startReceive_ to route incoming data via UDP
     virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true) override;
@@ -73,17 +54,43 @@ protected:
     // Provide host IP lookup for bound adapters
     virtual std::string getHostIP_(NetworkAdapter& adapter) override;
 
+    // CLI spefic stats reading
+    virtual std::string readStats() override;
+
     // WLAN write function
     int wlanWrite(const uint8_t* data, size_t length);
 
     // Ethernet write function
     int ethWrite(const uint8_t* data, size_t length);
+
+protected:
+    enum {
+        EthAdapter,
+        WlanAdapter,
+        MaxAdapter
+    };
+
+    struct NetStats {
+        int sPort;
+        int dPort;
+        double txRate;
+        double rxRate;
+        std::string moduleName;
+        std::unique_ptr<Network::Sockets> socket;
+        Adapter::CommsAdapter::NetworkAdapter* netAdapter = nullptr;
+    };
+
+    void OnWlanHandShakeRecv(std::vector<char>& data);
+    void OnEthHandShakeRecv(std::vector<char>& data);
+
+    constexpr static uint32_t EthHandshakePort = 8192;
+    constexpr static uint32_t WlanHandshakePort = 8193;
     
     // Map of UDP sockets by adapter ID
-    std::unordered_map<int, std::unique_ptr<Network::UdpServer>> m_UdpSockets;
+    std::unordered_map<int, NetStats> m_OpenedSockets;
 
     // Map of adapter name to non-owning socket pointers
-    std::unordered_map<std::string, Network::UdpServer*> m_AdapterMap;
+    std::unordered_map<std::string, Network::Sockets*> m_AdapterMap;
 
     // Ethernet adapter known host
     std::string m_EthHostIP;  // Ethernet known host
@@ -92,12 +99,20 @@ protected:
     std::string m_WlanHostIP; // WLAN known host
 
     // Non-owning pointer to the primary socket (first configured adapter)
-    Network::UdpServer* m_UdpSocket{nullptr};
+    Network::Sockets* m_UdpSocket{nullptr};
+
+    // WLAN socket for handshaking
+    std::shared_ptr<Network::UdpServer> m_WlanSocket{nullptr};
+    
+    // ETH socket for handshaking
+    std::shared_ptr<Network::UdpServer> m_EthSocket{nullptr};
 
     // List of adapter names that failed to open
     std::vector<std::pair<int, Adapter::CommsAdapter::NetworkAdapter*>> m_FailedAdapters;
 
     // Map of adapter IDs to failed adapter structs for quick lookup
     std::map<int, Adapter::CommsAdapter::NetworkAdapter*> m_FailedAdapterMap;
+
+    
 };
 };

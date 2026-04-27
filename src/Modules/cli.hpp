@@ -13,20 +13,23 @@ public:
     // Helper to forward a command buffer to the motor adapter
     int sendMotorCommand(char* pbuf, size_t len);
     
-    virtual int init(void) override {
-        return 0;
-    }
+    virtual int init(void) override;
     virtual int stop(void) override;
 
 protected:
     virtual void mainProc() override;
+
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_CliAdapter{nullptr};
+
+    std::mutex mutex;
+    std::vector<char> cmdBuffer;
 private:
     const char* tty = "/dev/ttyTHS1";
 
     EmbeddedCli *CLI = nullptr;
     int fd = -1;
 
-    int openInterface();
+    
     int writeIface(const char* format, ...);
 };
 }

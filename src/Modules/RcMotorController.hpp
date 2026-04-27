@@ -8,6 +8,7 @@
 #include "Devices/Pwm.hpp"
 #include "Devices/DeviceBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
+#include "Devices/Gpio.hpp"
 
 
 namespace Modules {
@@ -16,10 +17,7 @@ public:
     MotorController(int moduleID_, std::string name);
     ~MotorController();
 
-    virtual int stop(void) override {
-        // Implementation to stop the motor controller
-        return 0;
-    }
+    virtual int stop(void) override;
 
 
     Adapter::AdapterBase* getInputAdapter() override {
@@ -93,6 +91,12 @@ protected:
      * 
      */
     std::unique_ptr<Device::PeripheralCtrl> peripheralDriver = nullptr;
+
+    /**
+     * @brief GPIO to enable/disable motor controller
+     * 
+     */
+    Device::Gpio* m_GpioEnable = nullptr;
 
     /**
      * @brief Direction control PWM

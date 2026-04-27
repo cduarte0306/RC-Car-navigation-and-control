@@ -10,15 +10,22 @@
 #include <opencv2/dnn.hpp>
 #include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
+#include "Devices/StereoCam.hpp"
+#include "Devices/GyroScope.hpp"
 
-#include "app/VideoRecording.hpp"
+#include "app/video/VideoRecording.hpp"
+#include "app/video/VideoStereoCalibration.hpp"
+#include "app/video/VideoStreamer.hpp"
+#include "app/video/VideoLaneNet.hpp"
+#include "app/video/VideoStereo.hpp"
 
+#include <opencv2/cudastereo.hpp>
 
 namespace Modules {
 class VisionControls : public Base, public Adapter::CameraAdapter {
 public:
     VisionControls(int moduleID, std::string name);
-    ~VisionControls() {}
+    ~VisionControls();
 
     virtual int init(void) override;
 
@@ -34,7 +41,10 @@ public:
 
     virtual int moduleCommand_(std::vector<char>& buffer) override;
 
-    virtual int configurePipeline_(const std::string& host) override;
+    virtual int moduleCliCmd_(std::vector<std::string>& buffer) override;
+
+    // Command handlers
+    virtual std::string readStats() override;
     
 protected:
 #pragma pack(push, 1)
@@ -56,36 +66,100 @@ protected:
 
 #pragma pack(pop)
     enum {
-        StreamCamera,
-        StreamSim
+        StreamCameraSource,  // normal camera mode
+        StreamSimSource,     // simulation camera mode
+        StreamMaxSources
     };
 
     // Camera module commands
     enum {
-        CmdSetFrameRate,  // set camera frame rate
-        CmdStartStream,   // start video stream
-        CmdStopStream,    // stop video stream
-        CmdStreamMode,    // start simulation video stream
-        CmdSelCameraMode, // select camera mode
-        CmdClrVideoRec    // clear video recording buffer
+        CmdStartStream,           // start video stream
+        CmdStopStream,            // stop video stream
+        CmdSelCameraStream,       // select camera stream (Normal or training)
+        CmdSetFps,                // set streaming parameters (host IP, port, etc)
+        CmdSetQuality,            // Set the stream compresison quality
+        
+        // Stereo parameters
+        CmdSetMinDisparities,      // Set maximum disparities
+        CmdSetMaxDisparities,
+        CmdSetConfidenceThreshold,
+        CmdSetUniquenessRatio,    // Sets the uniqueness ratio
+        CmdSetP1,                 // Sets StereoSGM P1
+        CmdSetP2,                 // Sets StereoSGM P2
+        CmdSetZMax,
+        CmdSetZMin,
+        CmdSetDepthThreshold,
+        CmdSetMinAgreeingPixels,
+        CmdSetColorThreshold,
+
+        CmdRdParams,              // Command to read all configured parameteres
+        CmdClrVideoRec,           // clear video recording buffer
+        CmdSaveVideo,             // save video recording to disks
+        CmdLoadStoredVideos,      // Read stored videos from disk
+        CmdLoadSelectedVideo,     // load selected video from disk
+        CmdDeleteVideo,           // Delete video
+        CmdCalibrationSetState,   // Start video calibration
+        CmdCalibrationWrtParams,  // Sets calibration paramters
+        CmdCalibrationReset,      // Reset calibration
+        CmdCalibrationSave,       // Save calibration to disk
     };
 
-    // Setting enums
+    // Camera process enums
     enum {
         CamModeNormal,
-        CamModeDepth,
-        CamModeTraining
+        CamModeDisparity,
+        CamModeMax
     };
 
     struct CameraCommand {
         uint8_t command;
         val_type_t data;
+        uint32_t payloadLen;
     } __attribute__((__packed__));
 
     struct CameraSettings {
         int frameRate = 30;
+        int quality = 100;
+        int numDisparities = 128;
+        int numBlocks = 15;
+
+        int preFilterType;
+        int preFilterSize;
+        int preFilterCap;
+        int textureThreshold;
+        int uniquenessRatio;
+        int speckleWindowSize;
+        int speckleRange;
+        int disp12MaxDiff;
+        int p1 = 0;
+        int p2 = 0;
+        int sgmMode = cv::cuda::StereoSGM::MODE_HH4;
+
+        // VPI stereo runtime parameters (windowSize intentionally not user-configurable)
+        int maxDisparity = 0;
+        int minDisparity = 0;
+        int confidenceThreshold = 32767;
+        int confidenceType = 0;
+        int vpiQuality = 1;
+        int p2Alpha = 0;
+        float uniqueness = -1.0f;
+        int numPasses = 3;
+        float depthThreshold = 0.01f;
+        int   minAgreeingPixels = 20;
+        float colorThreshold = 30.0f;
+
+        float zMax = 10;
+        float zMin = 0;
+
         int mode      = CamModeNormal;
+        std::atomic<uint8_t> streamSelection{StreamCameraSource};
+        std::atomic<bool> calibrationMode{false};
+        std::string videoName = "recording.MOV";
+        cv::Size chessboardSize{9, 6}; // inner corners (cols, rows)
     } m_CamSettings;
+
+    static constexpr int CAM_WIDTH  = 640;
+    static constexpr int CAM_HEIGHT = 480;
 
     // Parent main proc override
     virtual void mainProc() override;
@@ -94,19 +168,34 @@ protected:
     virtual void OnTimer(void) override;
 
     // Frame transmission handler
-    void decodeJPEG(cv::Mat& frame, const VideoFrame& frameEntry);
+    void decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameEntry);
 
     // Receive frame handler
-    void recvFrame(std::vector<char>& data);
+    void onEthRecv(std::vector<char>& data);
 
-    // Frame processing handler
-    void processFrame(cv::Mat& frame);
+    // Stereo frame processing handler
+    void processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
 
-    // Depth processing handler
-    void processDepth(cv::Mat& frame);
+    // Lane detection
+    void processLaneDetection(cv::Mat& frame, cv::Mat& dst);
+
+    // Frame storage handler
+    void storeFrame(const cv::Mat& frameL, const cv::Mat& frameR);
+
+    // Save the streaming profile parameters
+    static int saveStreamingProfile(CameraSettings& settings);
+
+    // Load all settings
+    static int loadStreamingProfile(CameraSettings& settings);
+
+    // Clamp settings to VPI CUDA stereo constraints.
+    static void sanitizeVpiStereoSettings(CameraSettings& settings);
+
+    // Camera source stream handler
+    // void processCameraSource(Devices::StereoCam& cam);
 
     struct StreamStatus {
-        std::atomic<uint8_t> streamInStatus{StreamCamera};
+        std::atomic<uint8_t> streamInStatus{StreamCameraSource};
         int streamInCounter = 0;  // Stream IN watchdog counter
     } m_StreamStats;
 
@@ -119,17 +208,21 @@ protected:
     // Pipeline mutex lock
     std::mutex m_HostIPMutex;
 
+    // Stereo object mutex
+    std::mutex m_StereoMutex;
+
     // Video transmitter socket
     std::unique_ptr<Network::UdpServer> m_UdpSocket;
-
-    //  Training video input socket (only over eth)
-    std::unique_ptr<Network::UdpServer> m_UdpSimSocket;
 
     // Flag allowing the camera reader to feed the circular buffer
     std::atomic<bool> m_StreamerCanRun{false};
 
     // Frame received flag
     bool m_ReceivingFrame{false};
+
+    cv::cuda::GpuMat m_dHoughLines;
+
+    cv::dnn::Net m_Net;
 
     // Receive frame buffer
     cv::Mat m_ReceivedFrame;
@@ -141,16 +234,37 @@ protected:
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TxAdapter{nullptr};
 
     // Reception port
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_RxAdapter{nullptr};
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_EthAdapter{nullptr};
+
+    // Training video input port
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_SimVideoAdapter{nullptr};
 
     // Video recorder
-    VideoRecording m_VideoRecorder;
+    Vision::VideoRecording m_VideoRecorder;
+
+    std::unique_ptr<Vision::VideoStreamer> m_VideoStreamer{nullptr};
+
+    std::unique_ptr<Vision::LaneNet> m_LaneNet{nullptr};
+
+    std::unique_ptr<Vision::VideoStereo> m_VideoStereo{nullptr};
+
+    // Stereo camera object
+    std::unique_ptr<Devices::StereoCam> m_Cam{nullptr};
+    
+    // Video calibration
+    Vision::VideoStereoCalib m_VideoCalib;
 
     // Incoming frame assembler
-    VideoFrame m_StreamInFrame;
+    Vision::VideoFrame m_StreamInFrame;
+
+    // Flag marking whether we should save frames
+    bool m_SaveFrames = false;
 
     // Frame ID
     uint32_t m_FrameID = 0;
+
+    // Name of the currently-downloaded (sim) video, derived from incoming packet metadata.
+    std::string m_LastIncomingVideoName;
 
     // DNN model
     cv::dnn::Net m_DnnNetDepth;

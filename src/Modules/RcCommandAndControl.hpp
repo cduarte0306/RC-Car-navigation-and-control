@@ -33,14 +33,18 @@ protected:
         CmdNoop,         // No operation command
         CmdFwdDir,       // Forward direction command
         CmdSteer,        // Steering command
-        CmdCameraSetMode // Camera mode setting command
+        CmdCameraModule // Camera mode setting command
     };
 
     typedef struct __attribute__((__packed__))
     {
-        uint32_t   sequence_id;
+        uint16_t   sequence_id;
         uint16_t   msg_length;
+    } MsgHeader_t;
 
+    typedef struct __attribute__((__packed__))
+    {
+        MsgHeader_t header;
         struct __attribute__((__packed__))
         {
             uint8_t    command;
@@ -51,8 +55,14 @@ protected:
 
     typedef struct __attribute__((__packed__)) {
         val_type_t data;
-        uint8_t state;  
+        uint8_t state;
+        uint32_t payloadLen;
     } reply_t;
+
+    typedef struct __attribute__((__packed__)) {
+       MsgHeader_t header;
+       reply_t     reply; 
+    } HostReply_t;
 
     virtual int moduleCommand(char* pbuf, size_t len) override {
         return 0;
@@ -66,6 +76,9 @@ protected:
 
     // Map of UDP sockets by adapter ID
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_CommandNetAdapter{nullptr};
+
+    // UDP socket pointer for sending data
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_CommandNetAdapterEth{nullptr};
 
     std::unique_ptr<Network::UdpServer> m_UdpSocket;
 

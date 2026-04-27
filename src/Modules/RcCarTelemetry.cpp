@@ -7,20 +7,26 @@
 #include <chrono>
 #include <thread>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 
 
 namespace Modules {
+static nlohmann::json tempTlm;
+
 RcCarTelemetry::RcCarTelemetry(int moduleID, std::string name) : Modules::Base(moduleID, name), Adapter::TlmAdapter(name) {
 }
 
 int RcCarTelemetry::init(void) {
     // Initialize transmission adapter
     Logger* logger = Logger::getLoggerInst();
-    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(6000, "wlP1p1s0");
+    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, 6000, "wlP1p1s0");
     if (!m_TxAdapter) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create telemetry transmission adapter\r\n");
         return -1;
     }
+
+    setPeriod(1000);
 
     logger->log(Logger::LOG_LVL_INFO, "Telemetry module initialized\r\n");
     return 0;
@@ -42,6 +48,9 @@ int RcCarTelemetry::registerTelemetrySource_(const std::string& sourceName) {
     if (sourceName.empty()) {
         return -1;
     }
+
+    Logger* logger = Logger::getLoggerInst();
+    logger->log(Logger::LOG_LVL_INFO, "Registered telemetry source: %s\r\n", sourceName.c_str());
     m_registeredSources.insert(sourceName);
     return 0;
 }
@@ -62,10 +71,12 @@ int RcCarTelemetry::publishTelemetry_(const std::string& sourceName, const uint8
 
     // Only allow known sources
     if (m_registeredSources.find(sourceName) == m_registeredSources.end()) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Telemetry publish from unregistered source: %s\r\n", sourceName.c_str());
         return -1;
     }
 
     if (!m_TxAdapter || !this->CommsAdapter) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Telemetry publish failed: Transmission adapter not initialized\r\n");
         return -1;
     }
 
@@ -78,7 +89,29 @@ int RcCarTelemetry::publishTelemetry_(const std::string& sourceName, const uint8
 }
 
 
+void RcCarTelemetry::OnTimer() {
+    // Read CPU temperature
+    const std::vector<std::pair<std::string, std::string>> zones = {
+        {"/sys/devices/virtual/thermal/thermal_zone0/temp", "CPU_TEMP"},
+        {"/sys/devices/virtual/thermal/thermal_zone1/temp", "GPU_TEMP"},
+        {"/sys/devices/virtual/thermal/thermal_zone2/temp", "SOC_TEMP"},
+    };
+
+    for (const auto& [path, label] : zones) {
+        std::ifstream file(path);
+        if (!file.is_open()) continue;
+
+        int raw;
+        file >> raw;
+
+        // Data is millicelcius
+        tempTlm[label] = raw / 1000.0;
+    }
+}
+
+
 /**
+ * 
  * @brief Main processing loop
  * 
  */
@@ -101,9 +134,15 @@ void RcCarTelemetry::mainProc() {
         while (!m_TlmBuffer.isEmpty()) {
             std::lock_guard<std::mutex> lock(m_txMutex);
             nlohmann::json tlmData = m_TlmBuffer.getHead();
+            
+            // Append temperature telemetry
+            for (auto& [key, value] : tempTlm.items()) {
+                tlmData[key] = value;
+            }
+            
             m_TlmBuffer.pop();
             std::string payload = tlmData.dump();
-            m_TxAdapter->send(hostIP,
+            m_TxAdapter->send(
                 reinterpret_cast<const uint8_t*>(payload.data()),
                 payload.size());
         }

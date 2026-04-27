@@ -29,20 +29,11 @@
 #define CMD_BUFFER_SIZE     (32u)                   // To store current input that is not yet sent as command
 #define HISTORY_BUFFER_SIZE (4 * CMD_BUFFER_SIZE)   // To store previous commands
 
-#define CLI_PORT            (65000)
+#define CLI_PORT            (8001)
 
 namespace Modules
 {
 AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
-    if (this->openInterface() < 0) {
-        throw("Failed to open TTY interface");
-    }
-
-    this->writeIface("\033[2J\033[H");
-    this->writeIface("\r\n*************************RC Car CLI Interface*************************\r\n");
-    this->writeIface("Software version: %u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
-    this->writeIface("Please enter \"help\" to list available commands\r\n");
-
     const CliCommandBinding cmdBindings[] = {
         (CliCommandBinding){
             "read-psoc",
@@ -148,6 +139,62 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
             }
         },
         (CliCommandBinding){
+            "read-stats",
+            
+            "Reads stats from specied module\r\n"
+                "\tCommunications module ID: 0\r\n"
+                "\tCamera module ID: 1\r\n"
+                "\tread-stats \"<module ID>\"\r\n",
+            true, this,
+            
+            [](EmbeddedCli *cli, char *args, void *context) {
+                (void)cli;
+                AppCLI* _cli = static_cast<AppCLI*>(context);
+                const char *moduleIdx_ = embeddedCliGetToken(args, 1);
+                if (moduleIdx_ == nullptr) {
+                    _cli->writeIface("ERROR: Failed to provide argument\r\n");
+                    return;
+                }
+                
+                int moduleIdx = std::stoi(std::string(moduleIdx_));
+                switch (moduleIdx)
+                {
+                case 0: {
+                    std::string stats = _cli->CommsAdapter->readStats();
+                    _cli->writeIface("%s\n", stats.c_str());
+                    break;
+                }
+
+                case 1: {
+                    std::string stats = _cli->CameraAdapter->readStats();
+                    _cli->writeIface("%s\n", stats.c_str());
+                    break;
+                }
+
+                default:
+                    _cli->writeIface("Unknown module ID provided\r\n");
+                    break;
+                }
+            }
+        },
+        (CliCommandBinding){
+            "save-snapshot",
+            
+            "Saves a snapshot from the camera\r\n"
+                "\t\tsave-snapshot\r\n",
+            
+            false, this,
+            
+            [](EmbeddedCli *cli, char *args, void *context) {
+                (void)cli;
+                (void)args;
+                AppCLI* _cli = static_cast<AppCLI*>(context);
+                _cli->writeIface("Enabling video streaming...\r\n");
+                std::vector<std::string> buffer = {"save-snapshot"};
+                _cli->CameraAdapter->cliCommand(buffer);
+            }
+        },
+        (CliCommandBinding){
             "reboot-cpu",
             
             "Reboots CPU after shutting off all RC car components\r\n"
@@ -208,7 +255,8 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
     // Override the writeChar function to send output over UDP
     CLI->writeChar = [](EmbeddedCli *cli, char c ) {
         AppCLI* _cli = static_cast<AppCLI*>(cli->appContext);
-        int ret = write(_cli->fd, &c, 1);
+        std::vector<char> data = {c};
+        int ret = _cli->m_CliAdapter->send(reinterpret_cast<const uint8_t*>(data.data()), data.size());
         Logger* logger = Logger::getLoggerInst();
         if (ret < 0) {
             logger->log(Logger::LOG_LVL_ERROR, "%s, %s, Error writing to TTY\r\n", __func__, __LINE__);
@@ -223,6 +271,13 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
 AppCLI::~AppCLI() {
 }
 
+int AppCLI::init(void) {
+    m_CliAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::TcpAdapterType, CLI_PORT, 0, "lo", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_CliAdapter->setParent(this->getName());
+
+    return 0;
+}
+
 int AppCLI::stop(void) {
     // Stop main loop and close TTY
     if (fd >= 0) {
@@ -235,58 +290,33 @@ int AppCLI::stop(void) {
 
 void AppCLI::mainProc() {
     uint8_t buffer[128];
+    bool connected = false;
         
     // Simulate the enter key press to show the invitation prompt
     embeddedCliReceiveChar(this->CLI, '\n');
     embeddedCliProcess(this->CLI);
 
+    m_CliAdapter->onConnected = [this]() {
+        this->writeIface("\033[2J\033[H");
+        this->writeIface("\r\n*************************RC Car CLI Interface*************************\r\n");
+        this->writeIface("Software version: %u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
+        this->writeIface("Please enter \"help\" to list available commands\r\n");
+    };
+
+    this->CommsAdapter->startReceive(
+        *m_CliAdapter,
+        [this](std::vector<char>& data) {
+            std::lock_guard<std::mutex> lock(this->mutex);
+            for (char c : data) {
+                embeddedCliReceiveChar(this->CLI, c);
+            }
+            embeddedCliProcess(this->CLI);
+        }, false
+    );
+    
     while (true) {
-        int ret = read(this->fd, buffer, sizeof(buffer));
-        if (ret < 0) {
-            std::cerr << "Error reading from TTY" << std::endl;
-            continue;
-        }
-        for (int i = 0; i < ret; ++i) {
-            embeddedCliReceiveChar(this->CLI, buffer[i]);
-        }
-        embeddedCliProcess(this->CLI);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
-}
-
-
-/**
- * @brief Opens the TTY interface
- * 
- * @return int File descriptor of opened TTY, or -1 on error
- */
-int AppCLI::openInterface() {
-    this->fd = open(this->tty, O_RDWR | O_NOCTTY | O_NDELAY);
-    if (fd == -1) {
-        std::cerr << "Failed to open " << this->tty << std::endl;
-        return -1;
-    }
-
-    fcntl(fd, F_SETFL, 0); // Blocking read
-
-    struct termios options;
-    tcgetattr(fd, &options);
-
-    cfsetispeed(&options, B115200);
-    cfsetospeed(&options, B115200);
-
-    options.c_cflag |= (CLOCAL | CREAD); // Enable receiver, ignore modem control lines
-    options.c_cflag &= ~PARENB;          // No parity
-    options.c_cflag &= ~CSTOPB;          // 1 stop bit
-    options.c_cflag &= ~CSIZE;           // Clear current char size mask
-    options.c_cflag |= CS8;              // 8 data bits
-
-    options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG); // Raw input
-    options.c_iflag &= ~(IXON | IXOFF | IXANY);         // No software flow control
-    options.c_oflag &= ~OPOST;                          // Raw output
-
-    tcsetattr(fd, TCSANOW, &options);
-    return fd;
 }
 
 
@@ -312,11 +342,10 @@ int AppCLI::writeIface(const char* format, ...) {
         std::cerr << "Error formatting string" << std::endl;
         return -1;
     }
-    int ret = write(this->fd, buffer, len);
-    if (ret < 0) {
-        std::cerr << "Error writing to TTY" << std::endl;
-        return -1;
-    }
+
+    // Write over ethernet
+    std::vector<uint8_t> data(buffer, buffer + len);
+    int ret = m_CliAdapter->send(data.data(), data.size());
     return ret;
 }
 }

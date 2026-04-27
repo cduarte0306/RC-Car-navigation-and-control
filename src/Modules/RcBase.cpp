@@ -20,4 +20,21 @@ namespace Modules {
             }
         }
     }
+
+    int Base::moduleRegisterCommand(const int commandID, std::function<int(std::vector<char>&)> handler) {
+        commandHandlers[commandID] = handler;
+        return 0; // Success
+    }
+
+    int Base::dispatchCommand(const int commandID, std::vector<char>& buffer) {
+        try {
+            auto handler = commandHandlers[commandID];
+            return handler(buffer);
+        } catch (const std::out_of_range& e) {
+            // Handle the case where the commandID is not found in the map
+            return -1; // Command not found
+        }
+
+        return 0; // Success
+    }
 }

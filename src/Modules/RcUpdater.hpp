@@ -3,9 +3,10 @@
 #include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
 
+#include <condition_variable>
 
 namespace Modules {
-class Updater : public Base, public Adapter::CommandAdapter {
+class Updater : public Base, public Adapter::UpdateAdapter {
 public:
     Updater(int moduleID_, std::string name);
     ~Updater();
@@ -16,7 +17,7 @@ public:
      * @return Adapter::AdapterBase* Pointer to the input adapter
      */
     Adapter::AdapterBase* getInputAdapter() override {
-        return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::UpdaterAdapter*>(this));
+        return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::UpdateAdapter*>(this));
     }
 
     /**
@@ -41,25 +42,25 @@ public:
      * 
      * @return Adapter::AdapterBase* Pointer to the input adapter
      */
-    virtual int moduleCommand_(std::vector<char>& buffer) override;
+    virtual int moduleCommand_(std::vector<char>& buffer);
 
 protected:
     enum {
-        DownloadFirmwareData = 1,  // Download firmware data command
-        VerifyFirmware       = 2,  // Verify firmware command
-        InstallFirmware      = 3   // Install firmware command
+        PrepareForUpdate = 1,  // Command to prepare the system for an update (e.g., stop motors, close connections)
+        UploadFirmwareData,  // Download firmware data command
+        VerifyFirmware      ,  // Verify firmware command
+        InstallFirmware        // Install firmware command
     };
 
-    typedef struct __attribute__((__packed__))
-    {
-        struct __attribute__((__packed__))
-        {
-            uint8_t    command;
-            val_type_t data;
-            uint32_t   payloadLen;
-        } header;
-        uint8_t payload[];
-    } UpdaterReq_t;
+    struct UpdaterReqHeader {
+        uint8_t command;      // Command identifier
+        uint64_t payloadLen;  // Length of the payload following the header
+    };
+
+    struct FileInfo {
+      std::string fileName;
+      size_t fileLen;  
+    };
 
     /**
      * @brief Main processing loop for the updater module
@@ -67,10 +68,62 @@ protected:
      */
     virtual void mainProc() override;
 
+    /**
+     * @brief Handle the prepare for update command, which may involve steps like stopping motors and closing connections to ensure a safe update process
+     * 
+     * @param payload Command payload containing any necessary information for preparing for the update (e.g., target file name)
+     * @return int Error code indicating success or failure of the preparation step
+     */
+    int prepareForUpdateHandler(const std::vector<char>& payload);
+
+    /**
+    * @brief Handle the upload firmware data command, which involves receiving chunks of firmware data and writing them to a temporary file for later verification and installation
+    * 
+    * @param payload Command payload containing the chunk of firmware data to be written
+    * @return int Error code indicating success or failure of the data upload step
+    */
+    int uploadFirmwareDataHandler(const std::vector<char>& payload);
+
+    /**
+     * @brief Handle the verify firmware command, which involves checking the integrity and authenticity of the received firmware data (e.g., by comparing hashes) before allowing installation
+     * 
+     * @param payload Command payload containing any necessary information for verifying the firmware (e.g., expected hash value)
+     * @return int Error code indicating success or failure of the verification step
+     */
+    int verifyFirmwareHandler(const std::vector<char>& payload);
+
+    /**
+     * @brief Handle the install firmware command, which involves replacing the existing firmware with the new verified firmware and performing any necessary cleanup or reboot steps
+     * 
+     * @param payload Command payload containing any necessary information for installing the firmware (e.g., installation instructions)
+     * @return int Error code indicating success or failure of the installation step
+     */
+    int installFirmwareHandler(const std::vector<char>& payload);
+
     static constexpr char* IMAGE_LOCATION = (char*)"/data/rc_updater/";
 
-    // Local Updaterr port interface
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_UpdatServerPort{nullptr};
+    /**
+     * @brief Update file data buffer
+     * 
+     */
+    Msg::CircularBuffer<std::vector<uint8_t>> m_Buffer;
+
+    /**
+     * @brief Data received signal
+     * 
+     */
+    std::condition_variable m_DataReceived;
+
+    /**
+     * @brief Mutex for synchronizing access to the update signal
+     */
+    std::mutex m_UpdateSignalMutex;
+
+    /**
+     * @brief Update file info struct to hold metadata about the incoming firmware update
+     * 
+     */
+    FileInfo m_UpdateFileInfo;
 };
 }
 

@@ -13,3 +13,8 @@ _deps
 CMakeUserPresets.json
 build/
 docs/
+test/
+/test/**/video/
+venv/
+*.engine
+*.MOV*

@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <cstring>
+#include <limits>
 
 #include "utils/logger.hpp"
 #include "Devices/RegisterMap.hpp"
@@ -28,12 +29,19 @@ CommandController::~CommandController() {
 int CommandController::init(void) {
     Logger* logger = Logger::getLoggerInst();
     // Initialize the UDP server
-    m_CommandNetAdapter = this->CommsAdapter->createNetworkAdapter(65000, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_CommandNetAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 65000, 0, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
     if (!m_CommandNetAdapter) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create command network adapter\r\n");
         return -1;
     }
 
+    m_CommandNetAdapterEth = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 65000, 0, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    if (!m_CommandNetAdapterEth) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to create command network adapter\r\n");
+        return -1;
+    }
+
+    logger->log(Logger::LOG_LVL_INFO, "CommandController module initialized\r\n");
     return 0;
 }
 
@@ -58,8 +66,8 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
     ClientReq_t* clientData = reinterpret_cast<ClientReq_t*>(buffer.data());
 
     // Validate declared lengths before accessing payload
-    const size_t declaredMsgLen = clientData->msg_length;
-    const size_t baseHeader = sizeof(clientData->sequence_id) + sizeof(clientData->msg_length);
+    const size_t declaredMsgLen = clientData->header.msg_length;
+    const size_t baseHeader = sizeof(clientData->header.sequence_id) + sizeof(clientData->header.msg_length);
     const size_t basePayload = sizeof(clientData->payload);
     const size_t minimumFrame = baseHeader + basePayload;
 
@@ -81,7 +89,9 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
         return;
     }
 
-    CommandController::reply_t reply;
+    std::vector<char> replyPayloadPacket;
+    CommandController::HostReply_t replyPacket{};
+    CommandController::reply_t reply{};
     size_t length = sizeof(reply);
 
     switch(clientData->payload.command) {
@@ -102,27 +112,42 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
             this->motorAdapter->steer(clientData->payload.data.i16); // Example: set steering angle
             break;
 
-        case CmdCameraSetMode: {
+        case CmdCameraModule: {
             reply.state = true;
-            std::vector<char> payloadBuffer;
             if (extraLen > 0) {
-                payloadBuffer.insert(payloadBuffer.end(), buffer.begin() + extraOffset, buffer.begin() + extraOffset + extraLen);
+                replyPayloadPacket.insert(replyPayloadPacket.end(), buffer.begin() + extraOffset, buffer.begin() + extraOffset + extraLen);
+                int ret = this->CameraAdapter->moduleCommand(replyPayloadPacket);
+                reply.state = (ret == 0) ? true : false;
+            } else {
+                reply.state = false;
             }
-            int ret = this->CameraAdapter->moduleCommand(payloadBuffer);
-            reply.state = (ret >= 0);
         } break;
 
         default:
             // Unknown command, set error state
             logger->log(Logger::LOG_LVL_WARN, "Unknown command :%d\r\n", clientData->payload.command);
-            reply.state = true; // Error state
+            reply.state = false; // Error state
             break;
     }
 
     // Build reply
+    if (replyPayloadPacket.size() > (std::numeric_limits<uint16_t>::max() - sizeof(reply))) {
+        logger->log(Logger::LOG_LVL_WARN,
+                    "Reply payload too large (%zu bytes), dropping\n",
+                    replyPayloadPacket.size());
+        replyPayloadPacket.clear();
+    }
+    replyPacket.header.sequence_id = clientData->header.sequence_id;
+    reply.payloadLen               = static_cast<uint32_t>(replyPayloadPacket.size());
+    replyPacket.header.msg_length  = static_cast<uint16_t>(sizeof(reply) + replyPayloadPacket.size());
+    replyPacket.reply              = reply;
     buffer.clear();
-    buffer.resize(sizeof(reply));
-    std::memcpy(buffer.data(), &reply, sizeof(reply));
+    buffer.resize(sizeof(replyPacket) + replyPayloadPacket.size());
+
+    std::memcpy(buffer.data(), &replyPacket, sizeof(replyPacket));
+    if (!replyPayloadPacket.empty()) {
+        std::memcpy(buffer.data() + sizeof(replyPacket), replyPayloadPacket.data(), replyPayloadPacket.size());
+    }
 }
 
 
@@ -142,16 +167,9 @@ void CommandController::mainProc() {
 
         Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "CommandController network adapter connected. Configuring receive callback\r\n");
         this->CommsAdapter->startReceive(*m_CommandNetAdapter, std::bind(&CommandController::processIncomingData, this, std::placeholders::_1));
+        this->CommsAdapter->startReceive(*m_CommandNetAdapterEth, std::bind(&CommandController::processIncomingData, this, std::placeholders::_1));
 
         while (true) {
-            // Process motor commands
-            hostIP = this->CommsAdapter->getHostIP(*m_CommandNetAdapter);
-            if (hostIP.length() && (hostIP != lastHost)) {
-                this->CameraAdapter->configurePipeline(hostIP);
-                regMap->set(RegisterMap::RegisterKeys::HostIP, hostIP);
-                lastHost = hostIP;
-            }
-
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }

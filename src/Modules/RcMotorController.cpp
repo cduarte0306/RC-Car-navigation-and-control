@@ -3,8 +3,10 @@
 #include <iostream>
 #include <chrono>
 #include <string>
+#include <algorithm>
 #include "utils/logger.hpp"
 #include <nlohmann/json.hpp>
+#include "app/motor/MotorLogController.hpp"
 #include "Devices/RegisterMap.hpp"
 
 
@@ -29,6 +31,9 @@ MotorController::MotorController(int moduleID_, std::string name) : Base(moduleI
     } catch (const std::exception& e) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize PeripheralCtrl and motor control: %s\r\n", e.what());
     }
+
+    // Open GPIO for enabling motor direction
+    m_GpioEnable = Device::Gpio::create(31); // Physical header pin 33, GPIO1_31
 }
 
 MotorController::~MotorController() {
@@ -56,6 +61,13 @@ int MotorController::init(void) {
 
     logger->log(Logger::LOG_LVL_INFO, "Opened motor telemetry network adapter at port 65001\r\n");
     return 0;
+}
+
+
+int MotorController::stop(void) {
+    Logger* logger = Logger::getLoggerInst();
+    logger->log(Logger::LOG_LVL_INFO, "Stopping motor operations...\r\n");
+    
 }
 
 
@@ -136,17 +148,26 @@ int MotorController::setMotorSpeed_(int speed) {
         return -1;
     }
 
-    if (speed < 0) {
-        speed *= -2;
+    if (speed < 5 && speed > -5) {
+        speed = 0; // Deadzone
     }
 
-    if (speed < 3) {
-        speed = 0;
+    if (speed < 0) {
+        m_GpioEnable->gpioWrite(0); // Set direction GPIO high for reverse
+        speed = -speed;
+    } else {
+        m_GpioEnable->gpioWrite(1); // Set direction GPIO low for forward
     }
+
+    // Convert to Duty cycle percentage (0-100). Analog stick input range is -127 to 127
+    int dutyCycle = (static_cast<int>((static_cast<float>(speed) / 127.0f) * 100.0f));
+    speed = std::min(100, std::max(0, dutyCycle));
+
     Logger* logger = Logger::getLoggerInst();
+    // int ret =0;
     int ret = this->m_PwmFwd->writeDutyCycle(speed);
     if (ret < 0) {
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to set PWM duty cycle\r\n");
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to set PWM duty cycle: %d\r\n", speed);
     }
     return ret;
 }
@@ -188,43 +209,49 @@ int MotorController::steer_(int counts)
  * 
  */
 void MotorController::pollTlmData(void) {
-    if (!m_isControllerConnected) {
-        return;
-    }
-
     {
         std::lock_guard<std::mutex> lock(mtrControllerMutex);
         this->peripheralDriver->readData(psocData);
     }
     RegisterMap* regMap = RegisterMap::getInstance();
-    auto retVal = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP);
 
     nlohmann::json telemetryJson;
-    telemetryJson["version_major"] = psocData.version_major.u8;
-    telemetryJson["version_minor"] = psocData.version_minor.u8;
-    telemetryJson["version_build"] = psocData.version_build.u8;
-    telemetryJson["speed"        ] = psocData.speed.u32;
-    telemetryJson["frontDistance"] = psocData.frontDistance.u32;
-    telemetryJson["leftDistance" ] = psocData.leftDistance.u32;
-    telemetryJson["rightDistance"] = psocData.rightDistance.u32;
-    telemetryJson["accelerationX"] = psocData.accelerationX.f32;
-    telemetryJson["accelerationY"] = psocData.accelerationY.f32;
-    telemetryJson["accelerationZ"] = psocData.accelerationZ.f32;
-    telemetryJson["magneticX"   ] = psocData.magneticX.f32;
-    telemetryJson["magneticY"   ] = psocData.magneticY.f32;
-    telemetryJson["magneticZ"   ] = psocData.magneticZ.f32;
 
-    if (retVal.has_value()) {
-        this->TlmAdapter->publishTelemetry(this->getName(),
-            reinterpret_cast<const uint8_t*>(telemetryJson.dump().c_str()),
-            telemetryJson.dump().length());
+    if (m_isControllerConnected) {
+        telemetryJson["status"]        = true;
+        telemetryJson["version_major"] = psocData.version_major.u8;
+        telemetryJson["version_minor"] = psocData.version_minor.u8;
+        telemetryJson["version_build"] = psocData.version_build.u8;
+        telemetryJson["speed"        ] = psocData.speed.u32;
+        telemetryJson["frontDistance"] = psocData.frontDistance.u32;
+        telemetryJson["leftDistance" ] = psocData.leftDistance.u32;
+        telemetryJson["rightDistance"] = psocData.rightDistance.u32;
+        telemetryJson["accelerationX"] = psocData.accelerationX.f32;
+        telemetryJson["accelerationY"] = psocData.accelerationY.f32;
+        telemetryJson["accelerationZ"] = psocData.accelerationZ.f32;
+        telemetryJson["gyroX"        ] = psocData.gyroX.f32;
+        telemetryJson["gyroY"        ] = psocData.gyroY.f32;
+        telemetryJson["gyroZ"        ] = psocData.gyroZ.f32;
+        telemetryJson["magneticX"    ] = psocData.magneticX.f32;
+        telemetryJson["magneticY"    ] = psocData.magneticY.f32;
+        telemetryJson["magneticZ"    ] = psocData.magneticZ.f32;
+        telemetryJson["sensorFStatus"] = psocData.sensorFStatus.u8;
+        telemetryJson["sensorLStatus"] = psocData.sensorLStatus.u8;
+        telemetryJson["sensorRStatus"] = psocData.sensorRStatus.u8;
+        telemetryJson["imuStatus"    ] = psocData.imuStatus.u8;
+        telemetryJson["encoderStatus"] = psocData.encoderStatus.u8;
     }
+
+    this->TlmAdapter->publishTelemetry(this->getName(),
+        reinterpret_cast<const uint8_t*>(telemetryJson.dump().c_str()),
+        telemetryJson.dump().length());
 }
 
 
 void MotorController::mainProc() {
     Logger* logger = Logger::getLoggerInst();
     m_isControllerConnected = false;
+    Motor::MotorLogController logController; // Start the motor log controller to capture low-level logs from the motor controller
 
     // Main processing loop for the motor controller
     while (m_Running.load()) {

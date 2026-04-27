@@ -8,16 +8,19 @@
 #include <cstring>
 #include <netdb.h>
 #include <iostream>
+#include <sstream>
+#include <fstream>
 #include "utils/logger.hpp"
 
 
 using namespace Network;
 
 
-UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short port, size_t bufferSize):
-    Sockets(io_context, port) {
+UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short sPort, unsigned short dPort, size_t bufferSize, bool broadcast):
+    Sockets(io_context, sPort), m_Broadcast(broadcast) {
 
-    sport_ = port;
+    sport_ = sPort;
+    dport_ = dPort;
     Logger* logger = Logger::getLoggerInst();
 
     m_RecvBuffer.resize(bufferSize);
@@ -56,10 +59,78 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, s
         throw std::runtime_error("");
     }
 
-    udp::endpoint listen_endpoint(boost::asio::ip::make_address(ipAddress), port);
+    udp::endpoint listen_endpoint(boost::asio::ip::make_address(ipAddress), sPort);
     socket_.open(listen_endpoint.protocol());
+    socket_.set_option(boost::asio::socket_base::broadcast(m_Broadcast));
     socket_.bind(listen_endpoint);
-    logger->log(Logger::LOG_LVL_INFO, "Opened UDP socket: %s:%lu\r\n", ipAddress.c_str(), port);
+
+    sport_ = socket_.local_endpoint().port();  // Update in case we used port 0
+    dport_ = dPort;
+
+    // Fill host field with broadcast version
+    if (m_Broadcast) {
+        std::string netMask = getNetMask(adapter);
+        std::vector<char> ipOctets;
+        std::vector<char> maskOctets;
+
+        ipOctets.reserve(4);
+        maskOctets.reserve(4);
+        std::istringstream ipStream(ipAddress);
+        std::istringstream maskStream(netMask);
+        std::string segment;
+        while (std::getline(ipStream, segment, '.')) {
+            ipOctets.push_back(static_cast<char>(std::stoi(segment)));
+        }
+        while (std::getline(maskStream, segment, '.')) {
+            maskOctets.push_back(static_cast<char>(std::stoi(segment)));
+        }
+
+        if (ipOctets.size() == 4 && maskOctets.size() == 4) {
+            std::string broadcastIp;
+            for (size_t i = 0; i < 4; ++i) {
+                char broadcastOctet = ipOctets[i] | (~maskOctets[i]);
+                broadcastIp += std::to_string(static_cast<unsigned char>(broadcastOctet));
+                if (i < 3) {
+                    broadcastIp += ".";
+                }
+            }
+            m_BroadcastIP = broadcastIp;
+        }
+    }
+
+    logger->log(Logger::LOG_LVL_INFO, "Opened UDP socket: %s:%d\r\n", ipAddress.c_str(), sport_);
+}
+
+
+/**
+ * @brief Reads MAC address from device
+ * 
+ * @return std::string 
+ */
+std::string UdpServer::getNetMask(std::string& iface) {
+    ifaddrs* ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) != 0)
+        return std::string("");
+
+    std::string result("");
+
+    for (auto* ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || !ifa->ifa_netmask)
+            continue;
+
+        if (iface != ifa->ifa_name)
+            continue;
+
+        if (ifa->ifa_addr->sa_family == AF_INET) {
+            auto* nm = reinterpret_cast<sockaddr_in*>(ifa->ifa_netmask);
+            result = inet_ntoa(nm->sin_addr);  // dotted-decimal
+            break;
+        }
+    }
+
+    freeifaddrs(ifaddr);
+    return result;
+
 }
 
 
@@ -89,15 +160,22 @@ void UdpServer::startReceive_(void) {
                     Logger* logger = Logger::getLoggerInst();
                     std::vector<char> dataReceived(m_RecvBuffer.begin(), m_RecvBuffer.begin() + bytes_recvd);
                     dataReceivedCallback(dataReceived);
+                    if (dataReceived.size() > m_RecvBuffer.size()) {
+                        m_RecvBuffer.resize(dataReceived.size());
+                    }
+                    std::copy(dataReceived.begin(), dataReceived.end(), m_RecvBuffer.begin());
                     m_HostIP = remoteEndpoint.address().to_string();
                     if (!m_HostFound) {
+                        if (dport_ == 0) {
+                            dport_ = remoteEndpoint.port();
+                        }
                         logger->log(Logger::LOG_LVL_INFO, "Host found: %s:%d\n", m_HostIP.c_str(), remoteEndpoint.port());
                         m_HostFound = true;
                     }
                     // Reply with the receive buffer
                     if (m_AsyncTx) {
                         socket_.async_send_to(
-                            boost::asio::buffer(m_RecvBuffer.data(), bytes_recvd), remoteEndpoint,
+                            boost::asio::buffer(m_RecvBuffer.data(), dataReceived.size()), remoteEndpoint,
                             [&](const boost::system::error_code& ec, std::size_t bytes_sent) {
                                 if (ec) {
                                     logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s\r\n", ec.message().c_str());
@@ -107,6 +185,7 @@ void UdpServer::startReceive_(void) {
                 }
             }
             // Continue receiving
+            m_RxBytes += bytes_recvd;
             this->startReceive_();
         });
 }
@@ -127,24 +206,26 @@ UdpServer::~UdpServer() {
  * @return false Transmission failed
  */
 bool UdpServer::transmit(uint8_t* pBuf, size_t length, std::string& ip) {
-    if (pBuf == nullptr || length == 0) {
+    if (pBuf == nullptr || length == 0 || ip.length() == 0 || dport_ == 0) {
         return false;
     }
 
+    if (m_Broadcast) {
+        ip = m_BroadcastIP;
+    }
     udp::endpoint remoteEndpoint(
         boost::asio::ip::address::from_string(ip),
-        sport_
+        dport_
     );
 
-    bool ret = false;
-    socket_.async_send_to(
-        boost::asio::buffer(pBuf, length), remoteEndpoint,
-        [&](const boost::system::error_code& ec, std::size_t bytes_sent) {
-            if (ec) {
-                Logger* logger = Logger::getLoggerInst();
-                logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s, message length: %lu\r\n", ec.message().c_str(), length);
-            }
-        });
+    ssize_t bytes_sent = socket_.send_to(boost::asio::buffer(pBuf, length), remoteEndpoint);
+    if (bytes_sent < 0) {
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s, message length: %lu\r\n", strerror(errno), length);
+        return false;
+    }
+
+    m_TxBytes += length;
     return true;
 }
 

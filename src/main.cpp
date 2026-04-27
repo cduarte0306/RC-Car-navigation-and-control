@@ -8,6 +8,8 @@
 #include "utils/logger.hpp"
 #include "version.h"
 
+#include "app/ml/TensorRTEngine.hpp"
+
 #include "Modules/RcMessageLib.hpp"
 #include "Modules/AdapterBase.hpp"
 #include "Modules/RcBase.hpp"
@@ -20,8 +22,15 @@
 
 
 int main(int argc, char* argv[]) {
+    int ret;
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "RC Car navigation and control V%u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
+
+    ret = TensorRTEngine::createEngineFile("/home/models/lanenet/lanenet.onnx", "/data/model-engines/lanenet.engine");
+    if (ret != 0) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to create engine file for lanenet.onnx\r\n");
+        return -1;
+    }
 
     std::unique_ptr<Modules::MotorController  > motorController   = std::make_unique<Modules::MotorController>(Modules::MOTOR_CONTROLLER, "MainMotorController");
     std::unique_ptr<Modules::NetworkComms     > networkComms      = std::make_unique<Modules::NetworkComms>(Modules::WIRELESS_COMMS, "MainNetworkComms");
@@ -37,13 +46,15 @@ int main(int argc, char* argv[]) {
     commandController->createAdapter<Adapter::CameraAdapter>();
     commandController->createAdapter<Adapter::CommsAdapter>();
     commandController->createAdapter<Adapter::CommandAdapter>();
-    commandController->createAdapter<Adapter::UpdaterAdapter>();
     
     rcVision->createAdapter<Adapter::MotorAdapter>();
     rcVision->createAdapter<Adapter::CommsAdapter>();
     rcVision->createAdapter<Adapter::CommandAdapter>();
     rcVision->createAdapter<Adapter::TlmAdapter>();
     cli->createAdapter<Adapter::MotorAdapter>();
+    cli->createAdapter<Adapter::CommsAdapter>();
+    cli->createAdapter<Adapter::CameraAdapter>();
+
     rcTelemetry->createAdapter<Adapter::CommsAdapter>();
     rcUpdater->createAdapter<Adapter::CommsAdapter>();
 
@@ -52,13 +63,16 @@ int main(int argc, char* argv[]) {
     commandController->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
     commandController->moduleBind<Adapter::CameraAdapter>(rcVision->getInputAdapter());
     commandController->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
-    commandController->moduleBind<Adapter::UpdaterAdapter>(rcUpdater->getInputAdapter());
+    commandController->moduleBind<Adapter::UpdateAdapter>(rcUpdater->getInputAdapter());
     cli->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
+    cli->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
+    cli->moduleBind<Adapter::CameraAdapter>(rcVision->getInputAdapter());
     rcVision->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     rcVision->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
-    rcVision->moduleBind<Adapter::TlmAdapter>(commandController->getInputAdapter());
+    rcVision->moduleBind<Adapter::TlmAdapter>(rcTelemetry->getInputAdapter());
     rcTelemetry->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     rcUpdater->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
+    rcUpdater->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
 
     // Preliminary initialization
     motorController->init();

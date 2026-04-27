@@ -23,6 +23,7 @@ public:
     Adapter::AdapterBase* getInputAdapter() override;
 protected:
     void mainProc() override;
+    void OnTimer() override;
 
     int registerTelemetrySource_(const std::string& sourceName) override;
     int publishTelemetry_(const std::string& sourceName, const uint8_t* data, size_t length) override;

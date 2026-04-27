@@ -11,6 +11,7 @@
 #include <string>
 #include <chrono>
 #include <iostream>
+#include <unordered_map>
 
 #include <boost/asio.hpp>
 #include <boost/thread.hpp>
@@ -18,6 +19,8 @@
 
 #include "RcMessageLib.hpp"
 #include "AdapterBase.hpp"
+
+#include "lib/Thread.hpp"
 
 
 namespace Modules {
@@ -31,20 +34,6 @@ enum DeviceType {
     VIDEO_STREAMER,
     CLI_INTERFACE,
     UPDATER_MODULE
-};
-
-struct MotorCommand {
-    int srcID;
-    int speed;
-    int direction;
-    bool brake;
-};
-
-struct CameraCommand {
-    int srcID;
-    int panAngle;
-    int tiltAngle;
-    bool captureImage;
 };
 
 class RcThread {
@@ -83,6 +72,11 @@ public:
         return *this;
     }
 
+    void detach(void) {
+        internal_thread.detach();
+    }
+    
+
     // Optional: provide access to the underlying native handle if needed
     std::thread::native_handle_type native_handle() {
         return internal_thread.native_handle();
@@ -119,6 +113,8 @@ public:
                 worker.join();
             }
         }
+
+        Lib::Thread::joinAll();
     }
 
     /**
@@ -186,9 +182,8 @@ public:
         if (TlmAdapter) {
             TlmAdapter->bind(m_boundAdapters[moduleName].get());
         }
-
-        if (UdpaterAdapter) {
-            UdpaterAdapter->bind(m_boundAdapters[moduleName].get());
+        if (UpdateAdapter) {
+            UpdateAdapter->bind(m_boundAdapters[moduleName].get());
         }
 
         return 0;
@@ -207,8 +202,8 @@ public:
             CommandAdapter = std::make_unique<Adapter::CommandAdapter>();
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
             TlmAdapter = std::make_unique<Adapter::TlmAdapter>();
-        } else if constexpr (std::is_same<U, Adapter::UpdaterAdapter>::value) {
-            UdpaterAdapter = std::make_unique<Adapter::UpdaterAdapter>();
+        } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
+            UpdateAdapter = std::make_unique<Adapter::UpdateAdapter>();
         } else {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
             static_assert(!std::is_same<U, U>::value, "createAdapter: unsupported adapter type");
@@ -227,8 +222,10 @@ public:
             return std::move(CommsAdapter);
         } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
             return std::move(CommandAdapter);
-        } else if constexpr (std::is_same<U, Adapter::UpdaterAdapter>::value) {
-            return std::move(UdpaterAdapter);
+        } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
+            return std::move(TlmAdapter);
+        } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
+            return std::move(UpdateAdapter);
         } else {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
             return nullptr;
@@ -265,8 +262,8 @@ public:
             CommandAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
             TlmAdapter->bind(adapter);
-        } else if constexpr (std::is_same<U, Adapter::UpdaterAdapter>::value) {
-            UdpaterAdapter->bind(adapter);
+        } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
+            UpdateAdapter->bind(adapter);
         } else {
             return -1;
         }
@@ -302,10 +299,53 @@ public:
             TlmAdapter.reset(static_cast<Adapter::TlmAdapter*>(adapter.release()));
             return 0;
         }
+        if (auto p = dynamic_cast<Adapter::UpdateAdapter*>(adapter.get())) {
+            UpdateAdapter.reset(static_cast<Adapter::UpdateAdapter*>(adapter.release()));
+            return 0;
+        }
+
         // unknown concrete adapter: keep as baseAdapter
         baseAdapter = std::move(adapter);
         return 0;
     }
+
+    /**
+     * @brief Register a command handler for a specific command ID
+     * 
+     * @param commandID Command identifier to register the handler for
+     * @param handler Function that takes a vector of chars as input and returns an int error code
+     * @return int Error code indicating success or failure of the registration process
+     */
+    int moduleRegisterCommand(const int commandID, std::function<int(std::vector<char>&)> handler);
+
+    template<typename T>
+    int moduleRegisterCommand(const int commandID, int (T::*handler)(const std::vector<char>&)) {
+        static_assert(std::is_base_of<Base, T>::value, "moduleRegisterCommand: T must derive from Base");
+        T* instance = static_cast<T*>(this);
+        commandHandlers[commandID] = [instance, handler](std::vector<char>& payload) {
+            return (instance->*handler)(payload);
+        };
+        return 0;
+    }
+
+    template<typename T>
+    int moduleRegisterCommand(const int commandID, int (T::*handler)(std::vector<char>&)) {
+        static_assert(std::is_base_of<Base, T>::value, "moduleRegisterCommand: T must derive from Base");
+        T* instance = static_cast<T*>(this);
+        commandHandlers[commandID] = [instance, handler](std::vector<char>& payload) {
+            return (instance->*handler)(payload);
+        };
+        return 0;
+    }
+
+    /**
+     * @brief Dispatch an incoming command to the appropriate registered handler based on the command ID
+     * 
+     * @param commandID Command identifier to dispatch
+     * @param payload Vector containing the command data to be passed to the handler
+     * @return int Error code indicating success or failure of the command dispatch process
+     */
+    int dispatchCommand(const int commandID, std::vector<char>& payload);
 
 protected:
     int sendMailbox(char* pbuf, size_t len);
@@ -368,7 +408,7 @@ protected:
      */
     std::unordered_map<std::string, std::unique_ptr<Adapter::AdapterBase>> m_boundAdapters; // owned adapters
     std::unordered_map<std::string, Adapter::AdapterBase*> m_boundAdaptersNonOwning;      // non-owning adapters (in-adapters)
-    
+
     // Adapters for different device types
     std::unique_ptr<Adapter::AdapterBase    > baseAdapter    = nullptr;
     std::unique_ptr<Adapter::MotorAdapter   > motorAdapter   = nullptr;
@@ -376,7 +416,10 @@ protected:
     std::unique_ptr<Adapter::CommandAdapter > CommandAdapter = nullptr;
     std::unique_ptr<Adapter::CommsAdapter   > CommsAdapter   = nullptr;
     std::unique_ptr<Adapter::TlmAdapter     > TlmAdapter     = nullptr;
-    std::unique_ptr<Adapter::UpdaterAdapter > UdpaterAdapter = nullptr;
+    std::unique_ptr<Adapter::UpdateAdapter  > UpdateAdapter  = nullptr;
+
+    // Default CLI adapter on every module
+    Adapter::CLIAdapter CliAdapter;
 
     static boost::asio::io_context io_context;
     std::mutex mutex;
@@ -385,6 +428,13 @@ protected:
     // boost::thread boostThread;
 
     std::atomic<bool> m_Running{true};
+
+    /**
+     * @brief Map of command handlers for different command IDs. Each handler is a function that takes a vector of chars 
+     * as input and returns an int error code.
+     * 
+     */
+    std::unordered_map<int, std::function<int(std::vector<char>&)>> commandHandlers;
 
     static std::vector<std::thread> workerThreads;
 };
