@@ -11,13 +11,16 @@ static constexpr char* tempFilePath = "/data/firmware/";
 static CFile updateFile;
 
 namespace Modules {
-Updater::Updater(int moduleID_, std::string name) : Base(moduleID_, name), Adapter::UpdateAdapter(name), m_Buffer(10) {
+Updater::Updater(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::UpdateAdapter(name), m_Buffer(10) {
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Updater object initialized\r\n");
 }
 
 
 Updater::~Updater() {
+    if (updateFile.isOpen()) {
+        updateFile.close();
+    }
 }
 
 
@@ -27,15 +30,20 @@ Updater::~Updater() {
  * @return int Error code
  */
 int Updater::init(void) {
-    moduleRegisterCommand(PrepareForUpdate, &Updater::prepareForUpdateHandler);
-    moduleRegisterCommand(UploadFirmwareData, &Updater::uploadFirmwareDataHandler);
-    moduleRegisterCommand(VerifyFirmware, &Updater::verifyFirmwareHandler);
-    moduleRegisterCommand(InstallFirmware, &Updater::installFirmwareHandler);
-    return 0;
+    int ret = 0;
+
+    ret = Base::moduleRegisterCommand(PrepareForUpdate,   &Updater::prepareForUpdateHandler);
+    ret = Base::moduleRegisterCommand(UploadFirmwareData, &Updater::uploadFirmwareDataHandler);
+    ret = Base::moduleRegisterCommand(VerifyFirmware,     &Updater::verifyFirmwareHandler);
+    ret = Base::moduleRegisterCommand(InstallFirmware,    &Updater::installFirmwareHandler);
+
+    // Define the module payload
+    Base::DefinePayloadLoc(sizeof(UpdaterReqHeader));
+    return ret;
 }
 
 
-int Updater::prepareForUpdateHandler(const std::vector<char>& payload) {
+int Updater::prepareForUpdateHandler(val_type_t val, const std::vector<char>& payload) {
     // Perform necessary steps to prepare the system for an update, such as stopping motors and closing connections
     if (payload.size() == 0) {
         Logger* logger = Logger::getLoggerInst();
@@ -56,25 +64,31 @@ int Updater::prepareForUpdateHandler(const std::vector<char>& payload) {
     }
 
     // Command motor shut off
-    ret = motorAdapter->CommandMotorState(false);
+    ret = motorAdapter->stopCmd();
+    
+    // TODO: Add command to notify update app that we are starting the update process and it can start sending firmware data
+    
     return ret;
 }
 
 
-int Updater::uploadFirmwareDataHandler(const std::vector<char>& payload) {
+int Updater::uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload) {
+    (void) val;
     std::vector<uint8_t> firmwareData(payload.begin(), payload.end());
     m_Buffer.push(firmwareData);
-    m_DataReceived.notify_one();
     return 0;
 }
 
 
-int Updater::verifyFirmwareHandler(const std::vector<char>& payload) {
+int Updater::verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload) {
+    (void) val;
     return 0;
 }
 
 
-int Updater::installFirmwareHandler(const std::vector<char>& payload) {
+int Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& payload) {
+    (void) val;
+    (void) payload;
     return 0;
 }
 
@@ -86,30 +100,7 @@ int Updater::installFirmwareHandler(const std::vector<char>& payload) {
  * @return int Error code
  */
 int Updater::moduleCommand_(std::vector<char>& buffer) {
-    UpdaterReqHeader* req = reinterpret_cast<UpdaterReqHeader*>(buffer.data());
-    uint64_t payloadLen = req->payloadLen;
-    std::vector<char> payload;
-    int ret = 0;
-    if (payloadLen > 0) {
-        payload.insert(payload.end(), buffer.begin() + sizeof(UpdaterReqHeader), buffer.begin() + sizeof(UpdaterReqHeader) + payloadLen);
-        if (buffer.size() < sizeof(UpdaterReqHeader) + payloadLen) {
-            return -1; // Payload length mismatch
-        }
-    }
-
-    switch(req->command) {
-        case PrepareForUpdate:   ret = prepareForUpdateHandler  (payload); break;
-        case UploadFirmwareData: ret = uploadFirmwareDataHandler(payload); break;
-        case VerifyFirmware:     ret = verifyFirmwareHandler    (payload); break;
-        case InstallFirmware:    ret = installFirmwareHandler   (payload); break;
-
-        default:
-            // Unknown command
-            return -1;
-    }   
-    
-    // Implementation to handle module commands
-    return ret;
+    return 0;
 }
 
 
@@ -124,20 +115,8 @@ void Updater::mainProc() {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create updater temp directory\r\n");
         return;
     }
-
     
     while (m_ThreadCanRun) {
-        {
-            std::unique_lock<std::mutex> lk(m_UpdateSignalMutex);
-            m_DataReceived.wait_for(lk, std::chrono::milliseconds(1), [this] {
-                return !m_Buffer.isEmpty() || !m_ThreadCanRun;
-            });
-        }
-
-        if (m_Buffer.isEmpty()) {
-            continue; // No data received
-        }
-
         // Data received. Write to file and signal updater server if needed
         std::vector<uint8_t>& data = m_Buffer.getHead();
         if (!updateFile.isOpen()) {

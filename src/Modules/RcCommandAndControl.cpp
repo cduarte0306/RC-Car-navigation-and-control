@@ -5,11 +5,11 @@
 #include <limits>
 
 #include "utils/logger.hpp"
-#include "Devices/RegisterMap.hpp"
-
+#include "lib/RegisterMap.hpp"
+#include "lib/MessageLib.hpp"
 
 namespace Modules {
-CommandController::CommandController(int moduleID, std::string name) : Base(moduleID, name), Adapter::CommandAdapter(name) {
+CommandController::CommandController(ModuleDefs::DeviceType moduleID, std::string name) : Base(moduleID, name), Adapter::CommandAdapter(name) {
     // this->m_UdpSocket = std::make_unique<Network::UdpServer>(io_context, "wlP1p1s0", "enP8p1s0", 65000);
     // this->m_UdpSocket->startReceive(std::bind(&CommandController::processIncomingData, this, std::placeholders::_1, std::placeholders::_2));
     
@@ -40,6 +40,8 @@ int CommandController::init(void) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create command network adapter\r\n");
         return -1;
     }
+
+    Base::DefinePayloadLoc(sizeof(ClientReq_t));
 
     logger->log(Logger::LOG_LVL_INFO, "CommandController module initialized\r\n");
     return 0;
@@ -89,10 +91,17 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
         return;
     }
 
+    int ret = 0;
     std::vector<char> replyPayloadPacket;
     CommandController::HostReply_t replyPacket{};
     CommandController::reply_t reply{};
     size_t length = sizeof(reply);
+    std::vector<char> payloadBuffer;
+
+    // Decode the payload buffer
+    payloadBuffer.insert(payloadBuffer.end(), 
+                         buffer.begin() + extraOffset, 
+                         buffer.begin() + extraOffset + extraLen);
 
     switch(clientData->payload.command) {
         case CmdNoop:
@@ -123,11 +132,18 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
             }
         } break;
 
+        case CmdUpdater:
+            break;
+
         default:
             // Unknown command, set error state
             logger->log(Logger::LOG_LVL_WARN, "Unknown command :%d\r\n", clientData->payload.command);
             reply.state = false; // Error state
             break;
+    }
+
+    if (ret != 0) {
+        logger->log(Logger::LOG_LVL_ERROR, "Command handler returned error code %d\r\n", ret);
     }
 
     // Build reply
@@ -151,26 +167,33 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
 }
 
 
+int CommandController::OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule) {
+    std::vector<char> serializedReply;
+    capsule.SendAck(capsule.getCommand(), serializedReply.data(), serializedReply.size());  // Reply to the adapter
+    return 0;
+}
+
+
 /**
  * @brief Main processing loop for the motor controller
  * 
  */
 void CommandController::mainProc() {
-        // Main processing loop for the motor controller
-        std::string hostIP("");
-        std::string lastHost("");
-        RegisterMap* regMap = RegisterMap::getInstance();
+    // Main processing loop for the motor controller
+    std::string hostIP("");
+    std::string lastHost("");
+    RegisterMap* regMap = RegisterMap::getInstance();
 
-        while(!m_CommandNetAdapter->connected) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "CommandController network adapter connected. Configuring receive callback\r\n");
-        this->CommsAdapter->startReceive(*m_CommandNetAdapter, std::bind(&CommandController::processIncomingData, this, std::placeholders::_1));
-        this->CommsAdapter->startReceive(*m_CommandNetAdapterEth, std::bind(&CommandController::processIncomingData, this, std::placeholders::_1));
-
-        while (true) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
+    while(!m_CommandNetAdapter->connected) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "CommandController network adapter connected. Configuring receive callback\r\n");
+    this->CommsAdapter->startReceive(*m_CommandNetAdapter);
+    this->CommsAdapter->startReceive(*m_CommandNetAdapterEth);
+
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
 };

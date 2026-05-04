@@ -7,11 +7,11 @@
 #include "utils/logger.hpp"
 #include <nlohmann/json.hpp>
 #include "app/motor/MotorLogController.hpp"
-#include "Devices/RegisterMap.hpp"
+#include "lib/RegisterMap.hpp"
 
 
 namespace Modules {
-MotorController::MotorController(int moduleID_, std::string name) : Base(moduleID, name), Adapter::MotorAdapter(name) {
+MotorController::MotorController(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::MotorAdapter(name) {
     Logger* logger = Logger::getLoggerInst();
 
     try {
@@ -67,7 +67,8 @@ int MotorController::init(void) {
 int MotorController::stop(void) {
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Stopping motor operations...\r\n");
-    
+    peripheralDriver->setDriveMode(false);   // Set to manual
+    peripheralDriver->setMotorState(false);  // Disable motor
 }
 
 

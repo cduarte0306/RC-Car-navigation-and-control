@@ -3,7 +3,7 @@
 #include <algorithm>
 
 #include <thread>
-#include "Devices/RegisterMap.hpp"
+#include "lib/RegisterMap.hpp"
 
 #ifdef HAVE_OPENCV_CUDAIMGPROC
 #include <opencv2/cudaimgproc.hpp>
@@ -33,6 +33,7 @@ void VideoStreamer::start() {
         return;  // already running
     }
 
+    // Start producer and consumer threads. The producer threads will push frames into the buffers, and the consumer threads will read from the buffers and transmit the data. The running flag will be used to signal the threads to stop when needed.
     m_ThreadMono = std::thread(&VideoStreamer::runMono, this);
     m_ThreadStereo = std::thread(&VideoStreamer::runStereo, this);
     m_ThreadStereoMono = std::thread(&VideoStreamer::runStereoMono, this);
@@ -45,6 +46,12 @@ void VideoStreamer::stop() {
     if (!m_Running.exchange(false)) {
         return;
     }
+
+    // With the running flag set to false, the producer threads will stop pushing new frames, and the consumer threads will eventually exit once they process all remaining frames in the buffers. To unblock any waiting consumer threads immediately, we can call killProcess on the buffers, which will notify all waiting threads and cause them to exit their wait states. After that, we join the threads to ensure they have finished executing before we proceed with cleanup.
+    m_Buffer.killProcess();
+    m_BufferStereo.killProcess();
+    m_BufferStereoMono.killProcess();
+
     if (m_ThreadMono.joinable()) {
         m_ThreadMono.join();
     }
@@ -54,10 +61,6 @@ void VideoStreamer::stop() {
     if (m_ThreadStereoMono.joinable()) {
         m_ThreadStereoMono.join();
     }
-
-    m_Buffer.flush();
-    m_BufferStereoMono.flush();
-    m_BufferStereo.flush();
 
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer stopped.\n");
 }
@@ -176,12 +179,6 @@ void VideoStreamer::pushFrame(const cv::Mat& frame, cv::Matx44d& Q) {
     payload.stereoFrame = frame;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
     m_Buffer.push(payload);
-
-    // Notify any waiting readers that a new frame is available
-    {
-        std::lock_guard<std::mutex> lk(m_BufferStereoMtx);
-        m_BufferStereoCv.notify_all();
-    }
 }
 
 
@@ -192,12 +189,6 @@ void VideoStreamer::pushFrame(const cv::Mat& frame) {
     payload.stereoFrame = frame;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
     m_Buffer.push(payload);
-
-    // Notify any waiting readers that a new frame is available
-    {
-        std::lock_guard<std::mutex> lk(m_BufferStereoMtx);
-        m_BufferStereoCv.notify_all();
-    }
 }
 
 
@@ -212,14 +203,6 @@ void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
 
 void VideoStreamer::runMono() {
     while (m_Running) {
-        // Wait until it's time to send the next frame based on the configured frame rate.
-        {
-            std::unique_lock<std::mutex> lk(m_BufferStereoMtx);
-            m_BufferStereoCv.wait_for(lk, std::chrono::milliseconds(1), [this] {
-                return !m_Buffer.isEmpty() || !m_Running.load();
-            });
-        }
-
         VideoStreamer::throttleFps(frameIntervalMs.load());
 
         if (m_Buffer.isEmpty()) continue;
@@ -241,13 +224,6 @@ void VideoStreamer::runStereo() {
     std::pair<cv::Mat, cv::Mat> stereoFrames;
 
     while (m_Running) {
-        {
-            std::unique_lock<std::mutex> lk(m_BufferStereoMtx);
-            m_BufferStereoCv.wait_for(lk, std::chrono::milliseconds(1), [this] {
-                return !m_BufferStereo.isEmpty() || !m_Running.load();
-            });
-        }
-
         VideoStreamer::throttleFps(frameIntervalMs.load());
 
         if (m_BufferStereo.isEmpty()) continue;

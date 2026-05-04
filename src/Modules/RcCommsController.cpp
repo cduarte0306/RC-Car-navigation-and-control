@@ -15,7 +15,7 @@ namespace Modules {
 
 std::vector<std::string> hostMap = {"", ""};
 
-NetworkComms::NetworkComms(int moduleID, string name) 
+NetworkComms::NetworkComms(ModuleDefs::DeviceType moduleID, std::string name) 
     : Base(moduleID, name), Adapter::CommsAdapter(name) {
     // Socket instances are created per adapter in configureUDPAdapter.
     setPeriod(1000);  // Set the timer thread to service ever second

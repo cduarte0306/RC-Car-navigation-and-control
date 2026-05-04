@@ -33,7 +33,7 @@
 
 namespace Modules
 {
-AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
+AppCLI::AppCLI(ModuleDefs::DeviceType moduleID, std::string name) : Base(moduleID, name) {
     const CliCommandBinding cmdBindings[] = {
         (CliCommandBinding){
             "read-psoc",

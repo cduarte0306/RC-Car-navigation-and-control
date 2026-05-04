@@ -3,12 +3,10 @@
 #include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
 
-#include <condition_variable>
-
 namespace Modules {
 class Updater : public Base, public Adapter::UpdateAdapter {
 public:
-    Updater(int moduleID_, std::string name);
+    Updater(ModuleDefs::DeviceType moduleID_, std::string name);
     ~Updater();
 
     /**
@@ -18,6 +16,10 @@ public:
      */
     Adapter::AdapterBase* getInputAdapter() override {
         return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::UpdateAdapter*>(this));
+    }
+
+    virtual int stopCmd(void) override {
+        return stop();
     }
 
     /**
@@ -74,7 +76,7 @@ protected:
      * @param payload Command payload containing any necessary information for preparing for the update (e.g., target file name)
      * @return int Error code indicating success or failure of the preparation step
      */
-    int prepareForUpdateHandler(const std::vector<char>& payload);
+    int prepareForUpdateHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
     * @brief Handle the upload firmware data command, which involves receiving chunks of firmware data and writing them to a temporary file for later verification and installation
@@ -82,7 +84,7 @@ protected:
     * @param payload Command payload containing the chunk of firmware data to be written
     * @return int Error code indicating success or failure of the data upload step
     */
-    int uploadFirmwareDataHandler(const std::vector<char>& payload);
+    int uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
      * @brief Handle the verify firmware command, which involves checking the integrity and authenticity of the received firmware data (e.g., by comparing hashes) before allowing installation
@@ -90,7 +92,7 @@ protected:
      * @param payload Command payload containing any necessary information for verifying the firmware (e.g., expected hash value)
      * @return int Error code indicating success or failure of the verification step
      */
-    int verifyFirmwareHandler(const std::vector<char>& payload);
+    int verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
      * @brief Handle the install firmware command, which involves replacing the existing firmware with the new verified firmware and performing any necessary cleanup or reboot steps
@@ -98,7 +100,7 @@ protected:
      * @param payload Command payload containing any necessary information for installing the firmware (e.g., installation instructions)
      * @return int Error code indicating success or failure of the installation step
      */
-    int installFirmwareHandler(const std::vector<char>& payload);
+    int installFirmwareHandler(val_type_t val, const std::vector<char>& payload);
 
     static constexpr char* IMAGE_LOCATION = (char*)"/data/rc_updater/";
 
@@ -107,17 +109,6 @@ protected:
      * 
      */
     Msg::CircularBuffer<std::vector<uint8_t>> m_Buffer;
-
-    /**
-     * @brief Data received signal
-     * 
-     */
-    std::condition_variable m_DataReceived;
-
-    /**
-     * @brief Mutex for synchronizing access to the update signal
-     */
-    std::mutex m_UpdateSignalMutex;
 
     /**
      * @brief Update file info struct to hold metadata about the incoming firmware update

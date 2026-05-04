@@ -6,13 +6,13 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include "Modules/RcBase.hpp"
-#include "RcMessageLib.hpp"
+#include "lib/MessageLib.hpp"
 
 
 namespace Modules {
 class RcCarTelemetry : public Modules::Base, public Adapter::TlmAdapter {
 public:
-    RcCarTelemetry(int moduleID, std::string name);
+    RcCarTelemetry(ModuleDefs::DeviceType moduleID, std::string name);
     ~RcCarTelemetry() {}
 
     int init(void) override;

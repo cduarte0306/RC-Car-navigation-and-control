@@ -308,19 +308,7 @@ int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t
     auto startTime = std::chrono::steady_clock::now();
 
     // Wait until frame is ready (producer will notify when a new synchronized frame is available)
-    {
-        std::unique_lock<std::mutex> lk(m_FrameReadyMtx_);
-        m_FrameReadyCv_.wait_for(lk, std::chrono::milliseconds(timeoutMs), [this] {
-            return !m_StereoBuffer.isEmpty() || !m_ThreadCanRun.load();
-        });
-
-        if (m_StereoBuffer.isEmpty()) {
-            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Timeout waiting for camera frame\n");
-            return -1;  // Timeout
-        }
-    }
-
-    auto& frames = m_StereoBuffer.getHead();
+    auto& frames = m_StereoBuffer.getHead(timeoutMs);
     std::pair<cv::Mat, cv::Mat>& frameBuffers_ = frames.first;
     Device::GyroScope::GyroData& gyroData = frames.second;
 
@@ -500,11 +488,7 @@ void StereoCam::streamConsumer() {
     Device::GyroScope gyroScope_{"/dev/i2c-7"};
 
     while (m_ThreadCanRun.load()) {
-        if (m_ProducerLeftBuffer.isEmpty() || m_ProducerRightBuffer.isEmpty()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(500));
-            continue;
-        }
-
+        // Since both instances of getHead block until a new frame is available, this will effectively wait for the next pair of frames to arrive before proceeding.
         const FrameObject& left  = m_ProducerLeftBuffer.getHead();
         const FrameObject& right = m_ProducerRightBuffer.getHead();
 

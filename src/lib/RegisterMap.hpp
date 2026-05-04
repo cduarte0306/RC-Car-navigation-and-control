@@ -15,7 +15,8 @@
 class RegisterMap {
 public:
     enum class RegisterKeys{ 
-        HostIP, // Host IP address key
+        HostIP,     // Host IP address key
+        ModuleMap,  // Map of module names to IDs
         MaxKeys
     };
 
@@ -25,7 +26,7 @@ public:
         }
     };
 
-    using Value = std::variant<double, bool, std::string>;
+    using Value = std::variant<double, bool, std::string, std::unordered_map<std::string, int>>;
 
     // Singleton access
     static RegisterMap* getInstance();
@@ -59,7 +60,6 @@ public:
         }
         return std::nullopt;
     }
-
     
     // Remove a key if present
     void erase(RegisterKeys key) {

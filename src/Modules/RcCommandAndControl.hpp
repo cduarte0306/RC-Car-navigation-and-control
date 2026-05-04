@@ -12,7 +12,7 @@ using namespace Adapter;
 namespace Modules {
 class CommandController : public Base, public Adapter::CommandAdapter {
 public:
-    CommandController(int moduleID, std::string name);
+    CommandController(ModuleDefs::DeviceType moduleID, std::string name);
     ~CommandController();
 
     virtual int stop(void) override {
@@ -33,7 +33,8 @@ protected:
         CmdNoop,         // No operation command
         CmdFwdDir,       // Forward direction command
         CmdSteer,        // Steering command
-        CmdCameraModule // Camera mode setting command
+        CmdCameraModule, // Camera mode setting command
+        CmdUpdater,      // Update command
     };
 
     typedef struct __attribute__((__packed__))
@@ -70,6 +71,9 @@ protected:
 
     // Main Process
     virtual void mainProc() override;
+
+    // OnMsgRecevied override for receiving messages from adapters
+    virtual int OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule) override;
 
     // Processes reply from client
     void processIncomingData(std::vector<char>& buffer);

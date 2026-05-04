@@ -15,7 +15,7 @@ namespace Modules {
 class NetworkComms : public Base, public Adapter::CommsAdapter {
 public:
 
-    NetworkComms(int moduleID, std::string name);
+    NetworkComms(ModuleDefs::DeviceType moduleID, std::string name);
     ~NetworkComms();
 
     virtual int init(void) override;

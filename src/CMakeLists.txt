@@ -3,6 +3,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 
 set(SOURCE
     main.cpp
+    utils/CFile.cpp
     utils/logger.cpp
     cuda/cudaVision.cu
     cuda/include/cudaVision.hpp
@@ -10,9 +11,9 @@ set(SOURCE
     Modules/cli.cpp
     Modules/RcBase.cpp
     Modules/RcBase.hpp
+    Modules/AdapterBase.cpp
     Modules/RcMotorController.cpp
     Modules/RcMotorController.hpp
-    Modules/RcMessageLib.hpp
     Modules/RcCommandAndControl.hpp
     Modules/RcCommandAndControl.cpp
     Modules/RcCommsController.hpp
@@ -47,14 +48,15 @@ set(SOURCE
     Devices/network_interface/UdpServer.hpp
     Devices/network_interface/TcpServer.hpp
     Devices/network_interface/TcpServer.cpp
-    Devices/RegisterMap.hpp
-    Devices/RegisterMap.cpp
     Devices/GyroScope.cpp
     Devices/GyroScope.hpp
     Devices/StereoCam.cpp
     Devices/StereoCam.hpp
     lib/Thread.cpp
     lib/Thread.hpp
+    lib/MessageLib.hpp
+    lib/RegisterMap.hpp
+    lib/RegisterMap.cpp
     Devices/Gpio.cpp
     Devices/Gpio.hpp
 )
@@ -67,7 +69,8 @@ pkg_check_modules(GPIOD REQUIRED libgpiod)
 
 find_library(GPIOD_LIBRARY gpiod)
 
-add_executable(${PROJECT_NAME} ${SOURCE})
+add_executable(${PROJECT_NAME} ${SOURCE}
+  Modules/ModulesDefs.hpp)
 
 # Jetson Orin Nano typically: 87
 # You can also set this to "native" in newer CMake, but 87 is explicit.

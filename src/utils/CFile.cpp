@@ -4,9 +4,6 @@
 #include <openssl/sha.h>
 
 
-CFile::CFile() : m_File(nullptr) {
-}
-
 CFile::CFile(const char* filePath, const char* mode) {
     m_File = fopen(filePath, mode);
 }
@@ -27,14 +24,12 @@ int CFile::open(const char* filePath, const char* mode) {
     return m_File ? 0 : -1;
 }
 
-int CFile::close() {
+void CFile::close() {
     if (m_File) {
         fclose(m_File);
         m_File = nullptr;
         m_Size = 0;
-        return 0; // Success
     }
-    return -1; // File was not open
 }
 
 std::vector<char> CFile::read(size_t length) {
@@ -104,9 +99,9 @@ int CFile::GetSha256Hash(std::vector<uint8_t>& hashOutput) {
     return 0; // Success
 }
 
-int CFile::write(const uint8_t* data, size_t length, size_t offset) {
+size_t CFile::write(const uint8_t* data, size_t length, size_t offset) {
     if (!m_File) {
-        return -1; // File not open
+        return 0; // File not open
     }
 
     fseek(m_File, offset, SEEK_SET);

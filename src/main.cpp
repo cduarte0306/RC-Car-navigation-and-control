@@ -10,7 +10,8 @@
 
 #include "app/ml/TensorRTEngine.hpp"
 
-#include "Modules/RcMessageLib.hpp"
+#include "lib/MessageLib.hpp"
+#include "Modules/ModulesDefs.hpp"
 #include "Modules/AdapterBase.hpp"
 #include "Modules/RcBase.hpp"
 #include "Modules/RcMotorController.hpp"
@@ -32,13 +33,13 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    std::unique_ptr<Modules::MotorController  > motorController   = std::make_unique<Modules::MotorController>(Modules::MOTOR_CONTROLLER, "MainMotorController");
-    std::unique_ptr<Modules::NetworkComms     > networkComms      = std::make_unique<Modules::NetworkComms>(Modules::WIRELESS_COMMS, "MainNetworkComms");
-    std::unique_ptr<Modules::CommandController> commandController = std::make_unique<Modules::CommandController>(Modules::COMMAND_CONTROLLER, "MainCommsController");
-    std::unique_ptr<Modules::AppCLI           > cli               = std::make_unique<Modules::AppCLI>(Modules::CLI_INTERFACE, "AppCli");
-    std::unique_ptr<Modules::VisionControls   > rcVision          = std::make_unique<Modules::VisionControls>(Modules::CAMERA_CONTROLLER, "CamController");
-    std::unique_ptr<Modules::RcCarTelemetry   > rcTelemetry       = std::make_unique<Modules::RcCarTelemetry>(Modules::TELEMETRY_MODULE, "TelemetryModule");
-    std::unique_ptr<Modules::Updater          > rcUpdater         = std::make_unique<Modules::Updater>(Modules::UPDATER_MODULE, "UpdaterModule");
+    std::unique_ptr<Modules::MotorController  > motorController   = std::make_unique<Modules::MotorController>  (ModuleDefs::DeviceType::MOTOR_CONTROLLER, "MainMotorController");
+    std::unique_ptr<Modules::NetworkComms     > networkComms      = std::make_unique<Modules::NetworkComms>     (ModuleDefs::DeviceType::WIRELESS_COMMS, "MainNetworkComms");
+    std::unique_ptr<Modules::CommandController> commandController = std::make_unique<Modules::CommandController>(ModuleDefs::DeviceType::COMMAND_CONTROLLER, "MainCommsController");
+    std::unique_ptr<Modules::AppCLI           > cli               = std::make_unique<Modules::AppCLI>           (ModuleDefs::DeviceType::CLI_INTERFACE, "AppCli");
+    std::unique_ptr<Modules::VisionControls   > rcVision          = std::make_unique<Modules::VisionControls>   (ModuleDefs::DeviceType::CAMERA_CONTROLLER, "CamController");
+    std::unique_ptr<Modules::RcCarTelemetry   > rcTelemetry       = std::make_unique<Modules::RcCarTelemetry>   (ModuleDefs::DeviceType::TELEMETRY_MODULE, "TelemetryModule");
+    std::unique_ptr<Modules::Updater          > rcUpdater         = std::make_unique<Modules::Updater>          (ModuleDefs::DeviceType::UPDATER_MODULE, "UpdaterModule");
 
     // Create adapters
     motorController->createAdapter<Adapter::TlmAdapter>();
@@ -46,6 +47,7 @@ int main(int argc, char* argv[]) {
     commandController->createAdapter<Adapter::CameraAdapter>();
     commandController->createAdapter<Adapter::CommsAdapter>();
     commandController->createAdapter<Adapter::CommandAdapter>();
+    commandController->createAdapter<Adapter::UpdateAdapter>();
     
     rcVision->createAdapter<Adapter::MotorAdapter>();
     rcVision->createAdapter<Adapter::CommsAdapter>();
@@ -56,7 +58,9 @@ int main(int argc, char* argv[]) {
     cli->createAdapter<Adapter::CameraAdapter>();
 
     rcTelemetry->createAdapter<Adapter::CommsAdapter>();
-    rcUpdater->createAdapter<Adapter::CommsAdapter>();
+
+    rcUpdater->createAdapter<Adapter::MotorAdapter>();
+    rcUpdater->createAdapter<Adapter::UpdateAdapter>();
 
     // Bind modules
     motorController->moduleBind<Adapter::TlmAdapter>(rcTelemetry->getInputAdapter());
@@ -71,7 +75,6 @@ int main(int argc, char* argv[]) {
     rcVision->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
     rcVision->moduleBind<Adapter::TlmAdapter>(rcTelemetry->getInputAdapter());
     rcTelemetry->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
-    rcUpdater->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     rcUpdater->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
 
     // Preliminary initialization

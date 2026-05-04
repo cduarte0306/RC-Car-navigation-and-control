@@ -8,7 +8,7 @@
 namespace Modules {
 class AppCLI : public Modules::Base {
 public:
-    AppCLI(int moduleID_, std::string name);
+    AppCLI(ModuleDefs::DeviceType moduleID_, std::string name);
     ~AppCLI();
     // Helper to forward a command buffer to the motor adapter
     int sendMotorCommand(char* pbuf, size_t len);

@@ -8,48 +8,68 @@
 #include <atomic>
 #include <functional>
 #include <iostream>
+#include <memory>
 
+#include "ModulesDefs.hpp"
+
+#include "lib/MessageLib.hpp"
 
 namespace Adapter {
-    enum {
-        CliAdapterID = 1,
-        CommsAdapterID,
-        CommandAdapterID,
-        MotorAdapterID, 
-        CameraAdapterID,
-        TlmAdapterID,
-        UpdateAdapterID,
-    };
-
     class AdapterBase {
-    public:
-        AdapterBase(int id, std::string parentName_="") : parentName(parentName_), adapterId(id) {}
-        virtual ~AdapterBase() {}
+    public:    
+        AdapterBase(ModuleDefs::AdapterId id, std::string parentName_="");
+        virtual ~AdapterBase();
 
-        int bind(AdapterBase* Adapter) {
-            // record the mapping for lookup if needed
-            adapterMap[Adapter->getParentName()] = Adapter;
+        /**
+         * @brief Bind this adapter to a module adapter. This allows the module and adapter to communicate by forwarding calls between them. The module will call the adapter's moduleCommand, which will forward to the bound module adapter's implementation, and the module adapter can call this adapter's moduleCommand to forward commands back to the module.
+         * 
+         * @param Adapter Pointer to the adapter to bind
+         * @return int Status code (0 for success, -1 for failure)
+         */
+        int bind(AdapterBase* Adapter);
 
-            this->moduleWriteCmd = [Adapter](char* pbuf, size_t len) {
-                return Adapter->moduleCommand_(pbuf, len);
-            };
+        /**
+         * @brief Bind a command dispatch function to this adapter. This allows the adapter to forward received commands to the module's dispatchCommand implementation.
+         * 
+         * @param dispatchFunc The dispatch function to bind, which should match the signature of dispatchCommand (taking a MessageCapsule and returning an int)
+         * @return int Status code (0 for success, -1 for failure)
+         */
+        int bindCommandDispatch(std::function<int(Msg::MessageCapsule<char>& capsule)> dispatchFunc);
 
-            this->moduleWriteCmdVector = [Adapter](std::vector<char>& buffer) {
-                return Adapter->moduleCommand_(buffer);
-            };
-            
-            return bind_(Adapter);
-        }
+        /**
+         * @brief Bind module message reception callback. This allows the adapter to forward 
+         * received messages to the module's OnModuleMsgReceived implementation.
+         * 
+         * @return std::string Stats information as a string
+         */
+        int bindOnModuleMsgReceived(std::function<int(std::vector<char>& buffer)> onMsgReceivedFunc);
 
-        virtual std::string readStats() {
-            if (!readStatsCommand) {
-                return "";
-            }
+        /**
+         * @brief Default implementation of readStats. Adapters that need to provide custom handling should override this.
+         * 
+         * @return std::string Stats information as a string
+         */
+        virtual std::string readStats();
 
-            return readStatsCommand();
-        }
-
+        /**
+         * @brief Bind an adapter to this adapter. Must be implemented by derived classes.
+         * 
+         * @param Adapter Pointer to the adapter to bind
+         * @return int Status code
+         */
         virtual int bind_(AdapterBase* Adapter)= 0;
+
+        /**
+         * @brief Default implementation of moduleCommand. Adapters that need to
+         * provide custom handling should override this.
+         */
+        virtual int stopCmd(void);
+
+        /**
+         * @brief Default implementation of moduleCommand. Modules or adapters that need to
+         * provide custom handling should override this.
+         */
+        virtual int dispatchCommand(Msg::MessageCapsule<char>& capsule);
 
         /**
          * Default handler for moduleCommand. Modules or adapters that need to
@@ -57,50 +77,37 @@ namespace Adapter {
          * implementation here allows concrete adapter types to be instantiated
          * without requiring every adapter to implement moduleCommand.
          */
-        virtual int moduleCommand(char* pbuf, size_t len) {
-            if (!moduleWriteCmd) {
-                std::cout << "Module command error\r\n";
-                return -1;
-            }
+        virtual int moduleCommand(char* pbuf, size_t len);
 
-            moduleWriteCmd(pbuf, len);
-            return 0;
-        }
+        /**
+         * @brief Default handler for moduleCommand with vector input. Modules or adapters that need to
+         * provide custom handling should override this.
+         */
+        virtual int moduleCommand(std::vector<char>& buffer);
 
-        virtual int moduleCommand(std::vector<char>& buffer) {
-            if (!moduleWriteCmd) {
-                std::cout << "Module command error\r\n";
-                return -1;
-            }
-
-            return moduleWriteCmdVector(buffer);
-        }
-
-        virtual int cliCommand(std::vector<std::string>& buffer) {
-             if (!moduleCliCmd) {
-                std::cout << "Module CLI command error\r\n";
-                return -1;
-            }
-
-             return moduleCliCmd(buffer);
-        }
+        virtual int cliCommand(std::vector<std::string>& buffer);
 
         /**
          * @brief Add a module name to the bound modules list
          * 
          * @param moduleName Name of the module to add
          */
-        void addAdapter(std::string moduleName) {
-            boundModules.push_back(moduleName);
-        }
+        void addAdapter(std::string moduleName);
 
         /**
          * @brief Get the parent name
          * 
          * @return std::string parent module name 
          */
-        std::string getParentName() const {
-            return parentName;
+        std::string getParentName() const;
+
+        /**
+         * @brief Get the parent module's ID
+         * 
+         * @return int Parent module ID, or -1 if not found
+         */
+        int GetParentID() const {
+            return m_ModuleID;
         }
     protected:
         std::string parentName;
@@ -111,34 +118,24 @@ namespace Adapter {
         std::function< int(std::vector<char>&)     > moduleWriteCmdVector = nullptr;
         std::function< int(char* pbuf, size_t len) > moduleWriteAsyncCmd = nullptr;
         std::function<std::string(void)> readStatsCommand = nullptr;
+        std::function<int(Msg::MessageCapsule<char>& capsule)> dispatchCommandFunc = nullptr;
+        std::function<int(std::vector<char>& buffer)> OnModuleMsgReceivedFunc = nullptr;
+        int m_ModuleID = -1;
 
+        const ModuleDefs::AdapterId adapterId;
 
-        const int adapterId;
+        virtual int moduleCommand_(char* pbuf, size_t len);
 
-        virtual int moduleCommand_(char* pbuf, size_t len) {
-            (void)pbuf; (void)len;
-            return -1;
-        }
+        virtual int moduleCommand_(std::vector<char>& buffer);
 
-        virtual int moduleCommand_(std::vector<char>& buffer) {
-            (void)buffer;
-            return -1;
-        }
+        virtual int moduleCommandAsync_(char* pbuf, size_t len);
 
-        virtual int moduleCommandAsync_(char* pbuf, size_t len) {
-            (void)pbuf; (void)len;
-            return -1;
-        }
-
-        virtual int moduleCliCmd_(std::vector<std::string>& buffer) {
-            (void)buffer;
-            return -1;
-        }
+        virtual int moduleCliCmd_(std::vector<std::string>& buffer);
     };
 
     class MotorAdapter : public AdapterBase {
     public:
-        MotorAdapter(std::string parentName_="") : AdapterBase(MotorAdapterID, parentName_) {}
+        MotorAdapter(std::string parentName_="");
 
         /**
          * @brief Set the Motor Speed
@@ -146,14 +143,7 @@ namespace Adapter {
          * @param speed PWM setting
          * @return int 
          */
-        int setMotorSpeed(int speed) {
-            // Implementation for setting motor speed
-            if (!motorSpeedCommand) {
-                return -1; // No command set
-            }
-
-            return motorSpeedCommand(speed);
-        }
+        int setMotorSpeed(int speed);
 
         /**
          * @brief Steer the motor
@@ -161,15 +151,7 @@ namespace Adapter {
          * @param angle Steering angle
          * @return int Return status
          */
-        int steer(int angle) {
-            // Implementation for steering
-            if (!steerCommand) {
-                return -1; // No command set
-            }
-
-            steerCommand(angle);
-            return 0;
-        }
+        int steer(int angle);
 
         /**
          * @brief Motor state control command
@@ -177,18 +159,7 @@ namespace Adapter {
          * @param state Motor state
          * @return int 
          */
-        int CommandMotorState(bool state) {
-            if (!disableMotorsCommand || !enableMotorsCommand) {
-                return 0;
-            }
-
-            if (state) {
-                enableMotorsCommand();
-            } else {
-                disableMotorsCommand();
-            }
-            return 0;
-        }
+        int CommandMotorState(bool state);
 
     protected:
         // callable to request motor speed; empty when not set
@@ -199,157 +170,63 @@ namespace Adapter {
         std::function<int(char* data, size_t length)> getMotorStatus       = nullptr;
         std::function<int(void)                     > getDevice            = nullptr;
 
-        virtual int bind_(AdapterBase* Adapter) override {
-            // Implementation for binding motor adapter
-            bindInterface(static_cast<MotorAdapter*>(Adapter));
-            return 0;
-        }
+        virtual int bind_(AdapterBase* Adapter) override;
 
 
-        void bindInterface(MotorAdapter* adapter) {
-            if (!adapter) return;
-            // When binding, expose this adapter's implementation to the target
-            // adapter by assigning callables on the target that call into
-            // this instance's protected implementation methods.
-            // When binding to another adapter instance, expose the other
-            // adapter's implementation as the callable targets for this
-            // adapter. That way, calling this->setMotorSpeed(...) will
-            // forward into the bound adapter's implementation.
-            this->motorSpeedCommand = [adapter](int speed) {
-                return adapter->setMotorSpeed_(speed);
-            };
+        void bindInterface(MotorAdapter* adapter);
 
-            this->steerCommand = [adapter](int angle) {
-                return adapter->steer_(angle);
-            };
+        virtual int setMotorSpeed_(int direction);
 
-            this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
-                return adapter->moduleCommand_(pbuf, len);
-            };
-        }
-
-        virtual int setMotorSpeed_(int direction) {
-            // Implementation for setting motor direction
-            return 0;
-        }
-
-        virtual int steer_(int counts) {
-            // Implementation for steering
-            return 0;
-        }
+        virtual int steer_(int counts);
 
     };
     
     class CLIAdapter : public AdapterBase {
     public:
-        CLIAdapter(std::string parentName_="") : AdapterBase(CliAdapterID, parentName_) {}
+        CLIAdapter(std::string parentName_="");
 
     protected:
         std::function<std::string()> readStats = nullptr;
 
-        virtual int bind_(AdapterBase* Adapter) override {
-            // Implementation for binding motor adapter
-            return 0;
-        }
+        virtual int bind_(AdapterBase* Adapter) override;
 
-        void bindInterface(CLIAdapter* adapter) {
-            if (!adapter) return;
-            // bind this instance's implementation as a callable on the target adapter
-            this->readStats = [adapter]() -> std::string {
-                return adapter->readModuleStats_();
-            };
-        }
+        void bindInterface(CLIAdapter* adapter);
 
-        virtual std::string readModuleStats_(void) {
-            // Implementation for setting motor direction
-            return "";
-        };
+        virtual std::string readModuleStats_(void);
     };
 
     class CameraAdapter : public AdapterBase {
     public:
-        CameraAdapter(std::string parentName_="") : AdapterBase(CameraAdapterID, parentName_){}
+        CameraAdapter(std::string parentName_="");
 
-        int setCameraState(bool state) {
-            return 0;
-        }
+        int setCameraState(bool state);
 
         /**
          * @brief Read stats from module
          * 
          * @return std::string 
          */
-        virtual std::string readStats() {
-            if (readStatsCommand) {
-                return readStatsCommand();
-            }
-            return "";
-        }
+        virtual std::string readStats() override;
 
     protected:
         std::function<int(bool)>                    setCameraStateCommand    = nullptr;
 
-        virtual int bind_(AdapterBase* Adapter) override {
-            // Implementation for binding motor adapter
-            bindInterface(static_cast<CameraAdapter*>(Adapter));
-            return 0;
-        }
+        virtual int bind_(AdapterBase* Adapter) override;
 
-        void bindInterface(CameraAdapter* adapter) {
-            if (!adapter) return;
-            // bind this instance's implementation as a callable on the target adapter
-            this->setCameraStateCommand = [adapter](bool state) -> int {
-                return adapter->setCameraState_(state);
-            };
+        void bindInterface(CameraAdapter* adapter);
 
-            this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
-                return adapter->moduleCommand_(pbuf, len);
-            };
+        virtual int setCameraState_(int direction);
 
-            this->moduleWriteCmdVector = [adapter](std::vector<char>& buffer) {
-                return adapter->moduleCommand_(buffer);
-            };
-
-            this->moduleCliCmd = [adapter](std::vector<std::string>& buffer) {
-                return adapter->moduleCliCmd_(buffer);
-            };
-
-            this->readStatsCommand = [adapter]() -> std::string {
-                return adapter->readStats();
-            };
-        }
-
-        virtual int setCameraState_(int direction) {
-            // Implementation for setting motor direction
-            return 0;
-        }
-
-        virtual int configurePipeline_(const std::string& host) {
-            // Implementation for setting motor direction
-            return 0;
-        }
+        virtual int configurePipeline_(const std::string& host);
     };
 
     class UpdateAdapter : public AdapterBase {
     public:
-        UpdateAdapter(std::string parentName_="") : AdapterBase(CameraAdapterID, parentName_){}
+        UpdateAdapter(std::string parentName_="");
     protected:
-        virtual int bind_(AdapterBase* Adapter) override {
-            bindInterface(static_cast<UpdateAdapter*>(Adapter));
-            return 0;
-        }
+        virtual int bind_(AdapterBase* Adapter) override;
 
-        void bindInterface(UpdateAdapter* adapter) {
-            if (!adapter) return;
-
-            this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
-                return adapter->moduleCommand_(pbuf, len);
-            };
-
-            this->moduleWriteCmdVector = [adapter](std::vector<char>& buffer) {
-                return adapter->moduleCommand_(buffer);
-            };
-        }
+        void bindInterface(UpdateAdapter* adapter);
     };
 
     class CommsAdapter : public AdapterBase {
@@ -364,8 +241,8 @@ namespace Adapter {
         };
 
         struct NetworkAdapter {
-            NetworkAdapter(const std::string& adapter_,  int sPort_, int dPort_, size_t bufferSize_=2048) : adapter(adapter_), sPort(sPort_), dPort(dPort_), bufferSize(bufferSize_) {}
-            ~NetworkAdapter() {}
+            NetworkAdapter(const std::string& adapter_,  int sPort_, int dPort_, size_t bufferSize_=2048);
+            ~NetworkAdapter();
             std::function<int(std::string, const uint8_t*, size_t)> sendCallback = nullptr;
             std::function<int(const uint8_t*, size_t)> sendCallbackTcp = nullptr;
             std::function<void(void)> OnEthDetected = nullptr;
@@ -384,38 +261,19 @@ namespace Adapter {
             bool broadcast = false;
             int adapterType = -1;
 
-            int send(const uint8_t* data, size_t length, std::string destIp="") {
-                if (sendCallbackTcp) {
-                    return sendCallbackTcp(data, length);
-                }
-                else if (sendCallback) {
-                    return sendCallback(destIp, data, length);
-                }
-                return -1;
-            }
+            int send(const uint8_t* data, size_t length, std::string destIp="");
 
-            void setParent(const std::string& name) {
-                parent = name;
-            }
+            void setParent(const std::string& name);
 
-            std::string getHostIP() const {
-                if (hostResolver) {
-                    return hostResolver();
-                }
-                return std::string();
-            }
+            std::string getHostIP() const;
             
-            void OnEthLinkDetected(bool state) {
-                ethLinkDetected.store(state);
-            }
+            void OnEthLinkDetected(bool state);
 
-            void OnWlanLinkDetected(bool state) {
-                wlanLinkDetected.store(state);
-            }
+            void OnWlanLinkDetected(bool state);
 
         };
 
-        CommsAdapter(std::string parentName_="") : AdapterBase(CommsAdapterID, parentName_) {}
+        CommsAdapter(std::string parentName_="");
 
 
         /**
@@ -424,13 +282,7 @@ namespace Adapter {
          * @param length Size of data
          * @return int Status code  
          */
-        virtual int transmitData(const uint8_t* data, size_t length) {
-            if (!data || length == 0) {
-                return -1;
-            }
-
-            return transmitDataCommand(data, length);
-        }
+        virtual int transmitData(const uint8_t* data, size_t length);
 
 
         /**
@@ -438,21 +290,23 @@ namespace Adapter {
          * 
          * @param callback Callback function to handle received data
          */
-        virtual int startReceive(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> callback, bool asyncTx=true) {
-            if (!callback) {
-                return -1;
-            }
+        virtual int startReceive(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> callback, bool asyncTx=true);
 
-            dataReceivedCommand(adapter, callback, asyncTx);
-            return 0;
-        }
+        /**
+         * @brief Start receiving data asynchronously for module message dispatch mode. All network receptiobs
+         * are routed to the module OnMsgReceived Callback
+         * 
+         * @param callback Callback function to handle received data
+         */
+        virtual int startReceive(NetworkAdapter& adapter);
 
-        virtual std::string getHostIP(NetworkAdapter& adapter) {
-            if (!hostIPQueryCommand) {
-                return std::string();
-            }
-            return hostIPQueryCommand(adapter);
-        }
+        /**
+         * @brief Get the host IP address associated with the adapter
+         * 
+         * @param adapter Reference to the network adapter
+         * @return std::string Host IP address as a string
+         */
+        virtual std::string getHostIP(NetworkAdapter& adapter);
 
         /**
          * @brief Open an adapter for a given parent module
@@ -461,30 +315,16 @@ namespace Adapter {
          * @param adapter Adapter identifier or name
          * @return int 
          */
-        virtual int openAdapter(int port, std::string& adapter) {
-            return 0;
-        }
+        virtual int openAdapter(int port, std::string& adapter);
 
-        virtual std::unique_ptr<NetworkAdapter> createNetworkAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, std::string adapter, size_t bufferSize=2048, bool broadcast=false) {
-            if (type == UdpAdapterType) {
-                return openAdapterCommand(callerName, sPort, dPort, adapter, bufferSize, broadcast);
-            } else if (type == TcpAdapterType) {
-                return openTcpAdapterCommand(callerName, sPort, dPort, adapter, bufferSize, broadcast);
-            }
-            return nullptr;
-        }
+        virtual std::unique_ptr<NetworkAdapter> createNetworkAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, std::string adapter, size_t bufferSize=2048, bool broadcast=false);
 
         /**
          * @brief Read stats from module
          * 
          * @return std::string 
          */
-        virtual std::string readStats() {
-            if (readStatsCommand) {
-                return readStatsCommand();
-            }
-            return "";
-        }
+        virtual std::string readStats() override;
         
         /**
          * @brief Get the Eth Connection State 
@@ -492,9 +332,7 @@ namespace Adapter {
          * @return true 
          * @return false 
          */
-        virtual bool GetEthConnectionState() const {
-            return ethConnectionState.load();
-        }
+        virtual bool GetEthConnectionState() const;
     protected:
         // callable to request data transmit; now includes caller identity
         std::function<int(const uint8_t*, size_t)                                                       > transmitDataCommand   = nullptr;
@@ -516,11 +354,7 @@ namespace Adapter {
          * 
          * @param Adapter Pointer to communication adapter
          */
-        virtual int bind_(AdapterBase* Adapter) final {
-            CommsAdapter* Adapter_ = static_cast<CommsAdapter*>(Adapter);
-            bindInterface(Adapter_);
-            return 0;
-        }
+        virtual int bind_(AdapterBase* Adapter) final;
 
 
         /**
@@ -528,35 +362,7 @@ namespace Adapter {
          * 
          * @param adapter Pointer to communication adapter
          */
-        void bindInterface(CommsAdapter* adapter) {            
-            if (!adapter) return;
-
-            // Forward calls to the bound concrete comms adapter (e.g., NetworkComms)
-            this->transmitDataCommand = [adapter](const uint8_t* pData, size_t length) -> int {
-                return adapter->transmitData_(pData, length);
-            };
-
-            this->openAdapterCommand = [adapter](const std::string& parent, int sPort, int dPort, const std::string& adpName, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
-                return adapter->openAdapter_(parent, sPort, dPort, adpName, bufferSize, broadcast);
-            };
-
-            this->openTcpAdapterCommand = [adapter](const std::string& parent, int sPort, int dPort, const std::string& adpName, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
-                return adapter->openTcpAdapter_(parent, sPort, dPort, adpName, bufferSize, broadcast);
-            };
-            
-            this->dataReceivedCommand = [adapter](NetworkAdapter& netAdp, std::function<void(std::vector<char>&)> callback, bool asyncTx) -> int {
-                adapter->configureReceiveCallback(netAdp, callback, asyncTx);
-                return 0;
-            };
-
-            this->hostIPQueryCommand = [adapter](NetworkAdapter& netAdp) -> std::string {
-                return adapter->getHostIP_(netAdp);
-            };
-
-            this->readStatsCommand = [adapter]() -> std::string {
-                return adapter->readStats();
-            };
-        }
+        void bindInterface(CommsAdapter* adapter);
 
 
         /**
@@ -564,20 +370,11 @@ namespace Adapter {
          * 
          * @param dataReceivedCommand_ Callback function to handle received data
          */
-        virtual void startReceive_(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true) {
-            // Default implementation doesn't know how to route - subclasses
-            // (e.g. a network comms controller) should override this method
-            // and use `caller` to pick the fastest receive path.
-        }
+        virtual void startReceive_(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true);
 
+        virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> callback, bool asyncTx=true);
 
-        virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> callback, bool asyncTx=true) {
-            
-        }
-
-        virtual std::string getHostIP_(NetworkAdapter& adapter) {
-            return adapter.getHostIP();
-        }
+        virtual std::string getHostIP_(NetworkAdapter& adapter);
 
 
         /**
@@ -587,16 +384,7 @@ namespace Adapter {
          * @param length Length of the data to be transmitted
          * @return int Status code of the transmission operation
          */
-        virtual int transmitData_(const uint8_t* data, size_t length) {
-            if (!data || length == 0) {
-                return -1;
-            }
-
-            // Default implementation doesn't know how to route - subclasses
-            // (e.g. a network comms controller) should override this method
-            // and use `caller` to pick the fastest transmit path.
-            return 0;
-        }
+        virtual int transmitData_(const uint8_t* data, size_t length);
 
 
         /**
@@ -608,32 +396,7 @@ namespace Adapter {
          * @param adapter Adapter identifier or name
          * @return int Status code of the operation
          */
-        virtual std::unique_ptr<NetworkAdapter> openAdapter_(const std::string& parent,  int sPort, int dPort, const std::string& adapter, size_t bufferSize, bool broadcast) final {
-            std::pair<std::string, std::string> adapterDesc(parent, adapter);
-            m_RegisteredCallers.push_back(adapterDesc);
-
-            // If we have previously bound this caller adapter into adapterMap
-            // (via AdapterBase::bind), cache a direct pointer for fast lookup
-            auto it = adapterMap.find(parent);
-            if (it != adapterMap.end() && it->second) {
-                CommsAdapter* boundAdapter = reinterpret_cast<CommsAdapter*>(it->second);
-                m_CallerAdapterMap[parent] = boundAdapter;
-            }
-
-            std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapter, sPort, dPort, bufferSize);
-            adapterCounter++;
-            netAdapter->id = adapterCounter;  // assign unique ID
-            netAdapter->setParent(parent);    // set the parent module name
-            netAdapter->broadcast = broadcast;
-
-            // Configure the adapter on the derived comms driver
-            const int cfgStatus = configureUDPAdapter(*netAdapter, netAdapter->id);
-            if (cfgStatus != 0) {
-                std::string msg("Failed to configure adapter " + adapter + " for parent " + parent + "\n");
-            }
-
-            return netAdapter;
-        }
+        virtual std::unique_ptr<NetworkAdapter> openAdapter_(const std::string& parent,  int sPort, int dPort, const std::string& adapter, size_t bufferSize, bool broadcast) final;
 
 
         /**
@@ -645,32 +408,7 @@ namespace Adapter {
          * @param adapter Adapter identifier or name
          * @return int Status code of the operation
          */
-        virtual std::unique_ptr<NetworkAdapter> openTcpAdapter_(const std::string& parent,  int sPort, int dPort, const std::string& adapter, size_t bufferSize, bool broadcast) {
-            std::pair<std::string, std::string> adapterDesc(parent, adapter);
-            m_RegisteredCallers.push_back(adapterDesc);
-
-            // If we have previously bound this caller adapter into adapterMap
-            // (via AdapterBase::bind), cache a direct pointer for fast lookup
-            auto it = adapterMap.find(parent);
-            if (it != adapterMap.end() && it->second) {
-                CommsAdapter* boundAdapter = reinterpret_cast<CommsAdapter*>(it->second);
-                m_CallerAdapterMap[parent] = boundAdapter;
-            }
-
-            std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapter, sPort, dPort, bufferSize);
-            adapterCounter++;
-            netAdapter->id = adapterCounter;  // assign unique ID
-            netAdapter->setParent(parent);    // set the parent module name
-            netAdapter->broadcast = broadcast;
-
-            // Configure the adapter on the derived comms driver
-            const int cfgStatus = configureTCPAdapter(*netAdapter, netAdapter->id);
-            if (cfgStatus != 0) {
-                std::string msg("Failed to configure adapter " + adapter + " for parent " + parent + "\n");
-            }
-
-            return netAdapter;
-        }
+        virtual std::unique_ptr<NetworkAdapter> openTcpAdapter_(const std::string& parent,  int sPort, int dPort, const std::string& adapter, size_t bufferSize, bool broadcast);
 
         
         /**
@@ -680,9 +418,7 @@ namespace Adapter {
          * @param adapter Adapter identifier or name
          * @return int Status code of the operation
          */
-        virtual int configureUDPAdapter(NetworkAdapter& netAdapter, int adapterIdx) {
-            return 0;
-        }
+        virtual int configureUDPAdapter(NetworkAdapter& netAdapter, int adapterIdx);
 
         /**
          * @brief Configure a TCP adapter for a given port
@@ -691,92 +427,42 @@ namespace Adapter {
          * @param adapter Adapter identifier or name
          * @return int Status code of the operation
          */
-        virtual int configureTCPAdapter(NetworkAdapter& netAdapter, int adapterIdx) {
-            return 0;
-        }
+        virtual int configureTCPAdapter(NetworkAdapter& netAdapter, int adapterIdx);
     };
 
     class CommandAdapter : public AdapterBase {
     public:
-        CommandAdapter(std::string parentName_="") : AdapterBase(CommandAdapterID, parentName_) {}
+        CommandAdapter(std::string parentName_="");
 
     protected:
         // callable to request motor speed; empty when not set
 
-        virtual int bind_(AdapterBase* Adapter) final {
-            bindInterface(static_cast<CommandAdapter*>(Adapter));
-            return 0;
-        }
+        virtual int bind_(AdapterBase* Adapter) final;
 
-        void bindInterface(CommandAdapter* adapter) {
-            if (!adapter) return;
-        }
+        void bindInterface(CommandAdapter* adapter);
     };
 
     class TlmAdapter : public AdapterBase {
     public:
-        TlmAdapter(std::string parentName_="") : AdapterBase(TlmAdapterID, parentName_) {}
+        TlmAdapter(std::string parentName_="");
 
-        int registerTelemetrySource(const std::string& sourceName) {
-            if (!registerSourceCommand) {
-                return -1;
-            }
+        int registerTelemetrySource(const std::string& sourceName);
 
-            return registerSourceCommand(sourceName);
-        }
+        int publishTelemetry(const std::string& sourceName, const uint8_t* data, size_t length);
 
-        int publishTelemetry(const std::string& sourceName, const uint8_t* data, size_t length) {
-            if (!publishTelemetryCommand || !data || length == 0) {
-                return -1;
-            }
-
-            return publishTelemetryCommand(sourceName, data, length);
-        }
-
-        int publishTelemetry(const std::string& sourceName, const std::string& payload) {
-            return publishTelemetry(sourceName, reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
-        }
+        int publishTelemetry(const std::string& sourceName, const std::string& payload);
         
     protected:
         std::function<int(const std::string&)> registerSourceCommand = nullptr;
         std::function<int(const std::string&, const uint8_t*, size_t)> publishTelemetryCommand = nullptr;
 
-        virtual int bind_(AdapterBase* Adapter) final {
-            bindInterface(static_cast<TlmAdapter*>(Adapter));
-            return 0;
-        }
+        virtual int bind_(AdapterBase* Adapter) final;
 
-        void bindInterface(TlmAdapter* adapter) {
-            if (!adapter) return;
+        void bindInterface(TlmAdapter* adapter);
 
-            registerSourceCommand = [adapter](const std::string& sourceName) -> int {
-                return adapter->registerTelemetrySource_(sourceName);
-            };
+        virtual int registerTelemetrySource_(const std::string& sourceName);
 
-            publishTelemetryCommand = [adapter](const std::string& sourceName, const uint8_t* data, size_t length) -> int {
-                return adapter->publishTelemetry_(sourceName, data, length);
-            };
-
-            this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
-                return adapter->moduleCommand_(pbuf, len);
-            };
-
-            this->moduleWriteAsyncCmd = [adapter](char* pbuf, size_t len) {
-                return adapter->moduleCommandAsync_(pbuf, len);
-            };
-        }
-
-        virtual int registerTelemetrySource_(const std::string& sourceName) {
-            (void)sourceName;
-            return 0;
-        }
-
-        virtual int publishTelemetry_(const std::string& sourceName, const uint8_t* data, size_t length) {
-            (void)sourceName;
-            (void)data;
-            (void)length;
-            return -1;
-        }
+        virtual int publishTelemetry_(const std::string& sourceName, const uint8_t* data, size_t length);
     };
 }
 

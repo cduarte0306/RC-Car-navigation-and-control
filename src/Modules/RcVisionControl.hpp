@@ -24,7 +24,7 @@
 namespace Modules {
 class VisionControls : public Base, public Adapter::CameraAdapter {
 public:
-    VisionControls(int moduleID, std::string name);
+    VisionControls(ModuleDefs::DeviceType moduleID, std::string name);
     ~VisionControls();
 
     virtual int init(void) override;
@@ -110,12 +110,6 @@ protected:
         CamModeDisparity,
         CamModeMax
     };
-
-    struct CameraCommand {
-        uint8_t command;
-        val_type_t data;
-        uint32_t payloadLen;
-    } __attribute__((__packed__));
 
     struct CameraSettings {
         int frameRate = 30;

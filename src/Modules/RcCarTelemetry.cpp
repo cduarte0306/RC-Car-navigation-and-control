@@ -1,5 +1,5 @@
 #include "Modules/RcCarTelemetry.hpp"
-#include "Devices/RegisterMap.hpp"
+#include "lib/RegisterMap.hpp"
 
 #include "utils/logger.hpp"
 #include <nlohmann/json.hpp>
@@ -14,7 +14,7 @@
 namespace Modules {
 static nlohmann::json tempTlm;
 
-RcCarTelemetry::RcCarTelemetry(int moduleID, std::string name) : Modules::Base(moduleID, name), Adapter::TlmAdapter(name) {
+RcCarTelemetry::RcCarTelemetry(ModuleDefs::DeviceType moduleID, std::string name) : Modules::Base(moduleID, name), Adapter::TlmAdapter(name) {
 }
 
 int RcCarTelemetry::init(void) {

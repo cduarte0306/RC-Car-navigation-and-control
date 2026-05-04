@@ -8,7 +8,7 @@
 #include <mutex>
 #include <condition_variable>
 #include "lib/Thread.hpp"
-#include "Modules/RcMessageLib.hpp"
+#include "lib/MessageLib.hpp"
 #include "Devices/GyroScope.hpp"
 
 struct NvBufSurface;

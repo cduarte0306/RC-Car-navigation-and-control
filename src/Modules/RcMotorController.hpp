@@ -3,7 +3,7 @@
 #include <atomic>
 #include "AdapterBase.hpp"
 #include "RcBase.hpp"
-#include "RcMessageLib.hpp"
+#include "lib/MessageLib.hpp"
 #include "Devices/peripheralDriver.hpp"
 #include "Devices/Pwm.hpp"
 #include "Devices/DeviceBase.hpp"
@@ -14,8 +14,12 @@
 namespace Modules {
 class MotorController : public Modules::Base, public Adapter::MotorAdapter {
 public:
-    MotorController(int moduleID_, std::string name);
+    MotorController(ModuleDefs::DeviceType moduleID_, std::string name);
     ~MotorController();
+
+    virtual int stopCmd(void) override {
+        return stop();
+    }
 
     virtual int stop(void) override;
 
