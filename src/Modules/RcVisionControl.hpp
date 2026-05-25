@@ -24,27 +24,88 @@
 namespace Modules {
 class VisionControls : public Base, public Adapter::CameraAdapter {
 public:
+    /** @brief Construct the vision control module. */
     VisionControls(ModuleDefs::DeviceType moduleID, std::string name);
+
+    /** @brief Destroy the vision control module. */
     ~VisionControls();
 
+    /** @brief Initialize adapters, processing pipelines, and command bindings. */
     virtual int init(void) override;
 
+    /** @brief Stop the module execution. */
     virtual int stop(void) override {
         return 0;
     }
 
+    /** @brief Return this module as a camera adapter input. */
     Adapter::AdapterBase* getInputAdapter() override {
         return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CameraAdapter*>(this));
     }
 
     // virtual int moduleCommand_(char* pbuf, size_t len) override;
 
+    /** @brief Handle mailbox command payloads dispatched to this module. */
     virtual int moduleCommand_(std::vector<char>& buffer) override;
 
+    /** @brief Handle CLI commands sent to the vision module. */
     virtual int moduleCliCmd_(std::vector<std::string>& buffer) override;
 
-    // Command handlers
+    /** @brief Return runtime statistics for camera and calibration state. */
     virtual std::string readStats() override;
+
+    /** @brief Start outbound video streaming. */
+    int cmdStartStreamHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Stop outbound video streaming. */
+    int cmdStopStreamHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Select active stream source and optional mode flags. */
+    int cmdSelCameraStreamHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set stream frame rate. */
+    int cmdSetFpsHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set stream JPEG quality. */
+    int cmdSetQualityHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set stereo minimum disparity. */
+    int cmdSetMinDisparitiesHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set stereo maximum disparity. */
+    int cmdSetMaxDisparitiesHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set stereo confidence threshold. */
+    int cmdSetConfidenceThresholdHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set stereo uniqueness ratio. */
+    int cmdSetUniquenessRatioHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set stereo P1 smoothness parameter. */
+    int cmdSetP1Handler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set stereo P2 smoothness parameter. */
+    int cmdSetP2Handler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set maximum depth range limit. */
+    int cmdSetZMaxHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set minimum depth range limit. */
+    int cmdSetZMinHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set depth agreement threshold. */
+    int cmdSetDepthThresholdHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set minimum agreeing pixel count for depth filtering. */
+    int cmdSetMinAgreeingPixelsHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Set color consistency threshold for depth filtering. */
+    int cmdSetColorThresholdHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Read and return current camera/stereo parameters. */
+    int cmdRdParamsHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Clear in-memory video recording state. */
+    int cmdClrVideoRecHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Save recorded video to disk. */
+    int cmdSaveVideoHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Enumerate stored video recordings. */
+    int cmdLoadStoredVideosHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Load a selected video recording. */
+    int cmdLoadSelectedVideoHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Delete a selected video recording. */
+    int cmdDeleteVideoHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Enable or disable stereo calibration mode. */
+    int cmdCalibrationSetStateHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Apply calibration configuration from payload JSON. */
+    int cmdCalibrationWrtParamsHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Reset the calibration session. */
+    int cmdCalibrationResetHandler(val_type_t val, const std::vector<char>& payload);
+    /** @brief Persist calibration profile to disk. */
+    int cmdCalibrationSaveHandler(val_type_t val, const std::vector<char>& payload);
     
 protected:
 #pragma pack(push, 1)
@@ -155,34 +216,34 @@ protected:
     static constexpr int CAM_WIDTH  = 640;
     static constexpr int CAM_HEIGHT = 480;
 
-    // Parent main proc override
+    /** @brief Main worker thread procedure. */
     virtual void mainProc() override;
 
-    // Parent timer thread overridew
+    /** @brief Periodic timer callback. */
     virtual void OnTimer(void) override;
 
-    // Frame transmission handler
+    /** @brief Decode one JPEG frame entry into an OpenCV matrix. */
     void decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameEntry);
 
-    // Receive frame handler
+    /** @brief Handle incoming Ethernet video/control payloads. */
     void onEthRecv(std::vector<char>& data);
 
-    // Stereo frame processing handler
+    /** @brief Run stereo processing on a synchronized frame pair. */
     void processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q);
 
-    // Lane detection
+    /** @brief Run lane detection on the provided frame. */
     void processLaneDetection(cv::Mat& frame, cv::Mat& dst);
 
-    // Frame storage handler
+    /** @brief Save the current frame pair to disk when requested. */
     void storeFrame(const cv::Mat& frameL, const cv::Mat& frameR);
 
-    // Save the streaming profile parameters
+    /** @brief Save streaming and stereo settings to persistent storage. */
     static int saveStreamingProfile(CameraSettings& settings);
 
-    // Load all settings
+    /** @brief Load streaming and stereo settings from persistent storage. */
     static int loadStreamingProfile(CameraSettings& settings);
 
-    // Clamp settings to VPI CUDA stereo constraints.
+    /** @brief Clamp stereo settings to supported VPI/CUDA constraints. */
     static void sanitizeVpiStereoSettings(CameraSettings& settings);
 
     // Camera source stream handler

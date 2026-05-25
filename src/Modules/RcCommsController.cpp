@@ -17,35 +17,114 @@ std::vector<std::string> hostMap = {"", ""};
 
 NetworkComms::NetworkComms(ModuleDefs::DeviceType moduleID, std::string name) 
     : Base(moduleID, name), Adapter::CommsAdapter(name) {
+    setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CommsAdapter*>(this)));
+
     // Socket instances are created per adapter in configureUDPAdapter.
     setPeriod(1000);  // Set the timer thread to service ever second
+
+    // Instantiate cmd pool
+    m_LastCommandSource = new uint8_t[UINT16_MAX];
 }
 
 
 NetworkComms::~NetworkComms() {
     // m_OpenedSockets own sockets; m_UdpSocket is non-owning.
+    delete[] m_LastCommandSource;
     m_UdpSocket = nullptr;
 }
 
 
 int NetworkComms::init(void) {
     Logger* logger = Logger::getLoggerInst();
+    constexpr unsigned short kHandshakePort = static_cast<unsigned short>(ModuleDefs::NetworkPorts::HandshakePort);
+    constexpr unsigned short kCommandDispatcherPort = static_cast<unsigned short>(ModuleDefs::NetworkPorts::CommandDispatcherPort);
 
     // Initialize host IP map
     hostMap[WlanAdapter] = "";
     hostMap[EthAdapter]  = "";
 
     m_WlanSocket = std::make_shared<Network::UdpServer>(
-        io_context, "wlP1p1s0", "enP8p1s0", 0, WlanHandshakePort);  // Default bakeup interface is enP8p1s0
+        io_context, "wlP1p1s0", 0, kHandshakePort);  // Use ephemeral local port to avoid colliding with ETH handshake listener
 
     m_EthSocket = std::make_shared<Network::UdpServer>(
-        io_context, "enP8p1s0", "enP8p1s0", 0, EthHandshakePort);  // Default bakeup interface is wlan
+        io_context, "enP8p1s0", kHandshakePort, 0, 1024, true);  // Broadcast receive on handshake port
+
+    // Module command dispatchers
+    m_EthCmdDispatcher = std::make_shared<Network::UdpServer>(
+        io_context, "enP8p1s0", kCommandDispatcherPort, 0);  // Default bakeup interface is wlan
+
+    m_WlanCmdDispatcher = std::make_shared<Network::UdpServer>(
+        io_context, "wlP1p1s0", kCommandDispatcherPort, 0);  // Default bakeup interface is enP8p1s0
 
     m_WlanSocket->startReceive(std::bind(&NetworkComms::OnWlanHandShakeRecv, this, std::placeholders::_1));
     m_EthSocket->startReceive(std::bind(&NetworkComms::OnEthHandShakeRecv, this, std::placeholders::_1));
 
+    // Initialize command dispatcher ports
+    m_EthCmdDispatcher->startReceive(std::bind(&NetworkComms::OnEthCmdRecv, this, std::placeholders::_1));
+    m_WlanCmdDispatcher->startReceive(std::bind(&NetworkComms::OnWlanCmdRecv, this, std::placeholders::_1));
+
     logger->log(Logger::LOG_LVL_INFO, "NetworkComms module initialized\r\n");
     return 0;
+}
+
+
+void NetworkComms::OnEthCmdRecv(std::vector<char>& data) {
+    Logger* logger = Logger::getLoggerInst();
+    logger->log(Logger::LOG_LVL_INFO, "Received command data on Ethernet (%zu bytes)\r\n", data.size());
+
+    // Submit to pool
+    BaseMsgHdr* hdr = reinterpret_cast<BaseMsgHdr*>(data.data());
+    if (hdr->seqID >= UINT16_MAX) {
+        logger->log(Logger::LOG_LVL_ERROR, "Received command with invalid sequence ID: %d\r\n", hdr->seqID);
+        return;
+    }
+    m_LastCommandSource[hdr->seqID] = EthAdapter;
+    // Process command data received on Ethernet
+    Base::dispatchToModule(data);
+}
+
+
+void NetworkComms::OnWlanCmdRecv(std::vector<char>& data) {
+    Logger* logger = Logger::getLoggerInst();
+    logger->log(Logger::LOG_LVL_INFO, "Received command data on WLAN (%zu bytes)\r\n", data.size());
+    // Process command data received on WLAN
+    BaseMsgHdr* hdr = reinterpret_cast<BaseMsgHdr*>(data.data());
+    if (hdr->seqID >= UINT16_MAX) {
+        logger->log(Logger::LOG_LVL_ERROR, "Received command with invalid sequence ID: %d\r\n", hdr->seqID);
+        return;
+    }
+
+    // Submit to pool
+    m_LastCommandSource[hdr->seqID] = WlanAdapter;
+    Base::dispatchToModule(data);
+}
+
+
+int NetworkComms::replyReceived(Msg::MessageCapsule<char>& capsule) {
+    // This function is called by the reply processing thread to handle any messages that are sent back from the module to the adapter as part of command acknowledgments or responses. The adapter can implement this function to process the reply messages and take appropriate actions based on the content of the replies.
+    Logger* logger = Logger::getLoggerInst();
+    // Send reply over socket
+    const std::shared_ptr<Network::UdpServer> socket[] = {m_EthCmdDispatcher, m_WlanCmdDispatcher};
+    auto adapterId = m_LastCommandSource[capsule.getSeqID()];
+    std::shared_ptr<Network::UdpServer> targetSocket = socket[adapterId];
+    if (!targetSocket) {
+        logger->log(Logger::LOG_LVL_ERROR, "No valid socket found for adapter ID %d\r\n", adapterId);
+        return -1;
+    }
+
+    std::vector<char>& replyData = capsule.getData();
+    std::string destIP = targetSocket->getHostIP();
+    bool ok = targetSocket->transmit(reinterpret_cast<uint8_t*>(replyData.data()), replyData.size(), destIP);
+    if (!ok) {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to transmit reply data for sequence ID %d\r\n", capsule.getSeqID());
+        return -1;
+    }
+    return 0;
+}
+
+int NetworkComms::OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule) {
+    // Base handler remains a safe default for module-originated messages.
+    return Base::OnModuleMsgReceived(capsule);
 }
 
 
@@ -67,7 +146,7 @@ void NetworkComms::OnWlanHandShakeRecv(std::vector<char>& data) {
     hostMap[NetworkComms::WlanAdapter] = m_WlanSocket->getHostIP();
 
     if (!hostMap[NetworkComms::WlanAdapter].length())
-        logger->log(Logger::LOG_LVL_INFO, "WLAN Host IP: %s\r\n", hostMap[NetworkComms::WlanAdapter].c_str());
+        logger->log(Logger::LOG_LVL_INFO, "WLAN Host IP: %s\r\n", m_WlanSocket->getHostIP().c_str());
     data.insert(data.end(), replyStr.begin(), replyStr.end());
 }
 
@@ -88,8 +167,11 @@ void NetworkComms::OnEthHandShakeRecv(std::vector<char>& data) {
     // Fill the host map for Ethernet
     hostMap[NetworkComms::EthAdapter] = m_EthSocket->getHostIP();
     if (!hostMap[NetworkComms::EthAdapter].length())
-        logger->log(Logger::LOG_LVL_INFO, "Ethernet Host IP: %s\r\n", hostMap[NetworkComms::EthAdapter].c_str());
+        logger->log(Logger::LOG_LVL_INFO, "Ethernet Host IP: %s\r\n", m_EthSocket->getHostIP().c_str());
     data.insert(data.end(), replyStr.begin(), replyStr.end());
+    std::string destIP = m_EthSocket->getHostIP();
+    // Reply over the eth handshake socket
+    bool ok = m_EthSocket->transmit(reinterpret_cast<uint8_t*>(data.data()), data.size(), destIP);
 }
 
 
@@ -109,7 +191,7 @@ int NetworkComms::configureUDPAdapter(
     std::unique_ptr<Network::UdpServer> udpSocket;
     try {
         udpSocket = make_unique<Network::UdpServer>(
-            io_context, adapter, "enP8p1s0", netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize, netAdapter.broadcast);  // Default bakeup interface is enP8p1s0
+            io_context, adapter, netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize, netAdapter.broadcast);
     } catch(const std::exception& e) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create UDP socket for adapter %s: %s\r\n", adapter.c_str(), e.what());

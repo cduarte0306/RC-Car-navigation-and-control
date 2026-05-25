@@ -2,8 +2,9 @@
 #include <mutex>
 #include <atomic>
 #include <types.h>
-#include "RcBase.hpp"
+#include <unordered_map>
 
+#include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
 
 
@@ -31,10 +32,9 @@ public:
 protected:
     enum {
         CmdNoop,         // No operation command
-        CmdFwdDir,       // Forward direction command
-        CmdSteer,        // Steering command
-        CmdCameraModule, // Camera mode setting command
-        CmdUpdater,      // Update command
+        CmdMotorModule,  // Motor control group
+        CmdCameraModule, // Camera mode setting command group
+        CmdUpdater,      // Update command group
     };
 
     typedef struct __attribute__((__packed__))
@@ -88,5 +88,8 @@ protected:
 
     // UDP socket
     std::unique_ptr<CommsAdapter::NetworkAdapter> m_CommandAdapter{nullptr};    
+
+    // Map of bound adapters by module ID
+    std::unordered_map<int, std::unique_ptr<Adapter::AdapterBase>> m_ModuleAdapters;
 };
 };

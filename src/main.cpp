@@ -33,26 +33,25 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    std::unique_ptr<Modules::MotorController  > motorController   = std::make_unique<Modules::MotorController>  (ModuleDefs::DeviceType::MOTOR_CONTROLLER, "MainMotorController");
-    std::unique_ptr<Modules::NetworkComms     > networkComms      = std::make_unique<Modules::NetworkComms>     (ModuleDefs::DeviceType::WIRELESS_COMMS, "MainNetworkComms");
-    std::unique_ptr<Modules::CommandController> commandController = std::make_unique<Modules::CommandController>(ModuleDefs::DeviceType::COMMAND_CONTROLLER, "MainCommsController");
-    std::unique_ptr<Modules::AppCLI           > cli               = std::make_unique<Modules::AppCLI>           (ModuleDefs::DeviceType::CLI_INTERFACE, "AppCli");
-    std::unique_ptr<Modules::VisionControls   > rcVision          = std::make_unique<Modules::VisionControls>   (ModuleDefs::DeviceType::CAMERA_CONTROLLER, "CamController");
-    std::unique_ptr<Modules::RcCarTelemetry   > rcTelemetry       = std::make_unique<Modules::RcCarTelemetry>   (ModuleDefs::DeviceType::TELEMETRY_MODULE, "TelemetryModule");
-    std::unique_ptr<Modules::Updater          > rcUpdater         = std::make_unique<Modules::Updater>          (ModuleDefs::DeviceType::UPDATER_MODULE, "UpdaterModule");
+    std::unique_ptr<Modules::MotorController  > motorController   = std::make_unique<Modules::MotorController>  (ModuleDefs::DeviceType::MotorControllerModule, "MainMotorController");
+    std::unique_ptr<Modules::NetworkComms     > networkComms      = std::make_unique<Modules::NetworkComms>     (ModuleDefs::DeviceType::CommsModule, "MainNetworkComms");
+    std::unique_ptr<Modules::AppCLI           > cli               = std::make_unique<Modules::AppCLI>           (ModuleDefs::DeviceType::CliModule, "AppCli");
+    std::unique_ptr<Modules::VisionControls   > rcVision          = std::make_unique<Modules::VisionControls>   (ModuleDefs::DeviceType::CameraControllerModule, "CamController");
+    std::unique_ptr<Modules::RcCarTelemetry   > rcTelemetry       = std::make_unique<Modules::RcCarTelemetry>   (ModuleDefs::DeviceType::TelemetryModule, "TelemetryModule");
+    std::unique_ptr<Modules::Updater          > rcUpdater         = std::make_unique<Modules::Updater>          (ModuleDefs::DeviceType::UpdaterModule, "UpdaterModule");
 
     // Create adapters
     motorController->createAdapter<Adapter::TlmAdapter>();
-    commandController->createAdapter<Adapter::MotorAdapter>();
-    commandController->createAdapter<Adapter::CameraAdapter>();
-    commandController->createAdapter<Adapter::CommsAdapter>();
-    commandController->createAdapter<Adapter::CommandAdapter>();
-    commandController->createAdapter<Adapter::UpdateAdapter>();
-    
+
+    networkComms->createAdapter<Adapter::MotorAdapter>();
+    networkComms->createAdapter<Adapter::CameraAdapter>();
+    networkComms->createAdapter<Adapter::UpdateAdapter>();
+
     rcVision->createAdapter<Adapter::MotorAdapter>();
     rcVision->createAdapter<Adapter::CommsAdapter>();
     rcVision->createAdapter<Adapter::CommandAdapter>();
     rcVision->createAdapter<Adapter::TlmAdapter>();
+
     cli->createAdapter<Adapter::MotorAdapter>();
     cli->createAdapter<Adapter::CommsAdapter>();
     cli->createAdapter<Adapter::CameraAdapter>();
@@ -63,11 +62,10 @@ int main(int argc, char* argv[]) {
     rcUpdater->createAdapter<Adapter::UpdateAdapter>();
 
     // Bind modules
+    networkComms->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
+    networkComms->moduleBind<Adapter::CameraAdapter>(rcVision->getInputAdapter());
+    networkComms->moduleBind<Adapter::UpdateAdapter>(rcUpdater->getInputAdapter());
     motorController->moduleBind<Adapter::TlmAdapter>(rcTelemetry->getInputAdapter());
-    commandController->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
-    commandController->moduleBind<Adapter::CameraAdapter>(rcVision->getInputAdapter());
-    commandController->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
-    commandController->moduleBind<Adapter::UpdateAdapter>(rcUpdater->getInputAdapter());
     cli->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
     cli->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     cli->moduleBind<Adapter::CameraAdapter>(rcVision->getInputAdapter());
@@ -79,7 +77,6 @@ int main(int argc, char* argv[]) {
 
     // Preliminary initialization
     motorController->init();
-    commandController->init();
     networkComms->init();
     rcVision->init();
     rcTelemetry->init();
@@ -88,7 +85,6 @@ int main(int argc, char* argv[]) {
 
     // Start each module
     motorController->trigger();
-    commandController->trigger();
     networkComms->trigger();
     rcVision->trigger();
     rcTelemetry->trigger();

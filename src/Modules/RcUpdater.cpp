@@ -7,13 +7,15 @@
 #include "utils/logger.hpp"
 
 
-static constexpr char* tempFilePath = "/data/firmware/";
+static const char* tempFilePath = "/data/firmware/";
 static CFile updateFile;
 
 namespace Modules {
 Updater::Updater(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::UpdateAdapter(name), m_Buffer(10) {
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Updater object initialized\r\n");
+
+    setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::UpdateAdapter*>(this)));
 }
 
 
@@ -106,7 +108,7 @@ int Updater::moduleCommand_(std::vector<char>& buffer) {
 
 void Updater::mainProc() {
     // Implementation of the main processing loop for the updater
-    static constexpr char* tempFilePath = "/data/rc_updater/";
+    static const char* tempFilePath = "/data/rc_updater/";
     
     if (std::filesystem::exists(tempFilePath)) {
         std::filesystem::remove_all(tempFilePath);

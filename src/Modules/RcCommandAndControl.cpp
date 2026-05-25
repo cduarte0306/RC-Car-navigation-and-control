@@ -8,9 +8,13 @@
 #include "lib/RegisterMap.hpp"
 #include "lib/MessageLib.hpp"
 
+#include "Modules/ModulesDefs.hpp"
+
 namespace Modules {
 CommandController::CommandController(ModuleDefs::DeviceType moduleID, std::string name) : Base(moduleID, name), Adapter::CommandAdapter(name) {
-    // this->m_UdpSocket = std::make_unique<Network::UdpServer>(io_context, "wlP1p1s0", "enP8p1s0", 65000);
+    setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CommandAdapter*>(this)));
+
+    // this->m_UdpSocket = std::make_unique<Network::UdpServer>(io_context, "wlP1p1s0", 65000, 0);
     // this->m_UdpSocket->startReceive(std::bind(&CommandController::processIncomingData, this, std::placeholders::_1, std::placeholders::_2));
     
 }
@@ -28,14 +32,15 @@ CommandController::~CommandController() {
  */
 int CommandController::init(void) {
     Logger* logger = Logger::getLoggerInst();
+    constexpr int kCommandDispatcherPort = static_cast<int>(ModuleDefs::NetworkPorts::CommandDispatcherPort);
     // Initialize the UDP server
-    m_CommandNetAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 65000, 0, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_CommandNetAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, kCommandDispatcherPort, 0, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
     if (!m_CommandNetAdapter) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create command network adapter\r\n");
         return -1;
     }
 
-    m_CommandNetAdapterEth = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 65000, 0, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_CommandNetAdapterEth = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, kCommandDispatcherPort, 0, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
     if (!m_CommandNetAdapterEth) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create command network adapter\r\n");
         return -1;
@@ -104,42 +109,42 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
                          buffer.begin() + extraOffset + extraLen);
 
     switch(clientData->payload.command) {
-        case CmdNoop:
-            // No operation command, do nothing
-            reply.state = true; // Success
-            break;
+        // case CmdNoop:
+        //     // No operation command, do nothing
+        //     reply.state = true; // Success
+        //     break;
 
-        case CmdFwdDir:
-            reply.data = clientData->payload.data; // Echo back the data
-            reply.state = true; // Example state for success
-            this->motorAdapter->setMotorSpeed(reply.data.i16); // Example: set speed with 0 direction
-            break;
+        // case CmdFwdDir:
+        //     reply.data = clientData->payload.data; // Echo back the data
+        //     reply.state = true; // Example state for success
+        //     this->motorAdapter->setMotorSpeed(reply.data.i16); // Example: set speed with 0 direction
+        //     break;
 
-        case CmdSteer:
-            // Handle steering command
-            reply.state = true; // Example state for success
-            this->motorAdapter->steer(clientData->payload.data.i16); // Example: set steering angle
-            break;
+        // case CmdSteer:
+        //     // Handle steering command
+        //     reply.state = true; // Example state for success
+        //     this->motorAdapter->steer(clientData->payload.data.i16); // Example: set steering angle
+        //     break;
 
-        case CmdCameraModule: {
-            reply.state = true;
-            if (extraLen > 0) {
-                replyPayloadPacket.insert(replyPayloadPacket.end(), buffer.begin() + extraOffset, buffer.begin() + extraOffset + extraLen);
-                int ret = this->CameraAdapter->moduleCommand(replyPayloadPacket);
-                reply.state = (ret == 0) ? true : false;
-            } else {
-                reply.state = false;
-            }
-        } break;
+        // case CmdCameraModule: {
+        //     reply.state = true;
+        //     if (extraLen > 0) {
+        //         replyPayloadPacket.insert(replyPayloadPacket.end(), buffer.begin() + extraOffset, buffer.begin() + extraOffset + extraLen);
+        //         int ret = this->CameraAdapter->moduleCommand(replyPayloadPacket);
+        //         reply.state = (ret == 0) ? true : false;
+        //     } else {
+        //         reply.state = false;
+        //     }
+        // } break;
 
-        case CmdUpdater:
-            break;
+        // case CmdUpdater:
+        //     break;
 
-        default:
-            // Unknown command, set error state
-            logger->log(Logger::LOG_LVL_WARN, "Unknown command :%d\r\n", clientData->payload.command);
-            reply.state = false; // Error state
-            break;
+        // default:
+        //     // Unknown command, set error state
+        //     logger->log(Logger::LOG_LVL_WARN, "Unknown command :%d\r\n", clientData->payload.command);
+        //     reply.state = false; // Error state
+        //     break;
     }
 
     if (ret != 0) {
@@ -169,8 +174,32 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
 
 int CommandController::OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule) {
     std::vector<char> serializedReply;
-    capsule.SendAck(capsule.getCommand(), serializedReply.data(), serializedReply.size());  // Reply to the adapter
-    return 0;
+    std::vector<char> payloadBuffer;
+    Msg::MessageAck<char>& ack = capsule.GetAck();
+    if (capsule.GetPayloadSize() > 0) {
+        payloadBuffer = capsule.getData();
+    }
+
+    // Dispatch to respective adapter module
+    auto adapterIt = m_ModuleAdapters.find(capsule.getCommand());
+    if (adapterIt == m_ModuleAdapters.end()) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received command with invalid adapter index: %d\r\n", capsule.getCommand());
+        return -1;
+    }
+
+    if (capsule.getCommand() == static_cast<int>(ModuleDefs::DeviceType::NullModule)) {  // Null module is a keepalive/ping message
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Received noop command\r\n");
+        return 0; // Noop command, do nothing
+    }
+
+    Adapter::AdapterBase* adapter = adapterIt->second.get();
+    if (!adapter) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "No adapter bound for command: %d\r\n", capsule.getCommand());
+        return -1;
+    }
+
+    // Dispatch the command to the appropriate adapter
+    return adapter->dispatchCommand(capsule);
 }
 
 

@@ -67,7 +67,7 @@ private:
 
 class Base {
 public:
-    explicit Base(ModuleDefs::DeviceType moduleID_, const std::string& name);
+    explicit Base(ModuleDefs::DeviceType moduleID_, const std::string& name, Adapter::AdapterBase* inputAdpt = nullptr);
 
     ~Base();
 
@@ -107,14 +107,6 @@ public:
     virtual void DefinePayloadLoc(size_t offset);
 
     /**
-     * @brief Extract the payload from the incoming command buffer based on the defined payload offset. This is typically called by adapters when they receive a command that needs to be forwarded to the module, allowing them to extract just the payload portion of the command buffer to pass to the module's command handler.
-     * 
-     * @param buffer Vector containing the raw command data received from an adapter
-     * @return std::vector<char> Vector containing just the payload portion of the command buffer
-     */
-    virtual std::vector<char> getPayload(std::vector<char>& buffer);
-
-    /**
      * @brief Get the module name
      * 
      * @return const std::string& 
@@ -135,7 +127,13 @@ public:
         }
 
         m_boundAdapters[moduleName] = std::move(module);
+        
+        // Track bound adapter by parent module device type.
         Adapter::AdapterBase* adapterPtr = m_boundAdapters[moduleName].get();
+        const int parentId = adapterPtr->GetParentID();
+        if (parentId >= 0) {
+            m_BoundAdaptersMap[static_cast<ModuleDefs::DeviceType>(parentId)] = adapterPtr;
+        }
         adapterPtr->bindCommandDispatch([this](Msg::MessageCapsule<char>& capsule) {
             return this->dispatchCommand(capsule.getCommand(), capsule.getFlag(), capsule.getData());
         });
@@ -214,6 +212,10 @@ public:
     // to an adapter object owned by the module (or nullptr if none).
     virtual Adapter::AdapterBase* getInputAdapter();
 
+    // Set/initialize this module's input adapter pointer after construction.
+    // This binds inbound adapter messages to the module receive callback path.
+    void setInputAdapter(Adapter::AdapterBase* inputAdpt);
+
     // moduleBind overload to accept non-owning adapter pointers (in-adapters).
     template<typename U>
     int moduleBind(Adapter::AdapterBase* adapter) {
@@ -227,6 +229,10 @@ public:
             return -1;
         }
         m_boundAdaptersNonOwning[moduleName] = adapter;
+        const int parentId = adapter->GetParentID();
+        if (parentId >= 0) {
+            m_BoundAdaptersMap[static_cast<ModuleDefs::DeviceType>(parentId)] = adapter;
+        }
         adapter->bindCommandDispatch([this](Msg::MessageCapsule<char>& capsule) {
             return this->dispatchCommand(capsule.getCommand(), capsule.getFlag(), capsule.getData());
         });
@@ -250,6 +256,7 @@ public:
         } else {
             return -1;
         }
+
         return 0;
     }
 
@@ -305,11 +312,19 @@ protected:
      * @brief Standard module interface command handler. This is the main entry point for commands sent to the module. It should parse the command buffer, extract the command ID and payload, and then dispatch to the appropriate handler based on the command ID.
      * 
      */
-    struct ModMsgHdr {
-        uint8_t command;
-        val_type_t data;
-        uint64_t payloadLen;
+    struct BaseMsgHdr {
+        uint8_t  command;  /**< Module ID */
+        uint16_t seqID;    /**< Sequence ID */
     } __attribute__((__packed__));
+
+    /**
+     * @brief Module command 
+     * 
+     */
+    struct ModMsgHdr {
+        uint16_t cmd;    /**< Module command  */
+        val_type_t data;      /**< Module data */
+    };
 
     int sendMailbox(char* pbuf, size_t len);
     int recvMailbox(char* pbuf, size_t len);
@@ -317,13 +332,6 @@ protected:
     virtual void mainProc() = 0;
 
     virtual void OnTimer(void);
-    
-    /**
-     * @brief Handle an incoming command message received from an adapter. This function is called after the command ID and payload have been extracted from the command buffer, and it is responsible for dispatching the command to the appropriate handler based on the command ID. It may also perform any necessary preprocessing or validation of the command before dispatching.
-     * 
-     * @param buffer 
-     */
-    virtual int OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule) { return 0; }
 
     /**
      * @brief Set the sleep period for the timer
@@ -332,7 +340,17 @@ protected:
      */
     void setPeriod(int period);
 
+    /**
+     * @brief Thread function for handling time-based events. This thread continuously runs and calls the OnTimer function at regular intervals defined by m_SleepPeriod. It can be used by derived classes to implement any periodic tasks or time-based logic that needs to run in the background.
+     * 
+     */
     void timerThread(void);
+
+    /**
+     * @brief Thread function for handling mailbox communication with adapters. This thread continuously checks the mailbox for incoming messages from adapters, processes them, and dispatches them to the appropriate handlers based on the command ID. It also handles sending messages back to adapters as needed.
+     * 
+     */
+    void mailBoxThread(void);
 
     /**
      * @brief Extract the command ID and payload from the incoming command buffer, then dispatch to the appropriate handler based on the command ID. This is typically called by adapters when they receive a command that needs to be forwarded to the module.
@@ -354,9 +372,9 @@ protected:
      * @brief Deserialize the standard module message header from the incoming command buffer. This is typically called by adapters when they receive a command that needs to be forwarded to the module, allowing them to extract the command ID and payload from the raw command buffer before dispatching to the module's command handler. 
      * 
      * @param buffer Vector containing the raw command data received from an adapter
-     * @return ModMsgHdr Deserialized module message header
+     * @return BaseMsgHdr Deserialized module message header
      */
-    int GetModMsgHdr(std::vector<char>& buffer, ModMsgHdr& hdr);
+    int GetBaseMsgHdr(std::vector<char>& buffer, BaseMsgHdr& hdr);
 
     /**
      * @brief Send an acknowledgment message back to the adapter that sent a command. This can be used by command handlers to indicate success or failure of command processing, and to provide any necessary response data back to the adapter.
@@ -366,6 +384,22 @@ protected:
      * @return int Error code indicating success or failure of the acknowledgment sending process
      */
     int SubmitAcknowledge(int commandID, char* reply);
+
+    /**
+     * @brief Handle reception of command message and route it to the appropriate module.
+     * 
+     * @param msg Vector containing the raw command data received from an adapter
+     * @return int Error code indicating success or failure of the message handling process
+     */
+    int dispatchToModule(std::vector<char>& msg);
+
+    /**
+     * @brief Handle an incoming command message received from an adapter. This function is called after the command ID and payload have been extracted from the command buffer, and it is responsible for dispatching the command to the appropriate handler based on the command ID. It may also perform any necessary preprocessing or validation of the command before dispatching.
+     * 
+     * @param capsule Message capsule containing the echoed command data with reply
+     * @return int Error code indicating success or failure of the message handling process
+     */
+    int doReply(Msg::MessageCapsule<char>& capsule);
 
     /**
      * @brief Global thread can run flag
@@ -398,30 +432,39 @@ protected:
     std::string m_name;
 
     /**
+     * @brief Mailbox buffers for sending and receiving messages to/from adapters
+     * 
+     */
+    Msg::CircularBuffer<Msg::MessageCapsule<char>> m_MailBoxOut; // Buffer for outgoing messages to adapters
+
+    /**
+     * @brief Mailbox in circular buffer
+     * 
+     */
+    Msg::CircularBuffer<Msg::MessageCapsule<char>> m_MailBoxIn;  // Buffer for incoming messages from adapters
+
+    /**
      * @brief Bound adapters map (store adapters attached to this module)
      */
     std::unordered_map<std::string, std::unique_ptr<Adapter::AdapterBase>> m_boundAdapters; // owned adapters
     std::unordered_map<std::string, Adapter::AdapterBase*> m_boundAdaptersNonOwning;      // non-owning adapters (in-adapters)
+    std::unordered_map<ModuleDefs::DeviceType, Adapter::AdapterBase*> m_BoundAdaptersMap; /**< Map of device type to adapter pointer */
 
     // Adapters for different device types
-    std::unique_ptr<Adapter::AdapterBase    > baseAdapter    = nullptr;
-    std::unique_ptr<Adapter::MotorAdapter   > motorAdapter   = nullptr;
-    std::unique_ptr<Adapter::CameraAdapter  > CameraAdapter  = nullptr;
-    std::unique_ptr<Adapter::CommandAdapter > CommandAdapter = nullptr;
-    std::unique_ptr<Adapter::CommsAdapter   > CommsAdapter   = nullptr;
-    std::unique_ptr<Adapter::TlmAdapter     > TlmAdapter     = nullptr;
-    std::unique_ptr<Adapter::UpdateAdapter  > UpdateAdapter  = nullptr;
+    std::unique_ptr<Adapter::AdapterBase   > baseAdapter    = nullptr;
+    std::unique_ptr<Adapter::MotorAdapter  > motorAdapter   = nullptr;
+    std::unique_ptr<Adapter::CameraAdapter > CameraAdapter  = nullptr;
+    std::unique_ptr<Adapter::CommandAdapter> CommandAdapter = nullptr;
+    std::unique_ptr<Adapter::CommsAdapter  > CommsAdapter   = nullptr;
+    std::unique_ptr<Adapter::TlmAdapter    > TlmAdapter     = nullptr;
+    std::unique_ptr<Adapter::UpdateAdapter > UpdateAdapter  = nullptr;
 
     // Default CLI adapter on every module
     Adapter::CLIAdapter CliAdapter;
 
     static boost::asio::io_context io_context;
     std::mutex mutex;
-    std::thread thread;
-    std::thread m_TimerThread;  // This thread handles time-based events per object
     // boost::thread boostThread;
-
-    std::atomic<bool> m_Running{true};
 
     /**
      * @brief Map of command handlers for different command IDs. Each handler is a function that takes a vector of chars 
@@ -430,12 +473,36 @@ protected:
      */
     std::unordered_map<int, std::function<int(val_type_t, std::vector<char>&)>> m_CommandHandlers;
 
-    static std::vector<std::thread> workerThreads;
+    std::atomic<bool> m_Running{true};  // Flag to control the main processing loop and allow for graceful shutdown
 
+    static std::vector<std::thread> workerThreads;
 private:
+    std::thread thread;  // Main thread for the module's main processing loop
+    std::thread m_TimerThread;  // This thread handles time-based events per object
+
     size_t m_PayloadOffset = 0; // Default payload offset is 0, can be set by derived classes if needed
 
     char* m_SerializedAck = nullptr;
+
+    Adapter::AdapterBase* m_InputAdapter = nullptr; // Pointer to the input adapter (ancestor interface) for this module, if applicable
+
+    /**
+     * @brief Resolve the bound adapter for a module command ID.
+     *
+     * @param commandID Module command identifier.
+     * @return Adapter::AdapterBase* Bound adapter pointer, or nullptr if unmapped/unavailable.
+     */
+    Adapter::AdapterBase* resolveCommandAdapter(uint8_t commandID) const;
+
+protected:
+
+        
+    /**
+     * @brief Handle an incoming command message received from an adapter. This function is called after the command ID and payload have been extracted from the command buffer, and it is responsible for dispatching the command to the appropriate handler based on the command ID. It may also perform any necessary preprocessing or validation of the command before dispatching.
+     * 
+     * @param buffer 
+     */
+    virtual int OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule);
 };
 
 } // namespace Modules

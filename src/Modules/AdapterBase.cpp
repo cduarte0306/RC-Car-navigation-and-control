@@ -1,9 +1,15 @@
 #include "AdapterBase.hpp"
 #include "lib/RegisterMap.hpp"
+#include "utils/logger.hpp"
 
 namespace Adapter {
 
-AdapterBase::AdapterBase(ModuleDefs::AdapterId id, std::string parentName_) : parentName(parentName_), adapterId(id) {
+AdapterBase::AdapterBase(ModuleDefs::AdapterId id, std::string parentName_) : 
+parentName(parentName_), 
+adapterId(id),
+m_ReplyMailBox(100),
+m_InputMailBox(100),
+m_ReplyThreadRunning(true) {
 	// Resolve the parent module's ID
 	RegisterMap* regMap = RegisterMap::getInstance();
 	if (regMap) {
@@ -14,9 +20,69 @@ AdapterBase::AdapterBase(ModuleDefs::AdapterId id, std::string parentName_) : pa
 			}
 		}
 	}
+
+	// Start the reply listening thread
+	m_ReplyProcThread = std::thread(&AdapterBase::procReplyThread, this);
+	m_InputProcThread = std::thread(&AdapterBase::procInputThread, this);
 }
 
 AdapterBase::~AdapterBase() {
+	m_ReplyThreadRunning = false;
+	if (m_ReplyProcThread.joinable()) {
+		m_ReplyProcThread.join();
+	}
+	if (m_InputProcThread.joinable()) {
+		m_InputProcThread.join();
+	}
+}
+
+void AdapterBase::procReplyThread(void) {
+	int ret = 0;
+	while (m_ReplyThreadRunning) {
+		// Wait until there's a reply to process
+		{
+			std::unique_lock<std::mutex> lock(m_ReplyMutex);
+			m_ReplyCondVar.wait(lock, [this] { return !m_ReplyMailBox.isEmpty() || !m_ReplyThreadRunning; });
+			if (!m_ReplyThreadRunning) {
+				break;
+			}
+		}
+		Msg::MessageCapsule<char>& capsule = m_ReplyMailBox.getHead();
+		ret = replyReceived(capsule);
+		if (ret < 0) {
+			Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Error processing reply in adapter\r\n");
+		}
+	}
+}
+
+void AdapterBase::procInputThread(void) {
+	int ret = 0;
+	while (true) {
+		auto& capsule = m_InputMailBox.getHead();
+		if (OnModuleMsgReceivedFunc) {
+			auto& buffer = capsule.getData();
+			ret = OnModuleMsgReceivedFunc(buffer);
+			if (ret < 0) {
+				Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Error processing input message in adapter\r\n");
+			}
+		}
+
+		m_InputMailBox.pop();
+	}
+}
+
+void AdapterBase::NotifyExpectingReply(void) {
+	// We're expecting a reply. Fire the conditional variale to notify the reply thread
+	{
+		std::lock_guard<std::mutex> lock(m_ReplyMutex);
+		m_ReplyCondVar.notify_one();
+	}
+}
+
+int AdapterBase::SetModDispatchCallback(std::function<int(Msg::MessageCapsule<char>&)> modDispatchCB) {
+	if (modDispatchCB == nullptr) return -1;
+	moduleDispatchCmd = modDispatchCB;
+	return 0;
 }
 
 int AdapterBase::bind(AdapterBase* Adapter) {
@@ -30,7 +96,15 @@ int AdapterBase::bind(AdapterBase* Adapter) {
 		return Adapter->moduleCommand_(buffer);
 	};
 
+	this->dispatchCommandFunc = [Adapter](Msg::MessageCapsule<char>& capsule) {
+		return Adapter->SubmitMailBox(capsule);
+	};
+
 	return bind_(Adapter);
+}
+
+int AdapterBase::dispatchToParentMod(Msg::MessageCapsule<char>& capsule) {
+	return 0;
 }
 
 int AdapterBase::bindCommandDispatch(std::function<int(Msg::MessageCapsule<char>& capsule)> dispatchFunc) {
@@ -106,6 +180,25 @@ void AdapterBase::addAdapter(std::string moduleName) {
 
 std::string AdapterBase::getParentName() const {
 	return parentName;
+}
+
+int AdapterBase::AckMsg(Msg::MessageCapsule<char>& capsule, char* reply, int len) {
+	if (!reply || len <= 0) {
+		return -1;
+	}
+
+	int ret = capsule.SendAck(capsule.getSeqID(), reply, len);
+	if (ret != 0) {
+		return ret;
+	}
+
+	m_ReplyMailBox.push(capsule);
+	return 0;
+}
+
+int AdapterBase::replyReceived(Msg::MessageCapsule<char>& capsule) {
+	(void)capsule;
+	return 0;
 }
 
 int AdapterBase::moduleCommand_(char* pbuf, size_t len) {

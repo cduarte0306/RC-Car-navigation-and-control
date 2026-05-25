@@ -9,6 +9,8 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <thread>
+#include <condition_variable>
 
 #include "ModulesDefs.hpp"
 
@@ -27,6 +29,14 @@ namespace Adapter {
          * @return int Status code (0 for success, -1 for failure)
          */
         int bind(AdapterBase* Adapter);
+
+        /**
+         * @brief Dispatch a received command capsule to the parent module for processing. This is typically called by the adapter's command handling logic when it receives a command that needs to be processed by the module. The capsule contains the command and any associated data, and this function will forward it to the module's dispatchCommand implementation for handling.
+         * 
+         * @param capsule Message capsule containing the command and data to be dispatched to the module
+         * @return int Error code indicating success or failure of the dispatch process
+         */
+        int dispatchToParentMod(Msg::MessageCapsule<char>& capsule);
 
         /**
          * @brief Bind a command dispatch function to this adapter. This allows the adapter to forward received commands to the module's dispatchCommand implementation.
@@ -100,6 +110,26 @@ namespace Adapter {
          * @return std::string parent module name 
          */
         std::string getParentName() const;
+        
+        /**
+         * @brief Get the device type associated with this adapter
+         * 
+         * @return ModuleDefs::AdapterId The adapter's device type identifier
+         */
+        const ModuleDefs::AdapterId getDeviceType() const {
+            return adapterId;
+        }
+
+        /**
+         * @brief Acknowledge a received message by sending a reply back to the adapter. This can be used by command 
+         * handlers to provide any necessary response data back to the adapter after processing a command.
+         * 
+         * @param capsule The message capsule containing the original command and data
+         * @param reply Buffer containing any response data to be sent back to the adapter
+         * @param len Length of the reply buffer
+         * @return int Error code indicating success or failure of the acknowledgment process
+         */
+        virtual int AckMsg(Msg::MessageCapsule<char>& capsule, char* reply, int len);
 
         /**
          * @brief Get the parent module's ID
@@ -109,7 +139,20 @@ namespace Adapter {
         int GetParentID() const {
             return m_ModuleID;
         }
+
+        /**
+         * @brief Set the Mod Dispatch Callback for adapter-module comms
+         * 
+         * @param modDispatchCB Callback for module command dispatching
+         * @return int 
+         */
+        int SetModDispatchCallback(std::function<int(Msg::MessageCapsule<char>&)> modDispatchCB);
+
+        void NotifyExpectingReply(void);
+
     protected:
+        std::thread m_ReplyProcThread;
+        std::thread m_InputProcThread;
         std::string parentName;
         std::list<std::string> boundModules;
         std::unordered_map<std::string, AdapterBase*> adapterMap;
@@ -118,9 +161,16 @@ namespace Adapter {
         std::function< int(std::vector<char>&)     > moduleWriteCmdVector = nullptr;
         std::function< int(char* pbuf, size_t len) > moduleWriteAsyncCmd = nullptr;
         std::function<std::string(void)> readStatsCommand = nullptr;
-        std::function<int(Msg::MessageCapsule<char>& capsule)> dispatchCommandFunc = nullptr;
+        std::function<int(Msg::MessageCapsule<char>&)> dispatchCommandFunc = nullptr;
         std::function<int(std::vector<char>& buffer)> OnModuleMsgReceivedFunc = nullptr;
+        std::function<int(Msg::MessageCapsule<char>&)> moduleDispatchCmd = nullptr;
+        Msg::CircularBuffer<Msg::MessageCapsule<char>> m_ReplyMailBox;
+        Msg::CircularBuffer<Msg::MessageCapsule<char>> m_InputMailBox;
+        std::condition_variable m_ReplyCondVar;
+        std::mutex m_ReplyMutex;
+        
         int m_ModuleID = -1;
+        bool m_ReplyThreadRunning{true};
 
         const ModuleDefs::AdapterId adapterId;
 
@@ -131,6 +181,27 @@ namespace Adapter {
         virtual int moduleCommandAsync_(char* pbuf, size_t len);
 
         virtual int moduleCliCmd_(std::vector<std::string>& buffer);
+
+        virtual int replyReceived(Msg::MessageCapsule<char>& capsule);
+
+        void procReplyThread(void);
+
+        void procInputThread(void);
+
+        /**
+         * @brief Submit a message capsule to the adapter's input mailbox for processing by the module. This can be used by command handlers or other adapter logic to forward messages to the module for handling.
+         * 
+         * @param capsule The message capsule containing the command and data to be submitted to the module
+         * @return int Error code indicating success or failure of the submission process
+         */
+        int SubmitMailBox(Msg::MessageCapsule<char>& capsule) {
+            if (m_InputMailBox.isFull()) {
+                return -1;
+            }
+
+            m_InputMailBox.push(capsule);
+            return 0; 
+        }
     };
 
     class MotorAdapter : public AdapterBase {
@@ -171,7 +242,6 @@ namespace Adapter {
         std::function<int(void)                     > getDevice            = nullptr;
 
         virtual int bind_(AdapterBase* Adapter) override;
-
 
         void bindInterface(MotorAdapter* adapter);
 

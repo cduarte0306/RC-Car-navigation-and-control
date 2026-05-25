@@ -15,12 +15,14 @@ namespace Modules {
 static nlohmann::json tempTlm;
 
 RcCarTelemetry::RcCarTelemetry(ModuleDefs::DeviceType moduleID, std::string name) : Modules::Base(moduleID, name), Adapter::TlmAdapter(name) {
+    setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::TlmAdapter*>(this)));
 }
 
 int RcCarTelemetry::init(void) {
     // Initialize transmission adapter
     Logger* logger = Logger::getLoggerInst();
-    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, 6000, "wlP1p1s0");
+    constexpr int kTelemetryPort = static_cast<int>(ModuleDefs::NetworkPorts::TelemetryPort);
+    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, kTelemetryPort, "wlP1p1s0");
     if (!m_TxAdapter) {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create telemetry transmission adapter\r\n");
         return -1;

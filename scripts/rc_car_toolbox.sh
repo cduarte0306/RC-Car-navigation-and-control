@@ -7,7 +7,7 @@ PORT=2345
 
 JETSON_IP="192.168.1.10"
 JETSON_USER="root"
-JETSON_TARGET_DIR="/opt/rc-car/rc-car-nav/"
+JETSON_TARGET_DIR="/tmp/"
 REMOTE_APP_PATH="${JETSON_TARGET_DIR}/rc-car-nav"
 GDBSERVER_PATH="/usr/bin/gdbserver"    # explicit path
 

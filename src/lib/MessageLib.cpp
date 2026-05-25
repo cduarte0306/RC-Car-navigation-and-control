@@ -9,26 +9,13 @@
 namespace Msg {
 
 template<typename T>
-MessageCapsule<T>::MessageCapsule() {
+MessageCapsule<T>::MessageCapsule(uint16_t seqID, uint8_t cmd, const std::vector<T>& data, int source)
+	: seqID(seqID), command(cmd), data(data), source(source), wrtData(0), m_MessageAck(seqID, {}) {
 }
 
 template<typename T>
-MessageCapsule<T>::~MessageCapsule() {
-}
-
-template<typename T>
-MessageCapsule<T>::MessageCapsule(int command, const std::vector<T>& data, int source)
-	: cmd(command), data(data), source(source) {
-}
-
-template<typename T>
-MessageCapsule<T>& MessageCapsule<T>::operator=(const MessageCapsule& other) {
-	if (this != &other) {
-		cmd = other.cmd;
-		source = other.source;
-		data = other.data;
-	}
-	return *this;
+MessageCapsule<T>::MessageCapsule(uint16_t seqID, uint8_t cmd, std::vector<T>&& data, int source)
+	: seqID(seqID), command(cmd), data(std::move(data)), source(source), wrtData(0), m_MessageAck(seqID, {}) {
 }
 
 template<typename T>
@@ -57,26 +44,59 @@ void MessageCapsule<T>::setSource(int src) {
 }
 
 template<typename T>
-int MessageCapsule<T>::getCommand() const {
-	return cmd;
+uint16_t MessageCapsule<T>::getSeqID() const {
+	return seqID;
 }
 
 template<typename T>
-int MessageCapsule<T>::SendAck(int commandID, char* reply, int len) {
+int MessageCapsule<T>::SendAck(uint16_t seqID, char* reply, int len) {
 	if (!reply) {
 		return -1; // Invalid reply buffer
 	}
-	// Store the reply command ID and data in the capsule for later retrieval by the adapter
-	m_ReplyCommandID = commandID;
+	// Store the reply sequence ID and data in the capsule for later retrieval by the adapter
+	m_ReplySeqID = seqID;
 	m_ReplyData.assign(reply, reply + len);
 	m_ReplyPresent = true; // Mark that a reply has been sent for this message
 	return 0; // Success
 }
 
 template<typename T>
-std::vector<T>& MessageCapsule<T>::GetAck() {
+std::vector<T>& MessageCapsule<T>::GetAckRaw() {
 	m_ReplyPresent = false; // Mark that the reply has been retrieved 
 	return m_ReplyData;
+}
+
+// MessageAck implementation
+template<typename T>
+MessageAck<T>::MessageAck(int commandID, const std::vector<T>& replyData)
+	: m_CommandID(commandID), m_ReplyData(replyData) {
+}
+
+template<typename T>
+MessageAck<T>::~MessageAck() {
+}
+
+template<typename T>
+MessageAck<T>& MessageAck<T>::operator=(const MessageAck<T>& other) {
+	if (this != &other) {
+		m_CommandID = other.m_CommandID;
+		m_ReplyData = other.m_ReplyData;
+	}
+	return *this;
+}
+
+template<typename T>
+int MessageAck<T>::GetReplyDataSize() const {
+	return static_cast<int>(m_ReplyData.size());
+}
+
+template<typename T>
+int MessageAck<T>::GetReplyData(T* buffer, size_t bufferSize) const {
+	if (!buffer || bufferSize < m_ReplyData.size()) {
+		return -1; // Invalid buffer or buffer too small
+	}
+	std::copy(m_ReplyData.begin(), m_ReplyData.end(), buffer);
+	return 0; // Success
 }
 
 template<typename T>
@@ -90,9 +110,6 @@ CircularBuffer<T>::CircularBuffer(size_t capacity)
 		throw std::invalid_argument("Capacity cannot be zero.");
 	}
 }
-
-template<typename T>
-CircularBuffer<T>::~CircularBuffer() = default;
 
 template<typename T>
 void CircularBuffer<T>::killProcess() {
@@ -175,7 +192,7 @@ T& CircularBuffer<T>::getHead(int timeout) {
 			m_BufferCv.wait(lock, [this] { return !isEmpty(); });
 		} else {
 			if (!m_BufferCv.wait_for(lock, std::chrono::milliseconds(timeout), [this] { return !isEmpty(); })) {
-				throw std::runtime_error("Timeout waiting for buffer item.");
+				// throw std::runtime_error("Timeout waiting for buffer item.");
 			}
 		}
 	}
