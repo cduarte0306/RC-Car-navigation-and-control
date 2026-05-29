@@ -3,13 +3,12 @@
 namespace ModuleDefs {
     enum class DeviceType {
         NullModule  = 0,
-        CommsModule,
-        CommandAdapterModule,
         MotorControllerModule,
-        TelemetryModule,
         CameraControllerModule,
+        UpdaterModule,
+        CommsModule,
         CliModule,
-        UpdaterModule
+        TelemetryModule
     };
 
     enum class AdapterId {

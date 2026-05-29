@@ -213,22 +213,30 @@ int MotorController::steer_(int counts)
     return 0;
 }
 
-int MotorController::cmdHandlerSetSpeed(val_type_t val, const std::vector<char>& payload) {
+void MotorController::cmdHandlerSetSpeed(val_type_t val, const std::vector<char>& payload) {
     (void)payload;
-    return setMotorSpeed_(val.i32);
+    if (setMotorSpeed_(val.i32) < 0) {
+        Base::DoAck(false, {});
+    }
+    return;
 }
 
-int MotorController::cmdHandlerSteer(val_type_t val, const std::vector<char>& payload) {
+void MotorController::cmdHandlerSteer(val_type_t val, const std::vector<char>& payload) {
     (void)payload;
-    return steer_(val.i32);
+    if (steer_(val.i32) < 0) {
+        Base::DoAck(false, {});
+    }
+    return;
 }
 
-int MotorController::cmdHandlerDisable(val_type_t val, const std::vector<char>& payload) {
+void MotorController::cmdHandlerDisable(val_type_t val, const std::vector<char>& payload) {
     (void)payload;
     if (val.u8) {
-        return stop();
+        if (stop() < 0) {
+            Base::DoAck(false, {});
+        }
     }
-    return 0;
+    return;
 }
 
 

@@ -172,10 +172,10 @@ void CommandController::processIncomingData(std::vector<char>& buffer) {
 }
 
 
-int CommandController::OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule) {
+int CommandController::OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& capsule) {
     std::vector<char> serializedReply;
     std::vector<char> payloadBuffer;
-    Msg::MessageAck<char>& ack = capsule.GetAck();
+    Msg::MessageAck<std::vector<char>>& ack = capsule.GetAck();
     if (capsule.GetPayloadSize() > 0) {
         payloadBuffer = capsule.getData();
     }

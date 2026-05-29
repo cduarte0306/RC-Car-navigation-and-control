@@ -97,7 +97,7 @@ protected:
      * @param payload Command payload (if any)
      * @return int Return status
      */
-    int cmdHandlerSetSpeed(val_type_t val, const std::vector<char>& payload);
+    void cmdHandlerSetSpeed(val_type_t val, const std::vector<char>& payload);
 
     /**
      * @brief Handler for steer command received from adapter
@@ -106,7 +106,7 @@ protected:
      * @param payload Command payload (if any)
      * @return int Return status
      */
-    int cmdHandlerSteer(val_type_t val, const std::vector<char>& payload);
+    void cmdHandlerSteer(val_type_t val, const std::vector<char>& payload);
 
     /**
      * @brief Handler for disable command received from adapter
@@ -115,7 +115,7 @@ protected:
      * @param payload Command payload (if any)
      * @return int Return status
      */
-    int cmdHandlerDisable(val_type_t val, const std::vector<char>& payload);
+    void cmdHandlerDisable(val_type_t val, const std::vector<char>& payload);
 
     /**
      * @brief Peripheral driver instance

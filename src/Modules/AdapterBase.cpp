@@ -28,6 +28,9 @@ m_ReplyThreadRunning(true) {
 
 AdapterBase::~AdapterBase() {
 	m_ReplyThreadRunning = false;
+	m_ReplyMailBox.flush();
+	m_InputMailBox.flush();
+
 	if (m_ReplyProcThread.joinable()) {
 		m_ReplyProcThread.join();
 	}
@@ -39,19 +42,14 @@ AdapterBase::~AdapterBase() {
 void AdapterBase::procReplyThread(void) {
 	int ret = 0;
 	while (m_ReplyThreadRunning) {
-		// Wait until there's a reply to process
-		{
-			std::unique_lock<std::mutex> lock(m_ReplyMutex);
-			m_ReplyCondVar.wait(lock, [this] { return !m_ReplyMailBox.isEmpty() || !m_ReplyThreadRunning; });
-			if (!m_ReplyThreadRunning) {
-				break;
+		Msg::MessageAck<std::vector<char>>& ack = m_ReplyMailBox.getHead();
+		if (replyHandlerFunc) {
+			ret = replyHandlerFunc(ack);
+			if (ret < 0) {
+				Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Error processing reply in adapter\r\n");
 			}
 		}
-		Msg::MessageCapsule<char>& capsule = m_ReplyMailBox.getHead();
-		ret = replyReceived(capsule);
-		if (ret < 0) {
-			Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Error processing reply in adapter\r\n");
-		}
+		m_ReplyMailBox.pop();
 	}
 }
 
@@ -59,7 +57,12 @@ void AdapterBase::procInputThread(void) {
 	int ret = 0;
 	while (true) {
 		auto& capsule = m_InputMailBox.getHead();
-		if (OnModuleMsgReceivedFunc) {
+		if (moduleDispatchCmd) {
+			ret = moduleDispatchCmd(capsule);
+			if (ret < 0) {
+				Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Error dispatching input capsule in adapter\r\n");
+			}
+		} else if (OnModuleMsgReceivedFunc) {
 			auto& buffer = capsule.getData();
 			ret = OnModuleMsgReceivedFunc(buffer);
 			if (ret < 0) {
@@ -71,17 +74,15 @@ void AdapterBase::procInputThread(void) {
 	}
 }
 
-void AdapterBase::NotifyExpectingReply(void) {
-	// We're expecting a reply. Fire the conditional variale to notify the reply thread
-	{
-		std::lock_guard<std::mutex> lock(m_ReplyMutex);
-		m_ReplyCondVar.notify_one();
-	}
-}
-
-int AdapterBase::SetModDispatchCallback(std::function<int(Msg::MessageCapsule<char>&)> modDispatchCB) {
+int AdapterBase::SetModDispatchCallback(std::function<int(Msg::MessageCapsule<std::vector<char>>&)> modDispatchCB) {
 	if (modDispatchCB == nullptr) return -1;
 	moduleDispatchCmd = modDispatchCB;
+	return 0;
+}
+
+int AdapterBase::SetReplyHandlerCallback(std::function<int(Msg::MessageAck<std::vector<char>>&)> replyHandlerCB) {
+	if (replyHandlerCB == nullptr) return -1;
+	replyHandlerFunc = replyHandlerCB;
 	return 0;
 }
 
@@ -96,18 +97,19 @@ int AdapterBase::bind(AdapterBase* Adapter) {
 		return Adapter->moduleCommand_(buffer);
 	};
 
-	this->dispatchCommandFunc = [Adapter](Msg::MessageCapsule<char>& capsule) {
+	this->dispatchCommandFunc = [Adapter](Msg::MessageCapsule<std::vector<char>>& capsule) {
 		return Adapter->SubmitMailBox(capsule);
+	};
+	
+	// Connect destination adapter's reply handling to this adapter's reply submission.
+	Adapter->moduleReplyCmd = [this](Msg::MessageAck<std::vector<char>>& ack) {
+		return this->SubmitReplyMailBox(ack);
 	};
 
 	return bind_(Adapter);
 }
 
-int AdapterBase::dispatchToParentMod(Msg::MessageCapsule<char>& capsule) {
-	return 0;
-}
-
-int AdapterBase::bindCommandDispatch(std::function<int(Msg::MessageCapsule<char>& capsule)> dispatchFunc) {
+int AdapterBase::bindCommandDispatch(std::function<int(Msg::MessageCapsule<std::vector<char>>& capsule)> dispatchFunc) {
 	if (!dispatchFunc) {
 		return -1;
 	}
@@ -137,7 +139,7 @@ int AdapterBase::stopCmd(void) {
 	return 0;
 }
 
-int AdapterBase::dispatchCommand(Msg::MessageCapsule<char>& capsule) {
+int AdapterBase::dispatchCommand(Msg::MessageCapsule<std::vector<char>>& capsule) {
 	if (!dispatchCommandFunc) {
 		return -1;
 	}
@@ -174,15 +176,11 @@ int AdapterBase::cliCommand(std::vector<std::string>& buffer) {
 	return moduleCliCmd(buffer);
 }
 
-void AdapterBase::addAdapter(std::string moduleName) {
-	boundModules.push_back(moduleName);
-}
-
 std::string AdapterBase::getParentName() const {
 	return parentName;
 }
 
-int AdapterBase::AckMsg(Msg::MessageCapsule<char>& capsule, char* reply, int len) {
+int AdapterBase::AckMsg(Msg::MessageCapsule<std::vector<char>>& capsule, char* reply, int len) {
 	if (!reply || len <= 0) {
 		return -1;
 	}
@@ -192,13 +190,19 @@ int AdapterBase::AckMsg(Msg::MessageCapsule<char>& capsule, char* reply, int len
 		return ret;
 	}
 
-	m_ReplyMailBox.push(capsule);
-	return 0;
+	Msg::MessageAck<std::vector<char>> ack(true, capsule.GetAckRaw());
+	ack.mCommandID = capsule.getCommand();
+	ack.mSeqID = capsule.getSeqID();
+	ack.mReplyDestID = capsule.getSource();
+	return ConnectModuleReply(ack);
 }
 
-int AdapterBase::replyReceived(Msg::MessageCapsule<char>& capsule) {
-	(void)capsule;
-	return 0;
+int AdapterBase::ConnectModuleReply(Msg::MessageAck<std::vector<char>>& ack) {
+	if (moduleReplyCmd) {
+		return moduleReplyCmd(ack);
+	}
+
+	return SubmitReplyMailBox(ack);
 }
 
 int AdapterBase::moduleCommand_(char* pbuf, size_t len) {
@@ -209,12 +213,6 @@ int AdapterBase::moduleCommand_(char* pbuf, size_t len) {
 
 int AdapterBase::moduleCommand_(std::vector<char>& buffer) {
 	(void)buffer;
-	return -1;
-}
-
-int AdapterBase::moduleCommandAsync_(char* pbuf, size_t len) {
-	(void)pbuf;
-	(void)len;
 	return -1;
 }
 
@@ -666,10 +664,6 @@ void TlmAdapter::bindInterface(TlmAdapter* adapter) {
 
 	this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
 		return adapter->moduleCommand_(pbuf, len);
-	};
-
-	this->moduleWriteAsyncCmd = [adapter](char* pbuf, size_t len) {
-		return adapter->moduleCommandAsync_(pbuf, len);
 	};
 }
 

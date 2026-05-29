@@ -55,57 +55,57 @@ public:
     virtual std::string readStats() override;
 
     /** @brief Start outbound video streaming. */
-    int cmdStartStreamHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdStartStreamHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Stop outbound video streaming. */
-    int cmdStopStreamHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdStopStreamHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Select active stream source and optional mode flags. */
-    int cmdSelCameraStreamHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSelCameraStreamHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set stream frame rate. */
-    int cmdSetFpsHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetFpsHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set stream JPEG quality. */
-    int cmdSetQualityHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetQualityHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set stereo minimum disparity. */
-    int cmdSetMinDisparitiesHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetMinDisparitiesHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set stereo maximum disparity. */
-    int cmdSetMaxDisparitiesHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetMaxDisparitiesHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set stereo confidence threshold. */
-    int cmdSetConfidenceThresholdHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetConfidenceThresholdHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set stereo uniqueness ratio. */
-    int cmdSetUniquenessRatioHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetUniquenessRatioHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set stereo P1 smoothness parameter. */
-    int cmdSetP1Handler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetP1Handler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set stereo P2 smoothness parameter. */
-    int cmdSetP2Handler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetP2Handler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set maximum depth range limit. */
-    int cmdSetZMaxHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetZMaxHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set minimum depth range limit. */
-    int cmdSetZMinHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetZMinHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set depth agreement threshold. */
-    int cmdSetDepthThresholdHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetDepthThresholdHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set minimum agreeing pixel count for depth filtering. */
-    int cmdSetMinAgreeingPixelsHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetMinAgreeingPixelsHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Set color consistency threshold for depth filtering. */
-    int cmdSetColorThresholdHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSetColorThresholdHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Read and return current camera/stereo parameters. */
-    int cmdRdParamsHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdRdParamsHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Clear in-memory video recording state. */
-    int cmdClrVideoRecHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdClrVideoRecHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Save recorded video to disk. */
-    int cmdSaveVideoHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdSaveVideoHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Enumerate stored video recordings. */
-    int cmdLoadStoredVideosHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdLoadStoredVideosHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Load a selected video recording. */
-    int cmdLoadSelectedVideoHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdLoadSelectedVideoHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Delete a selected video recording. */
-    int cmdDeleteVideoHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdDeleteVideoHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Enable or disable stereo calibration mode. */
-    int cmdCalibrationSetStateHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdCalibrationSetStateHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Apply calibration configuration from payload JSON. */
-    int cmdCalibrationWrtParamsHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdCalibrationWrtParamsHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Reset the calibration session. */
-    int cmdCalibrationResetHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdCalibrationResetHandler(val_type_t val, const std::vector<char>& payload);
     /** @brief Persist calibration profile to disk. */
-    int cmdCalibrationSaveHandler(val_type_t val, const std::vector<char>& payload);
+    void cmdCalibrationSaveHandler(val_type_t val, const std::vector<char>& payload);
     
 protected:
 #pragma pack(push, 1)

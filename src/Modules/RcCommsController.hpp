@@ -92,18 +92,18 @@ protected:
      * @param capsule Reference to the message capsule containing the command and data
      * @return int Status code indicating success or failure of message processing
      */
-    virtual int OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule) override;
-    
+    virtual int OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& capsule) override;
+
     /**
      * @brief Handler for processing replies from the module. This function is called by the reply processing thread 
      * to handle any messages that are sent back from the module to the adapter as part of command acknowledgments or 
      * responses. The adapter can implement this function to process the reply messages and take appropriate actions 
      * based on the content of the replies.
      * 
-     * @param capsule Reference to the message capsule containing the reply data from the module
+    * @param ack Reference to the acknowledgment object containing reply data from the module
      * @return int Status code indicating success or failure of reply processing
      */
-    virtual int replyReceived(Msg::MessageCapsule<char>& capsule) override;
+    virtual int OnReply(Msg::MessageAck<std::vector<char>>& ack) override;
 
     // Map of UDP sockets by adapter ID
     std::unordered_map<int, NetStats> m_OpenedSockets;

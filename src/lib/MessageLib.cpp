@@ -8,68 +8,105 @@
 
 namespace Msg {
 
-template<typename T>
-MessageCapsule<T>::MessageCapsule(uint16_t seqID, uint8_t cmd, const std::vector<T>& data, int source)
-	: seqID(seqID), command(cmd), data(data), source(source), wrtData(0), m_MessageAck(seqID, {}) {
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, const storage_type& data, int source)
+	: MessageCapsule(seqID, cmd, static_cast<uint8_t>(0), static_cast<val_type_t>(0), data, source) {
 }
 
-template<typename T>
-MessageCapsule<T>::MessageCapsule(uint16_t seqID, uint8_t cmd, std::vector<T>&& data, int source)
-	: seqID(seqID), command(cmd), data(std::move(data)), source(source), wrtData(0), m_MessageAck(seqID, {}) {
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, storage_type&& data, int source)
+	: MessageCapsule(seqID, cmd, static_cast<uint8_t>(0), static_cast<val_type_t>(0), std::move(data), source) {
 }
 
-template<typename T>
-std::vector<T>& MessageCapsule<T>::getData() {
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, const storage_type& data, int source)
+	: MessageCapsule(seqID, cmd, modCmd, static_cast<val_type_t>(0), data, source) {
+}
+
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, storage_type&& data, int source)
+	: MessageCapsule(seqID, cmd, modCmd, static_cast<val_type_t>(0), std::move(data), source) {
+}
+
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, val_type_t dataField, const storage_type& data, int source)
+	: seqID(seqID), command(cmd), mModCmd(modCmd), wrtData(dataField), rawData(data), data(data), source(source), m_MessageAck(seqID, {}) {
+}
+
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, val_type_t dataField, storage_type&& data, int source)
+	: seqID(seqID), command(cmd), mModCmd(modCmd), wrtData(dataField), rawData(data), data(std::move(data)), source(source), m_MessageAck(seqID, {}) {
+}
+
+template<typename T, typename StorageT>
+typename MessageCapsule<T, StorageT>::storage_type& MessageCapsule<T, StorageT>::getData() {
 	return data;
 }
 
-template<typename T>
-const std::vector<T>& MessageCapsule<T>::getData() const {
+template<typename T, typename StorageT>
+const typename MessageCapsule<T, StorageT>::storage_type& MessageCapsule<T, StorageT>::getData() const {
 	return data;
 }
 
-template<typename T>
-void MessageCapsule<T>::setData(const std::vector<T>& d) {
+template<typename T, typename StorageT>
+void MessageCapsule<T, StorageT>::setData(const storage_type& d) {
 	data = d;
 }
 
-template<typename T>
-int MessageCapsule<T>::getSource() const {
+template<typename T, typename StorageT>
+int MessageCapsule<T, StorageT>::getSource() const {
 	return source;
 }
 
-template<typename T>
-void MessageCapsule<T>::setSource(int src) {
+template<typename T, typename StorageT>
+void MessageCapsule<T, StorageT>::setSource(int src) {
 	source = src;
 }
 
-template<typename T>
-uint16_t MessageCapsule<T>::getSeqID() const {
+template<typename T, typename StorageT>
+uint16_t MessageCapsule<T, StorageT>::getSeqID() const {
 	return seqID;
 }
 
-template<typename T>
-int MessageCapsule<T>::SendAck(uint16_t seqID, char* reply, int len) {
+template<typename T, typename StorageT>
+int MessageCapsule<T, StorageT>::SendAck(uint16_t seqID, char* reply, int len) {
 	if (!reply) {
 		return -1; // Invalid reply buffer
 	}
+	if (len < 0) {
+		return -1;
+	}
+
+	if constexpr (is_std_vector<storage_type>::value && std::is_same<typename storage_type::value_type, char>::value) {
+		m_ReplyData.assign(reply, reply + len);
+	} else {
+		return -1;
+	}
+
 	// Store the reply sequence ID and data in the capsule for later retrieval by the adapter
 	m_ReplySeqID = seqID;
-	m_ReplyData.assign(reply, reply + len);
 	m_ReplyPresent = true; // Mark that a reply has been sent for this message
 	return 0; // Success
 }
 
-template<typename T>
-std::vector<T>& MessageCapsule<T>::GetAckRaw() {
+template<typename T, typename StorageT>
+int MessageCapsule<T, StorageT>::SendAck(uint16_t seqID, const storage_type& replyData) {
+	m_ReplySeqID = seqID;
+	m_ReplyData = replyData;
+	m_ReplyPresent = true;
+	return 0;
+}
+
+template<typename T, typename StorageT>
+typename MessageCapsule<T, StorageT>::storage_type& MessageCapsule<T, StorageT>::GetAckRaw() {
 	m_ReplyPresent = false; // Mark that the reply has been retrieved 
 	return m_ReplyData;
 }
 
 // MessageAck implementation
 template<typename T>
-MessageAck<T>::MessageAck(int commandID, const std::vector<T>& replyData)
-	: m_CommandID(commandID), m_ReplyData(replyData) {
+MessageAck<T>::MessageAck(int commandID, uint16_t seqID, const T& replyData)
+	: mCommandID(commandID), mSeqID(seqID), mReplyData(replyData) {
 }
 
 template<typename T>
@@ -79,24 +116,21 @@ MessageAck<T>::~MessageAck() {
 template<typename T>
 MessageAck<T>& MessageAck<T>::operator=(const MessageAck<T>& other) {
 	if (this != &other) {
-		m_CommandID = other.m_CommandID;
-		m_ReplyData = other.m_ReplyData;
+		mCommandID = other.mCommandID;
+		mSeqID 	= other.mSeqID;
+		mReplyData = other.mReplyData;
 	}
 	return *this;
 }
 
 template<typename T>
-int MessageAck<T>::GetReplyDataSize() const {
-	return static_cast<int>(m_ReplyData.size());
+int MessageAck<T>::getCommandID() const {
+	return mCommandID;
 }
 
 template<typename T>
-int MessageAck<T>::GetReplyData(T* buffer, size_t bufferSize) const {
-	if (!buffer || bufferSize < m_ReplyData.size()) {
-		return -1; // Invalid buffer or buffer too small
-	}
-	std::copy(m_ReplyData.begin(), m_ReplyData.end(), buffer);
-	return 0; // Success
+uint16_t MessageAck<T>::getSeqID() const {
+	return mSeqID;
 }
 
 template<typename T>

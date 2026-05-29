@@ -111,6 +111,12 @@ namespace Modules {
         adapter->bindOnModuleMsgReceived([this, adapter](std::vector<char>& buffer) {
             return this->OnModuleMsgReceived_(buffer, adapter->GetParentID());
         });
+        adapter->SetModDispatchCallback([this](Msg::MessageCapsule<std::vector<char>>& capsule) {
+            return this->OnModuleMsgReceived(capsule);
+        });
+        adapter->SetReplyHandlerCallback([this](Msg::MessageAck<std::vector<char>>& ack) {
+            return this->OnReply(ack);
+        });
     }
 
     int Base::attachAdapter(std::unique_ptr<Adapter::AdapterBase> adapter) {
@@ -180,46 +186,6 @@ namespace Modules {
         }
     }
 
-    void Base::mailBoxThread(void) {
-        while (m_ThreadCanRun) {
-            Msg::MessageCapsule<char>& capsule = m_MailBoxIn.getHead();
-            m_MailBoxIn.pop();
-        }
-    }
-
-    int Base::doReply(Msg::MessageCapsule<char>& capsule) {
-        // This function can be used by command handlers to send a reply back to the adapter after processing a command. The capsule contains the acknowledgment data that the command handler has set, and this function will handle sending that data back to the adapter as part of the reply.
-        if (!capsule.isReplyPresent()) {
-            return -1; // No reply data to send
-        }
-
-        std::vector<char> replyData = capsule.GetAckRaw();
-        // Here you would implement the logic to send the replyData back to the adapter using the appropriate communication mechanism (e.g., through a socket, serial port, etc.)
-        // This is just a placeholder for demonstration purposes
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Sending reply back to adapter (size: %zu)\r\n", replyData.size());
-        return 0; // Success
-    }
-
-    Adapter::AdapterBase* Base::resolveCommandAdapter(uint8_t commandID) const {
-        const Adapter::AdapterBase* CmdToAdapter[] = {
-            motorAdapter.get(),
-            CameraAdapter.get(),
-            CommsAdapter.get(),
-            TlmAdapter.get(),
-            UpdateAdapter.get()
-        };
-
-        if (commandID >= sizeof(CmdToAdapter) / sizeof(CmdToAdapter[0])) {
-            return nullptr; // Invalid command ID
-        }
-
-        auto adapter = CmdToAdapter[commandID];
-        if (adapter != nullptr) {
-            return const_cast<Adapter::AdapterBase*>(adapter); // Return the bound adapter for the command ID
-        }
-        return nullptr; // Command ID not found
-    }
-
     int Base::dispatchToModule(std::vector<char>& msg) {
         if (msg.size() < sizeof(BaseMsgHdr)) {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message too small for header (size: %zu)\r\n", msg.size());
@@ -231,30 +197,79 @@ namespace Modules {
         if (hdr->command == static_cast<uint8_t>(ModuleDefs::DeviceType::NullModule)) {
             return 0; // Null mode messages are only for pinging. Drop immediately
         }
-
-        std::vector<char> payload(msg.begin() + sizeof(BaseMsgHdr), msg.end());
-
         uint16_t seqID = hdr->seqID;
-        Msg::MessageCapsule<char> capsule(seqID, hdr->command, std::move(payload), static_cast<int>(moduleID));
 
-        // Route the message
-        Adapter::AdapterBase* adapter = resolveCommandAdapter(hdr->command);
-        if (!adapter) {
-            Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message with invalid command ID: %d\r\n", hdr->command);
-            return -1; // Invalid command ID
+        if (msg.size() < sizeof(BaseMsgHdr) + sizeof(ModMsgHdr)) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message too small for module header (size: %zu)\r\n", msg.size());
+            return -1;
         }
 
+        ModMsgHdr* modHdr  = reinterpret_cast<ModMsgHdr*>(msg.data() + sizeof(BaseMsgHdr));
+        uint8_t    modCmd  = static_cast<uint8_t>(modHdr->cmd);
+        val_type_t modData = modHdr->data;
+
+        std::vector<char> payload(msg.begin() + sizeof(BaseMsgHdr) + sizeof(ModMsgHdr), msg.end());
+        Msg::MessageCapsule<std::vector<char>> capsule(seqID, hdr->command, modCmd, modData, std::move(payload), static_cast<int>(moduleID));
+
+        const std::unordered_map<
+            ModuleDefs::DeviceType, Adapter::AdapterBase*
+        > CmdToAdapter = {
+            {ModuleDefs::DeviceType::NullModule,             nullptr},
+            {ModuleDefs::DeviceType::CommsModule,            CommsAdapter.get()},
+            {ModuleDefs::DeviceType::CliModule,              &CliAdapter},
+            {ModuleDefs::DeviceType::TelemetryModule,        TlmAdapter.get()},
+            {ModuleDefs::DeviceType::MotorControllerModule,  motorAdapter.get()},
+            {ModuleDefs::DeviceType::CameraControllerModule, CameraAdapter.get()},
+            {ModuleDefs::DeviceType::UpdaterModule,          UpdateAdapter.get()},
+        };
+
+        auto it = CmdToAdapter.find(static_cast<ModuleDefs::DeviceType>(hdr->command));
+        if (it == CmdToAdapter.end() || it->second == nullptr) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message with invalid/unbound command ID: %d\r\n", hdr->command);
+            return -1;
+        }
+
+        // This is a ping message. Reply immediately
+        if (it->first == ModuleDefs::DeviceType::NullModule) {
+            return 0;
+        }
+
+        const std::unordered_map<
+            ModuleDefs::DeviceType, std::string
+        > CmdToModuleName = {
+            {ModuleDefs::DeviceType::NullModule,             "NullModule"},
+            {ModuleDefs::DeviceType::CommsModule,            "CommsModule"},
+            {ModuleDefs::DeviceType::CliModule,              "CliModule"},
+            {ModuleDefs::DeviceType::TelemetryModule,        "TelemetryModule"},
+            {ModuleDefs::DeviceType::MotorControllerModule,  "MotorControllerModule"},
+            {ModuleDefs::DeviceType::CameraControllerModule, "CameraControllerModule"},
+            {ModuleDefs::DeviceType::UpdaterModule,          "UpdaterModule"},
+        };
+
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Dispatching message to module %s. SeqID: %d, Cmd: %d, Flag: %d, Payload size: %zu\r\n", 
+                                    CmdToModuleName.at(static_cast<ModuleDefs::DeviceType>(hdr->command)).c_str(), 
+                                    capsule.getSeqID(), capsule.getModCmd(), capsule.getDataField().u32, capsule.getData().size());
+
         // Forward the message to the appropriate adapter for handling
-        int ret = adapter->dispatchCommand(capsule);
+        int ret = it->second->dispatchCommand(capsule);
 
         // Notify the local adapter we're now expecting a reply
-        m_InputAdapter->NotifyExpectingReply();
         return ret;
     }
 
-    int Base::moduleRegisterCommand(const int commandID, std::function<int(val_type_t, std::vector<char>&)> handler) {
+    int Base::moduleRegisterCommand(const int commandID, std::function<void(val_type_t, std::vector<char>&)> handler) {
         m_CommandHandlers[commandID] = [handler](val_type_t val, std::vector<char>& payload) {
-            return handler(val, payload);
+            handler(val, payload);
+        };
+        return 0; // Success
+    }
+
+    int Base::moduleRegisterCommand(const int commandID, std::function<int(val_type_t, std::vector<char>&)> handler) {
+        m_CommandHandlers[commandID] = [this, handler](val_type_t val, std::vector<char>& payload) {
+            const int status = handler(val, payload);
+            if (status < 0) {
+                this->DoAck(false, {});
+            }
         };
         return 0; // Success
     }
@@ -271,7 +286,8 @@ namespace Modules {
     int Base::dispatchCommand(const int commandID, val_type_t val, std::vector<char>& payload) {
         try {
             auto handler = m_CommandHandlers[commandID];
-            return handler(val, payload);
+            handler(val, payload);
+            return 0;
         } catch (const std::out_of_range& e) {
             // Handle the case where the commandID is not found in the map
             return -1; // Command not found
@@ -280,48 +296,116 @@ namespace Modules {
         return 0; // Success
     }
 
-    int Base::OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule) {
+    int Base::DoAck(bool status, const std::vector<char>& replyData) {
+        // For now, we simply log the acknowledgment data. In a real implementation, this could involve more complex processing.
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_INFO, "Acknowledgment status: %s, Reply data size: %zu\r\n", status ? "Success" : "Failure", replyData.size());
+        
+        // Just cache for the OnModuleMsgReceived to pick it up
+        Msg::MessageAck<std::vector<char>> ack(status, replyData); // Assuming commandID and seqID are 0 for now
+        m_AckCache.push_back(ack);
+        return 0; // Success
+    }
+
+    int Base::OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& capsule) {
         auto& payload = capsule.getData();
         using PayloadType = std::remove_reference_t<decltype(capsule.getData())>;
         PayloadType extraPayload;
 
-        if (payload.size() < sizeof(ModMsgHdr)) {
-            return -1;
-        }
+        const std::unordered_map<
+            ModuleDefs::DeviceType, std::string
+        > CmdToModuleName = {
+            {ModuleDefs::DeviceType::NullModule,             "NullModule"},
+            {ModuleDefs::DeviceType::CommsModule,            "CommsModule"},
+            {ModuleDefs::DeviceType::CliModule,              "CliModule"},
+            {ModuleDefs::DeviceType::TelemetryModule,        "TelemetryModule"},
+            {ModuleDefs::DeviceType::MotorControllerModule,  "MotorControllerModule"},
+            {ModuleDefs::DeviceType::CameraControllerModule, "CameraControllerModule"},
+            {ModuleDefs::DeviceType::UpdaterModule,          "UpdaterModule"},
+        };
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Receveied @module %s. Msg source: %s, SeqID: %d, Cmd: %d, Flag: %d, Payload size: %zu\r\n", 
+                                    CmdToModuleName.at(static_cast<ModuleDefs::DeviceType>(moduleID)).c_str(), 
+                                    CmdToModuleName.at(static_cast<ModuleDefs::DeviceType>(capsule.getSource())).c_str(),
+                                    capsule.getSeqID(), capsule.getModCmd(), capsule.getDataField().u32, payload.size());
 
-        ModMsgHdr* hdr = reinterpret_cast<ModMsgHdr*>(payload.data());
-        if (hdr == nullptr) {
-            return -1;
-        }
-        if (payload.size() > sizeof(ModMsgHdr)) {
-            extraPayload.assign(payload.begin() + sizeof(ModMsgHdr), payload.end());
-        } else {
-            extraPayload.clear();
-        }
+        int commandId = static_cast<int>(capsule.getModCmd());
+        val_type_t commandData = capsule.getDataField();
+        extraPayload = payload;
 
-        auto it = m_CommandHandlers.find(hdr->cmd);
+        auto it = m_CommandHandlers.find(commandId);
+        // Compatibility fallback for legacy payloads that still embed ModMsgHdr in data.
         if (it == m_CommandHandlers.end()) {
-            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Unknown command received: %d\r\n", hdr->cmd);
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Unknown command received: %d\r\n", commandId);
             return -1;
         }
 
-        return it->second(hdr->data, extraPayload);
+        m_AckCache.clear();
+        it->second(commandData, extraPayload);
+        if (m_AckCache.size() && capsule.isAckRequested()) {
+            Msg::MessageAck<std::vector<char>>& ack = m_AckCache.front();
+            ack.mCommandID   = commandId;
+            ack.mSeqID       = capsule.getSeqID();
+            ack.mReplyDestID = capsule.getSource();
+            DoReply(ack);
+        }
+
+        m_AckCache.clear(); // Clear any pending ack payload after command completion.
+
+        return 0;
+    }
+
+    int Base::DoReply(Msg::MessageAck<std::vector<char>>& ack) {
+        // In a real implementation, this would involve sending the acknowledgment back to the sender module thread. For now, we simply log the acknowledgment data.
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_INFO, "Submitting reply - Command ID: %d, Seq ID: %d, Status: %s, Reply data size: %zu\r\n", 
+                    ack.mCommandID, ack.mSeqID, ack.GetStatus() ? "Success" : "Failure", ack.mReplyData.size());
+     
+        // Route the Ack to the adapter
+        const std::unordered_map<
+            ModuleDefs::DeviceType, Adapter::AdapterBase*
+        > CmdToAdapter = {
+            {ModuleDefs::DeviceType::NullModule,             nullptr},
+            {ModuleDefs::DeviceType::CommsModule,            CommsAdapter.get()},
+            {ModuleDefs::DeviceType::CliModule,              &CliAdapter},
+            {ModuleDefs::DeviceType::TelemetryModule,        TlmAdapter.get()},
+            {ModuleDefs::DeviceType::MotorControllerModule,  motorAdapter.get()},
+            {ModuleDefs::DeviceType::CameraControllerModule, CameraAdapter.get()},
+            {ModuleDefs::DeviceType::UpdaterModule,          UpdateAdapter.get()},
+        };
+        
+        auto it = CmdToAdapter.find(static_cast<ModuleDefs::DeviceType>(ack.mReplyDestID));
+        if (it == CmdToAdapter.end() || it->second == nullptr) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message with invalid/unbound command ID: %d\r\n", ack.mReplyDestID);
+            return -1;
+        }
+
+        return it->second->ConnectModuleReply(ack);
     }
 
     int Base::OnModuleMsgReceived_(std::vector<char>& buffer, int srcId) {
         // Extract the standard module message header. If payload size, then 
         // we define a payload
-        int ret = 0;
-        BaseMsgHdr* hdr = reinterpret_cast<BaseMsgHdr*>(buffer.data());
         if (buffer.size() < sizeof(BaseMsgHdr)) {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message too small for header + payload (size: %zu)\r\n", buffer.size());
             return -1; // Buffer too small for header + payload
         }
 
-        std::vector<char> payload(buffer.begin() + sizeof(BaseMsgHdr), buffer.end());
+        if (buffer.size() < sizeof(BaseMsgHdr) + sizeof(ModMsgHdr)) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message too small for module header + payload (size: %zu)\r\n", buffer.size());
+            return -1;
+        }
+
+        int ret = 0;
+        BaseMsgHdr* hdr = reinterpret_cast<BaseMsgHdr*>(buffer.data());
+
+        ModMsgHdr* modHdr = reinterpret_cast<ModMsgHdr*>(buffer.data() + sizeof(BaseMsgHdr));
+        uint8_t modCmd = static_cast<uint8_t>(modHdr->cmd);
+        val_type_t modData = modHdr->data;
+
+        std::vector<char> payload(buffer.begin() + sizeof(BaseMsgHdr) + sizeof(ModMsgHdr), buffer.end());
 
         uint16_t seqId = hdr->seqID;
-        Msg::MessageCapsule<char> capsule(seqId, hdr->command, std::move(payload), srcId);
+        Msg::MessageCapsule<std::vector<char>> capsule(seqId, hdr->command, modCmd, modData, std::move(payload), srcId);
 
          // Extract the payload based on the payload length in the header
         ret = OnModuleMsgReceived(capsule);

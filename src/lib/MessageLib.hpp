@@ -6,20 +6,42 @@
 #include <condition_variable>
 #include <cstddef>
 #include <utility>
+#include <type_traits>
 
 #include "types.h"
 
 namespace Msg {
 
     template<typename T>
+    using DefaultCapsuleStorage = std::conditional_t<std::is_same<T, char>::value, std::vector<T>, T>;
+
+    template<typename U>
+    struct is_std_vector : std::false_type {};
+
+    template<typename U, typename Alloc>
+    struct is_std_vector<std::vector<U, Alloc>> : std::true_type {};
+
+    template<typename U, typename = void>
+    struct has_size_method : std::false_type {};
+
+    template<typename U>
+    struct has_size_method<U, std::void_t<decltype(std::declval<const U&>().size())>> : std::true_type {};
+
+    template<typename T>
     class MessageAck;  // Forward declaration of MessageAck for use in MessageCapsule
     
-    template<typename T>
+    template<typename T, typename StorageT = DefaultCapsuleStorage<T>>
     class MessageCapsule {
     public:
+        using storage_type = StorageT;
+
         MessageCapsule() = default;
-        MessageCapsule(uint16_t seqID, uint8_t cmd, const std::vector<T>& rawData, int source);
-        MessageCapsule(uint16_t seqID, uint8_t cmd, std::vector<T>&& rawData, int source);
+        MessageCapsule(uint16_t seqID, uint8_t cmd, const storage_type& rawData, int source);
+        MessageCapsule(uint16_t seqID, uint8_t cmd, storage_type&& rawData, int source);
+        MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, const storage_type& rawData, int source);
+        MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, storage_type&& rawData, int source);
+        MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, val_type_t dataField, const storage_type& rawData, int source);
+        MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, val_type_t dataField, storage_type&& rawData, int source);
         MessageCapsule(const MessageCapsule&) = default;
         MessageCapsule(MessageCapsule&&) noexcept = default;
         MessageCapsule& operator=(const MessageCapsule& other) = default;
@@ -27,8 +49,8 @@ namespace Msg {
         ~MessageCapsule() = default;
 
         // Getter for data
-        std::vector<T>& getData();
-        const std::vector<T>& getData() const;
+        storage_type& getData();
+        const storage_type& getData() const;
 
         /**
          * @brief Get the Payload 
@@ -36,7 +58,10 @@ namespace Msg {
          * @return size_t Payload size in bytes
          */
         size_t GetPayloadSize() const {
-            return data.size();
+            if constexpr (has_size_method<storage_type>::value) {
+                return static_cast<size_t>(data.size());
+            }
+            return sizeof(storage_type);
         }
 
         /**
@@ -44,7 +69,7 @@ namespace Msg {
          * 
          * @return std::vector<T> A vector containing the acknowledgment data set by the command handler
          */
-        std::vector<T>& GetAckRaw();
+        storage_type& GetAckRaw();
 
         /**
          * @brief Get the acknowledgment object associated with this message. This can be used by command handlers to set acknowledgment data that will be sent back to the adapter as part of the reply when SendAck is called.
@@ -60,7 +85,7 @@ namespace Msg {
          * 
          * @param d 
          */
-        void setData(const std::vector<T>& d);
+        void setData(const storage_type& d);
         
         /**
          * @brief Get the Source object
@@ -86,6 +111,34 @@ namespace Msg {
         }
 
         /**
+         * @brief Get module data field associated with this capsule.
+         */
+        val_type_t getDataField() const {
+            return wrtData;
+        }
+
+        /**
+         * @brief Set module data field associated with this capsule.
+         */
+        void setDataField(val_type_t value) {
+            wrtData = value;
+        }
+
+        /**
+         * @brief Get module-specific command identifier.
+         */
+        uint8_t getModCmd() const {
+            return mModCmd;
+        }
+
+        /**
+         * @brief Set module-specific command identifier.
+         */
+        void setModCmd(uint8_t cmd) {
+            mModCmd = cmd;
+        }
+
+        /**
          * @brief Get the Command object
          * 
          * @return uint16_t 
@@ -101,6 +154,11 @@ namespace Msg {
          * @return int Error code indicating success or failure of the reply sending process
          */
         int SendAck(uint16_t seqID, char* reply, int len);
+
+        /**
+         * @brief Send a reply object using the capsule storage type.
+         */
+        int SendAck(uint16_t seqID, const storage_type& replyData);
 
         /**
          * @brief Check if a reply has already been sent for this message. This can be used by command handlers to ensure that they do not send multiple replies for the same command, which could lead to confusion or errors on the adapter side.
@@ -120,6 +178,26 @@ namespace Msg {
         uint8_t getCommand() const {
             return command;
         }
+
+        /**
+         * @brief Set the Command object
+         * 
+         * @param cmd 
+         */
+        void SetAckRequested(bool ackRequested) {
+            m_AckRequested = ackRequested;
+        }
+
+        /**
+         * @brief Check if acknowledgment was requested for this message. This can be used by command handlers to determine whether they need to send an acknowledgment back to the adapter as part of the reply.
+         * 
+         * @return true If acknowledgment was requested for this message
+         * @return false If no acknowledgment was requested for this message
+         */
+        bool isAckRequested() const {
+            return m_AckRequested;
+        }
+
     private:
         /**
          * @brief Sequence Identifier for this message
@@ -134,6 +212,12 @@ namespace Msg {
         uint8_t command = 0;
 
         /**
+         * @brief Module specific command identifier for this message
+         * 
+         */
+        uint8_t mModCmd = 0;
+
+        /**
          * @brief Data field as a union type for extra command actions (write values, read values, etc.). 
          * This can be used by adapters to store additional information related to the command, 
          * such as parameters or flags, without needing to modify the MessageCapsule structure. 
@@ -146,14 +230,14 @@ namespace Msg {
          * @brief Raw data buffer for the message
          * 
          */
-        std::vector<T> rawData;
+        storage_type rawData;
 
         /**
          * @brief Source identifier for the message
          * 
          */
         int source = -1;
-        std::vector<T> data;
+        storage_type data;
 
         /**
          * @brief Sequence ID for which the reply is being sent
@@ -165,7 +249,7 @@ namespace Msg {
          * @brief Optional reply field
          * 
          */
-        std::vector<T> m_ReplyData;
+        storage_type m_ReplyData;
 
         /**
          * @brief Optional acknowledgment object for this message
@@ -178,24 +262,29 @@ namespace Msg {
          * 
          */
         bool m_ReplyPresent = false; // Flag to indicate if a reply has already been sent for this message
+
+        bool m_AckRequested = false; // Flag to indicate if acknowledgment was requested for this message
     };
 
     template<typename T>
     class MessageAck {
     public:
         MessageAck() = default;
-        MessageAck(int commandID, const std::vector<T>& replyData);
+        MessageAck(int commandID, uint16_t seqID, const T& replyData);
+        MessageAck(bool status, const T& replyData) : mStatus(status), mReplyData(replyData) {}
+        MessageAck(const MessageAck&) = default;
+        MessageAck(MessageAck&&) noexcept = default;
         ~MessageAck();
         MessageAck& operator=(const MessageAck& other);
 
         /**
          * @brief Set the reply data for this acknowledgment. This can be used by command handlers to set the response data that will be sent back to the adapter as part of the reply when SendAck is called on the associated MessageCapsule.
          * 
-         * @param replyData Vector containing the reply data to be sent back to the adapter
+         * @param replyData Reply data to be sent back to the adapter
          * @return int Error code indicating success or failure of setting the reply data
          */
-        int SetReplyPayload(const std::vector<T>& replyData) {
-            m_ReplyData = replyData;
+        int SetReplyPayload(const T& replyData) {
+            mReplyData = replyData;
             return 0; // Success
         }
 
@@ -207,22 +296,34 @@ namespace Msg {
         int getCommandID() const;
 
         /**
-         * @brief Get the reply data associated with this acknowledgment
-         * 
-         * @return std::vector<T> Reply data as a vector of type T
+         * @brief Get sequence ID associated with this acknowledgment.
          */
-        int GetReplyData(T* buffer, size_t bufferSize) const;
+        uint16_t getSeqID() const;
 
         /**
-         * @brief Get the size of the reply data associated with this acknowledgment
+         * @brief Get the reply data associated with this acknowledgment as a reference to the acknowledgment's internal storage. This can be used by command handlers to retrieve the reply data that has been set for this acknowledgment without needing to copy it into an external buffer.
          * 
-         * @return int Size of the reply data in bytes
+         * @return T& Reference to the reply data stored in this acknowledgment
          */
-        int GetReplyDataSize() const;
-    
-    private:
-        int m_CommandID;           // Command ID for which this acknowledgment is being sent
-        std::vector<T> m_ReplyData; // Optional reply data to be sent back to the adapter
+        T& GetReplyData() {
+            return mReplyData;
+        }
+
+        /**
+         * @brief Get the status of the acknowledgment, which can be used to indicate success or failure of the command processing. This can be set by command handlers to provide feedback to the adapter about the result of processing a command.
+         * 
+         * @return true If the acknowledgment indicates success
+         * @return false If the acknowledgment indicates failure
+         */
+        bool GetStatus(void) const {
+            return mStatus;
+        }
+
+        int mReplyDestID;   // Module ID that expects the reply associated with this acknowledgment
+        int mCommandID;     // Command ID for which this acknowledgment is being sent
+        uint16_t mSeqID;    // Sequence ID for which the reply is being sent
+        bool mStatus = false;
+        T mReplyData;       // Optional reply data to be sent back to the adapter
     };
 
     template <typename T>

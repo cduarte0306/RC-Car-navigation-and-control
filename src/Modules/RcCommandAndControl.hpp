@@ -73,7 +73,7 @@ protected:
     virtual void mainProc() override;
 
     // OnMsgRecevied override for receiving messages from adapters
-    virtual int OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule) override;
+    virtual int OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& capsule) override;
 
     // Processes reply from client
     void processIncomingData(std::vector<char>& buffer);

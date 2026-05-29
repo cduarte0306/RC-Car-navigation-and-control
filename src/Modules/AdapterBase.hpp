@@ -31,20 +31,12 @@ namespace Adapter {
         int bind(AdapterBase* Adapter);
 
         /**
-         * @brief Dispatch a received command capsule to the parent module for processing. This is typically called by the adapter's command handling logic when it receives a command that needs to be processed by the module. The capsule contains the command and any associated data, and this function will forward it to the module's dispatchCommand implementation for handling.
-         * 
-         * @param capsule Message capsule containing the command and data to be dispatched to the module
-         * @return int Error code indicating success or failure of the dispatch process
-         */
-        int dispatchToParentMod(Msg::MessageCapsule<char>& capsule);
-
-        /**
          * @brief Bind a command dispatch function to this adapter. This allows the adapter to forward received commands to the module's dispatchCommand implementation.
          * 
          * @param dispatchFunc The dispatch function to bind, which should match the signature of dispatchCommand (taking a MessageCapsule and returning an int)
          * @return int Status code (0 for success, -1 for failure)
          */
-        int bindCommandDispatch(std::function<int(Msg::MessageCapsule<char>& capsule)> dispatchFunc);
+        int bindCommandDispatch(std::function<int(Msg::MessageCapsule<std::vector<char>>& capsule)> dispatchFunc);
 
         /**
          * @brief Bind module message reception callback. This allows the adapter to forward 
@@ -79,7 +71,7 @@ namespace Adapter {
          * @brief Default implementation of moduleCommand. Modules or adapters that need to
          * provide custom handling should override this.
          */
-        virtual int dispatchCommand(Msg::MessageCapsule<char>& capsule);
+        virtual int dispatchCommand(Msg::MessageCapsule<std::vector<char>>& capsule);
 
         /**
          * Default handler for moduleCommand. Modules or adapters that need to
@@ -96,13 +88,6 @@ namespace Adapter {
         virtual int moduleCommand(std::vector<char>& buffer);
 
         virtual int cliCommand(std::vector<std::string>& buffer);
-
-        /**
-         * @brief Add a module name to the bound modules list
-         * 
-         * @param moduleName Name of the module to add
-         */
-        void addAdapter(std::string moduleName);
 
         /**
          * @brief Get the parent name
@@ -129,7 +114,7 @@ namespace Adapter {
          * @param len Length of the reply buffer
          * @return int Error code indicating success or failure of the acknowledgment process
          */
-        virtual int AckMsg(Msg::MessageCapsule<char>& capsule, char* reply, int len);
+        virtual int AckMsg(Msg::MessageCapsule<std::vector<char>>& capsule, char* reply, int len);
 
         /**
          * @brief Get the parent module's ID
@@ -146,28 +131,39 @@ namespace Adapter {
          * @param modDispatchCB Callback for module command dispatching
          * @return int 
          */
-        int SetModDispatchCallback(std::function<int(Msg::MessageCapsule<char>&)> modDispatchCB);
+        int SetModDispatchCallback(std::function<int(Msg::MessageCapsule<std::vector<char>>&)> modDispatchCB);
 
-        void NotifyExpectingReply(void);
+        /**
+         * @brief Set the reply handler callback for processing module acknowledgments
+         * 
+         * @param replyHandlerCB Callback for handling module acknowledgments
+         * @return int 
+         */
+        int SetReplyHandlerCallback(std::function<int(Msg::MessageAck<std::vector<char>>&)> replyHandlerCB);
 
+        /**
+         * @brief Forward a module acknowledgment through the bound reply callback chain.
+         *
+         * This is typically called by module-side code to route a reply back to
+         * the adapter that originated the command.
+         */
+        int ConnectModuleReply(Msg::MessageAck<std::vector<char>>& ack);
     protected:
         std::thread m_ReplyProcThread;
         std::thread m_InputProcThread;
         std::string parentName;
-        std::list<std::string> boundModules;
         std::unordered_map<std::string, AdapterBase*> adapterMap;
         std::function< int(char* pbuf, size_t len) > moduleWriteCmd = nullptr;
         std::function< int(std::vector<std::string>&) > moduleCliCmd = nullptr;
         std::function< int(std::vector<char>&)     > moduleWriteCmdVector = nullptr;
-        std::function< int(char* pbuf, size_t len) > moduleWriteAsyncCmd = nullptr;
         std::function<std::string(void)> readStatsCommand = nullptr;
-        std::function<int(Msg::MessageCapsule<char>&)> dispatchCommandFunc = nullptr;
+        std::function<int(Msg::MessageCapsule<std::vector<char>>&)> dispatchCommandFunc = nullptr;
         std::function<int(std::vector<char>& buffer)> OnModuleMsgReceivedFunc = nullptr;
-        std::function<int(Msg::MessageCapsule<char>&)> moduleDispatchCmd = nullptr;
-        Msg::CircularBuffer<Msg::MessageCapsule<char>> m_ReplyMailBox;
-        Msg::CircularBuffer<Msg::MessageCapsule<char>> m_InputMailBox;
-        std::condition_variable m_ReplyCondVar;
-        std::mutex m_ReplyMutex;
+        std::function<int(Msg::MessageCapsule<std::vector<char>>&)> moduleDispatchCmd = nullptr;
+        std::function<int(Msg::MessageAck<std::vector<char>>&)> moduleReplyCmd = nullptr;
+        std::function<int(Msg::MessageAck<std::vector<char>>&)> replyHandlerFunc = nullptr;
+        Msg::CircularBuffer<Msg::MessageAck<std::vector<char>>> m_ReplyMailBox;
+        Msg::CircularBuffer<Msg::MessageCapsule<std::vector<char>>> m_InputMailBox;
         
         int m_ModuleID = -1;
         bool m_ReplyThreadRunning{true};
@@ -178,11 +174,7 @@ namespace Adapter {
 
         virtual int moduleCommand_(std::vector<char>& buffer);
 
-        virtual int moduleCommandAsync_(char* pbuf, size_t len);
-
         virtual int moduleCliCmd_(std::vector<std::string>& buffer);
-
-        virtual int replyReceived(Msg::MessageCapsule<char>& capsule);
 
         void procReplyThread(void);
 
@@ -194,12 +186,27 @@ namespace Adapter {
          * @param capsule The message capsule containing the command and data to be submitted to the module
          * @return int Error code indicating success or failure of the submission process
          */
-        int SubmitMailBox(Msg::MessageCapsule<char>& capsule) {
+        int SubmitMailBox(Msg::MessageCapsule<std::vector<char>>& capsule) {
             if (m_InputMailBox.isFull()) {
                 return -1;
             }
 
             m_InputMailBox.push(capsule);
+            return 0; 
+        }
+
+        /**
+         * @brief Submit an acknowledgment to the adapter's reply mailbox for processing by the reply thread. This can be used by command handlers to send acknowledgments back to the adapter, which can then be forwarded to the appropriate destination (e.g. network adapter) for transmission back to the original sender.
+         * 
+         * @param ack The acknowledgment object containing the acknowledgment data to be sent back to the sender module thread
+         * @return int Error code indicating success or failure of the submission process
+         */
+        int SubmitReplyMailBox(Msg::MessageAck<std::vector<char>>& ack) {
+            if (m_ReplyMailBox.isFull()) {
+                return -1;
+            }
+
+            m_ReplyMailBox.push(ack);
             return 0; 
         }
     };
@@ -315,7 +322,6 @@ namespace Adapter {
             ~NetworkAdapter();
             std::function<int(std::string, const uint8_t*, size_t)> sendCallback = nullptr;
             std::function<int(const uint8_t*, size_t)> sendCallbackTcp = nullptr;
-            std::function<void(void)> OnEthDetected = nullptr;
             std::function<void()> onConnected = nullptr;
             std::function<std::string()> hostResolver = nullptr;
             int id = -1;
@@ -409,7 +415,6 @@ namespace Adapter {
         std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, const std::string&, size_t, bool)> openAdapterCommand    = nullptr;
         std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, const std::string&, size_t, bool)> openTcpAdapterCommand = nullptr;
 
-        std::function<int (const char* pbuf, size_t len)                                                > recvDataCallback      = nullptr;
         std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)> dataReceivedCommand = nullptr;
         std::function<std::string(NetworkAdapter& adapter)> hostIPQueryCommand = nullptr;
         std::atomic<bool> ethConnectionState{false};

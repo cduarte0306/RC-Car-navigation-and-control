@@ -100,29 +100,29 @@ void NetworkComms::OnWlanCmdRecv(std::vector<char>& data) {
 }
 
 
-int NetworkComms::replyReceived(Msg::MessageCapsule<char>& capsule) {
+int NetworkComms::OnReply(Msg::MessageAck<std::vector<char>>& ack) {
     // This function is called by the reply processing thread to handle any messages that are sent back from the module to the adapter as part of command acknowledgments or responses. The adapter can implement this function to process the reply messages and take appropriate actions based on the content of the replies.
     Logger* logger = Logger::getLoggerInst();
     // Send reply over socket
     const std::shared_ptr<Network::UdpServer> socket[] = {m_EthCmdDispatcher, m_WlanCmdDispatcher};
-    auto adapterId = m_LastCommandSource[capsule.getSeqID()];
+    auto adapterId = m_LastCommandSource[ack.mSeqID];
     std::shared_ptr<Network::UdpServer> targetSocket = socket[adapterId];
     if (!targetSocket) {
         logger->log(Logger::LOG_LVL_ERROR, "No valid socket found for adapter ID %d\r\n", adapterId);
         return -1;
     }
 
-    std::vector<char>& replyData = capsule.getData();
+    std::vector<char>& replyData = ack.mReplyData;
     std::string destIP = targetSocket->getHostIP();
     bool ok = targetSocket->transmit(reinterpret_cast<uint8_t*>(replyData.data()), replyData.size(), destIP);
     if (!ok) {
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to transmit reply data for sequence ID %d\r\n", capsule.getSeqID());
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to transmit reply data for sequence ID %d\r\n", ack.mSeqID);
         return -1;
     }
     return 0;
 }
 
-int NetworkComms::OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule) {
+int NetworkComms::OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& capsule) {
     // Base handler remains a safe default for module-originated messages.
     return Base::OnModuleMsgReceived(capsule);
 }
@@ -136,7 +136,7 @@ int NetworkComms::OnModuleMsgReceived(Msg::MessageCapsule<char>& capsule) {
 void NetworkComms::OnWlanHandShakeRecv(std::vector<char>& data) {
     Logger* logger = Logger::getLoggerInst();
     // Process handshake data
-    logger->log(Logger::LOG_LVL_INFO, "Received handshake data (%zu bytes)\r\n", data.size());
+    logger->log(Logger::LOG_LVL_INFO, "Received handshake data on WLAN (%zu bytes)\r\n", data.size());
 
     // Build reply
     data.clear();
@@ -148,6 +148,10 @@ void NetworkComms::OnWlanHandShakeRecv(std::vector<char>& data) {
     if (!hostMap[NetworkComms::WlanAdapter].length())
         logger->log(Logger::LOG_LVL_INFO, "WLAN Host IP: %s\r\n", m_WlanSocket->getHostIP().c_str());
     data.insert(data.end(), replyStr.begin(), replyStr.end());
+
+    std::string destIP = m_WlanSocket->getHostIP();
+    // Reply over the wlan handshake socket
+    bool ok = m_WlanSocket->transmit(reinterpret_cast<uint8_t*>(data.data()), data.size(), destIP);
 }
 
 
@@ -159,7 +163,7 @@ void NetworkComms::OnWlanHandShakeRecv(std::vector<char>& data) {
 void NetworkComms::OnEthHandShakeRecv(std::vector<char>& data) {
     Logger* logger = Logger::getLoggerInst();
     // Process handshake data
-    logger->log(Logger::LOG_LVL_INFO, "Received handshake data (%zu bytes)\r\n", data.size());
+    logger->log(Logger::LOG_LVL_INFO, "Received handshake data on Ethernet (%zu bytes)\r\n", data.size());
 
     // Build reply
     data.clear();
