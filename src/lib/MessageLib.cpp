@@ -116,8 +116,10 @@ MessageAck<T>::~MessageAck() {
 template<typename T>
 MessageAck<T>& MessageAck<T>::operator=(const MessageAck<T>& other) {
 	if (this != &other) {
+		mReplyDestID = other.mReplyDestID;
 		mCommandID = other.mCommandID;
 		mSeqID 	= other.mSeqID;
+		mStatus = other.mStatus;
 		mReplyData = other.mReplyData;
 	}
 	return *this;
@@ -237,10 +239,14 @@ T& CircularBuffer<T>::getHead(int timeout) {
 
 template<typename T>
 const T& CircularBuffer<T>::getHead() const {
-	if (size_ == 0) {
-		throw std::out_of_range("Buffer is empty.");
+	std::unique_lock<std::mutex> lock(bufferMutex);
+
+	// If the buffer is empty, we wait for the signal that an item has been added
+	if (isEmpty()) {
+		m_BufferCv.wait(lock, [this] { return !isEmpty(); });
 	}
-	size_t idx = (tail_ + size_ - 1) % capacity_;
+
+	size_t idx = (head_ + capacity_ - 1) % capacity_;
 	return buffer_[idx];
 }
 

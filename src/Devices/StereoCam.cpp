@@ -537,11 +537,18 @@ void StereoCam::streamConsumer() {
 
             timeLast = std::chrono::steady_clock::now();
         } else {
-            // Not aligned: drop the older frame (smaller timestamp) to catch up.
-            if (timeDiff < 0) {
-                m_ProducerLeftBuffer.pop();
-            } else {
-                m_ProducerRightBuffer.pop();
+            try {
+                // Not aligned: drop the older frame (smaller timestamp) to catch up.
+                if (timeDiff < 0) {
+                    m_ProducerLeftBuffer.pop();
+                } else {
+                    m_ProducerRightBuffer.pop();
+                }
+            } catch (const std::exception& e) {
+                Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+                                             "Exception while dropping frame from camera %d: %s\n",
+                                             timeDiff < 0 ? static_cast<int>(CamIdx::CamLeft) : static_cast<int>(CamIdx::CamRight),
+                                             e.what());
             }
 
             // Log if we're dropping frames too often, which may indicate a problem with the cameras or synchronization.

@@ -8,13 +8,14 @@
 #include "Devices/network_interface/UdpServer.hpp"
 #include "Devices/network_interface/TcpServer.hpp"
 
+#include "app/network/NetworkLib.hpp"
+
 using namespace std;
 using namespace Adapter;
 
 namespace Modules {
 class NetworkComms : public Base, public Adapter::CommsAdapter {
 public:
-
     NetworkComms(ModuleDefs::DeviceType moduleID, std::string name);
     ~NetworkComms();
 
@@ -51,9 +52,6 @@ public:
     // Override transmitData_ to route data via UDP
     virtual int transmitData_(const uint8_t* data, size_t length) override;
 
-    // Provide host IP lookup for bound adapters
-    virtual std::string getHostIP_(NetworkAdapter& adapter) override;
-
     // CLI spefic stats reading
     virtual std::string readStats() override;
 
@@ -76,7 +74,7 @@ protected:
         double txRate;
         double rxRate;
         std::string moduleName;
-        std::unique_ptr<Network::Sockets> socket;
+        Network::Sockets* socket = nullptr;
         Adapter::CommsAdapter::NetworkAdapter* netAdapter = nullptr;
     };
 
@@ -104,6 +102,8 @@ protected:
      * @return int Status code indicating success or failure of reply processing
      */
     virtual int OnReply(Msg::MessageAck<std::vector<char>>& ack) override;
+
+    using AdapterPair = NetUtils::PortManager;
 
     // Map of UDP sockets by adapter ID
     std::unordered_map<int, NetStats> m_OpenedSockets;
@@ -141,7 +141,19 @@ protected:
     // Map of adapter IDs to failed adapter structs for quick lookup
     std::map<int, Adapter::CommsAdapter::NetworkAdapter*> m_FailedAdapterMap;
 
+    std::string hostMap[MaxAdapter] = {"", ""}; // Map of adapter ID to host IP for quick lookup
+
     // Command containing port source of the last sent command
     uint8_t* m_LastCommandSource{nullptr};
+
+    // Command containing length of the last sent command
+    std::vector<NetUtils::NetworkPort<Network::UdpServer>> m_UdpPorts;
+
+    // Command containing port source of the last sent command
+    std::vector<NetUtils::NetworkPort<Network::TcpServer>> m_TcpPorts;
+
+    // Registerd socket map
+    std::map<int, std::unique_ptr<AdapterPair>> m_RegisteredPorts{};
 };
+
 };

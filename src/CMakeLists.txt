@@ -5,6 +5,7 @@ set(SOURCE
     main.cpp
     utils/CFile.cpp
     utils/logger.cpp
+    utils/Utils.cpp
     cuda/cudaVision.cu
     cuda/include/cudaVision.hpp
     Modules/cli.hpp
@@ -40,6 +41,8 @@ set(SOURCE
     app/video/VideoLaneNet.cpp
     app/ml/TensorRTEngine.hpp
     app/ml/TensorRTEngine.cpp
+    app/network/NetworkLib.hpp
+    app/network/NetworkLib.cpp
     Devices/peripheralDriver.hpp
     Devices/peripheralDriver.cpp
     Devices/Pwm.cpp
@@ -219,4 +222,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 target_compile_options(${PROJECT_NAME} PRIVATE
     ${GPIOD_CFLAGS_OTHER}
+    $<$<CONFIG:Debug>:-g3 -O0 -fno-omit-frame-pointer>
+    $<$<CONFIG:Release>:-g1 -O2 -fno-omit-frame-pointer>  # keep minimal symbols
 )

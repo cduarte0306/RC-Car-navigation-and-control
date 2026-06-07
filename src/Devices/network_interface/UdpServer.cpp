@@ -18,7 +18,20 @@ using namespace Network;
 
 UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, unsigned short sPort, unsigned short dPort, size_t bufferSize, bool broadcast):
     Sockets(io_context, sPort), m_Broadcast(broadcast) {
+    if (!UdpServer::openSocket(adapter, sPort, dPort, bufferSize, broadcast)) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+            "UdpServer: failed to open socket on adapter '%s' port %d\r\n",
+            adapter.c_str(), sPort);
+    }
+}
 
+
+UdpServer::UdpServer(boost::asio::io_context& io_context) : Sockets(io_context) {
+    
+}
+
+
+bool UdpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize, bool broadcast) {
     sport_ = sPort;
     dport_ = dPort;
     Logger* logger = Logger::getLoggerInst();
@@ -54,9 +67,12 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, u
         return ipAddress;
     };
 
-    std::string ipAddress = getAdapter(adapter);
+    std::string ipAddress = getAdapter(adapterName);
     if (ipAddress.empty()) {
-        throw std::runtime_error("");
+        logger->log(Logger::LOG_LVL_ERROR,
+            "UdpServer: adapter '%s' not found — check interface name (available: run 'ip link show')\r\n",
+            adapterName.c_str());
+        return false;
     }
 
     udp::endpoint listen_endpoint = m_Broadcast
@@ -72,7 +88,7 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, u
 
     // Fill host field with broadcast version
     if (m_Broadcast) {
-        std::string netMask = getNetMask(adapter);
+        std::string netMask = getNetMask(adapterName);
         std::vector<char> ipOctets;
         std::vector<char> maskOctets;
 
@@ -102,6 +118,7 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, u
     }
 
     logger->log(Logger::LOG_LVL_INFO, "Opened UDP socket: %s:%d\r\n", ipAddress.c_str(), sport_);
+    return true;
 }
 
 
@@ -178,11 +195,12 @@ void UdpServer::startReceive_(void) {
                     Logger* logger = Logger::getLoggerInst();
                     std::vector<char> dataReceived(m_RecvBuffer.begin(), m_RecvBuffer.begin() + bytes_recvd);
                     m_HostIP = remoteEndpoint.address().to_string();
+                    m_Port = remoteEndpoint.port();
                     if (!m_HostFound) {
-                        if (dport_ == 0) {
+                        if (dport_ <= 0) {
                             dport_ = remoteEndpoint.port();
                         }
-                        logger->log(Logger::LOG_LVL_INFO, "Host found: %s:%d\n", m_HostIP.c_str(), remoteEndpoint.port());
+                        logger->log(Logger::LOG_LVL_INFO, "Host found: %s:%d\n", m_HostIP.c_str(), dport_);
                         m_HostFound = true;
                     }
 
@@ -224,10 +242,10 @@ UdpServer::~UdpServer() {
  * @return true Transmission successful
  * @return false Transmission failed
  */
-bool UdpServer::transmit(uint8_t* pBuf, size_t length, std::string& ip) {
+bool UdpServer::transmit(const uint8_t* pBuf, size_t length, std::string& ip) {
     if (pBuf == nullptr || length == 0 || ip.length() == 0 || dport_ == 0) {
         Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_DEBUG, "Invalid parameters for UDP transmit: pBuf=%p, length=%zu, ip=%s, dport=%d\r\n", pBuf, length, ip.c_str(), dport_);
+        logger->log(Logger::LOG_LVL_ERROR, "Invalid parameters for UDP transmit: pBuf=%p, length=%zu, ip=%s, dport=%d\r\n", pBuf, length, ip.c_str(), dport_);
         return false;
     }
 
@@ -239,6 +257,7 @@ bool UdpServer::transmit(uint8_t* pBuf, size_t length, std::string& ip) {
         dport_
     );
 
+    Logger* logger = Logger::getLoggerInst();
     ssize_t bytes_sent = socket_.send_to(boost::asio::buffer(pBuf, length), remoteEndpoint);
     if (bytes_sent < 0) {
         Logger* logger = Logger::getLoggerInst();

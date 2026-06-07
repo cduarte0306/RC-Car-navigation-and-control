@@ -43,6 +43,9 @@ void AdapterBase::procReplyThread(void) {
 	int ret = 0;
 	while (m_ReplyThreadRunning) {
 		Msg::MessageAck<std::vector<char>>& ack = m_ReplyMailBox.getHead();
+		Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Adapter %s processing reply for Command ID: %d, Seq ID: %d, Adapter parent module ID: %d\r\n",
+			parentName.c_str(), ack.mCommandID, ack.mSeqID, m_ModuleID);
+
 		if (replyHandlerFunc) {
 			ret = replyHandlerFunc(ack);
 			if (ret < 0) {
@@ -101,9 +104,9 @@ int AdapterBase::bind(AdapterBase* Adapter) {
 		return Adapter->SubmitMailBox(capsule);
 	};
 	
-	// Connect destination adapter's reply handling to this adapter's reply submission.
-	Adapter->moduleReplyCmd = [this](Msg::MessageAck<std::vector<char>>& ack) {
-		return this->SubmitReplyMailBox(ack);
+	// Route replies from this source adapter to the bound destination adapter.
+	this->moduleReplyCmd = [Adapter](Msg::MessageAck<std::vector<char>>& ack) {
+		return Adapter->SubmitReplyMailBox(ack);
 	};
 
 	return bind_(Adapter);
@@ -388,7 +391,7 @@ void UpdateAdapter::bindInterface(UpdateAdapter* adapter) {
 }
 
 CommsAdapter::NetworkAdapter::NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_)
-	: adapter(adapter_), sPort(sPort_), dPort(dPort_), bufferSize(bufferSize_) {
+	: sPort(sPort_), dPort(dPort_), bufferSize(bufferSize_), adapter(adapter_) {
 }
 
 CommsAdapter::NetworkAdapter::~NetworkAdapter() {
@@ -398,20 +401,13 @@ int CommsAdapter::NetworkAdapter::send(const uint8_t* data, size_t length, std::
 	if (sendCallbackTcp) {
 		return sendCallbackTcp(data, length);
 	} else if (sendCallback) {
-		return sendCallback(destIp, data, length);
+		return sendCallback(data, length);
 	}
 	return -1;
 }
 
 void CommsAdapter::NetworkAdapter::setParent(const std::string& name) {
 	parent = name;
-}
-
-std::string CommsAdapter::NetworkAdapter::getHostIP() const {
-	if (hostResolver) {
-		return hostResolver();
-	}
-	return std::string();
 }
 
 void CommsAdapter::NetworkAdapter::OnEthLinkDetected(bool state) {
@@ -440,13 +436,6 @@ int CommsAdapter::startReceive(NetworkAdapter& adapter, std::function<void(std::
 
 	dataReceivedCommand(adapter, callback, asyncTx);
 	return 0;
-}
-
-std::string CommsAdapter::getHostIP(NetworkAdapter& adapter) {
-	if (!hostIPQueryCommand) {
-		return std::string();
-	}
-	return hostIPQueryCommand(adapter);
 }
 
 int CommsAdapter::startReceive(NetworkAdapter& adapter) {
@@ -514,10 +503,6 @@ void CommsAdapter::bindInterface(CommsAdapter* adapter) {
 		return 0;
 	};
 
-	this->hostIPQueryCommand = [adapter](NetworkAdapter& netAdp) -> std::string {
-		return adapter->getHostIP_(netAdp);
-	};
-
 	this->readStatsCommand = [adapter]() -> std::string {
 		return adapter->readStats();
 	};
@@ -533,10 +518,6 @@ void CommsAdapter::configureReceiveCallback(NetworkAdapter& adapter, std::functi
 	(void)adapter;
 	(void)callback;
 	(void)asyncTx;
-}
-
-std::string CommsAdapter::getHostIP_(NetworkAdapter& adapter) {
-	return adapter.getHostIP();
 }
 
 int CommsAdapter::transmitData_(const uint8_t* data, size_t length) {

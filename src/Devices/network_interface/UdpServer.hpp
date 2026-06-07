@@ -15,9 +15,10 @@ namespace Network {
 class UdpServer : public Sockets {
 public:
     UdpServer(boost::asio::io_context& io_context, std::string adapter, unsigned short sPort, unsigned short dPort, size_t bufferSize=1024, bool broadcast=false);
+    UdpServer(boost::asio::io_context& io_context);
     ~UdpServer();
 
-    bool transmit(uint8_t* pBuf, size_t length, std::string& ip) override;
+    bool transmit(const uint8_t* pBuf, size_t length, std::string& ip) override;
 
     /** 
      * @brief Set broadcast mode for the socket. If enabled, the socket will send to the broadcast address of the network.
@@ -28,9 +29,21 @@ public:
      */
     bool setBroadcast(bool broadcast);
 
+    /**
+     * @brief Opens UDP socket with provided options
+     * 
+     * @param adapterName Name of adapter at which the socket will be opened
+     * @param sPort Source port
+     * @param dPort Destination port
+     * @param bufferSize Size of receive buffr
+     * @param broadcast Is this a broadcast socket?
+     * @return true 
+     * @return false 
+     */
+    bool openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize=1024, bool broadcast=false);
+
     virtual void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_, bool asyncTx=true) override;
-    
-private:
+protected:
     void startReceive_(void);
 
     std::string getNetMask(std::string& iface);

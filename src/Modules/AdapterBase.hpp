@@ -317,36 +317,35 @@ namespace Adapter {
             TcpAdapterType = 2
         };
 
-        struct NetworkAdapter {
-            NetworkAdapter(const std::string& adapter_,  int sPort_, int dPort_, size_t bufferSize_=2048);
+        class NetworkAdapter {
+        public:
+            NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048);
             ~NetworkAdapter();
-            std::function<int(std::string, const uint8_t*, size_t)> sendCallback = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallback = nullptr;
             std::function<int(const uint8_t*, size_t)> sendCallbackTcp = nullptr;
             std::function<void()> onConnected = nullptr;
-            std::function<std::string()> hostResolver = nullptr;
             int id = -1;
             int typeID = -1;
-            std::string adapter;
             int sPort = -1;
             int dPort = -1;
             const size_t bufferSize = 0;
             bool connected = false;
+            std::string adapter;
             std::string parent;
             std::atomic<bool> wlanLinkDetected;
             std::atomic<bool> ethLinkDetected;
             bool broadcast = false;
             int adapterType = -1;
 
+            int socketDesc{-1};
+
             int send(const uint8_t* data, size_t length, std::string destIp="");
 
             void setParent(const std::string& name);
-
-            std::string getHostIP() const;
             
             void OnEthLinkDetected(bool state);
 
             void OnWlanLinkDetected(bool state);
-
         };
 
         CommsAdapter(std::string parentName_="");
@@ -375,14 +374,6 @@ namespace Adapter {
          * @param callback Callback function to handle received data
          */
         virtual int startReceive(NetworkAdapter& adapter);
-
-        /**
-         * @brief Get the host IP address associated with the adapter
-         * 
-         * @param adapter Reference to the network adapter
-         * @return std::string Host IP address as a string
-         */
-        virtual std::string getHostIP(NetworkAdapter& adapter);
 
         /**
          * @brief Open an adapter for a given parent module
@@ -448,9 +439,6 @@ namespace Adapter {
         virtual void startReceive_(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true);
 
         virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> callback, bool asyncTx=true);
-
-        virtual std::string getHostIP_(NetworkAdapter& adapter);
-
 
         /**
          * @brief Transmit data on behalf of caller

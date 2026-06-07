@@ -210,7 +210,7 @@ namespace Modules {
 
         std::vector<char> payload(msg.begin() + sizeof(BaseMsgHdr) + sizeof(ModMsgHdr), msg.end());
         Msg::MessageCapsule<std::vector<char>> capsule(seqID, hdr->command, modCmd, modData, std::move(payload), static_cast<int>(moduleID));
-
+        capsule.SetAckRequested(hdr->ack != 0);
         const std::unordered_map<
             ModuleDefs::DeviceType, Adapter::AdapterBase*
         > CmdToAdapter = {
@@ -299,8 +299,8 @@ namespace Modules {
     int Base::DoAck(bool status, const std::vector<char>& replyData) {
         // For now, we simply log the acknowledgment data. In a real implementation, this could involve more complex processing.
         Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_INFO, "Acknowledgment status: %s, Reply data size: %zu\r\n", status ? "Success" : "Failure", replyData.size());
-        
+        logger->log(Logger::LOG_LVL_DEBUG, "Submitting acknowledgment - Status: %s, Reply data size: %zu\r\n", 
+                    status ? "Success" : "Failure", replyData.size());
         // Just cache for the OnModuleMsgReceived to pick it up
         Msg::MessageAck<std::vector<char>> ack(status, replyData); // Assuming commandID and seqID are 0 for now
         m_AckCache.push_back(ack);
@@ -372,7 +372,7 @@ namespace Modules {
             {ModuleDefs::DeviceType::CameraControllerModule, CameraAdapter.get()},
             {ModuleDefs::DeviceType::UpdaterModule,          UpdateAdapter.get()},
         };
-        
+
         auto it = CmdToAdapter.find(static_cast<ModuleDefs::DeviceType>(ack.mReplyDestID));
         if (it == CmdToAdapter.end() || it->second == nullptr) {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message with invalid/unbound command ID: %d\r\n", ack.mReplyDestID);

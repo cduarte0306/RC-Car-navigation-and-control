@@ -5,6 +5,9 @@
 #include <stdexcept> // For std::out_of_range
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <string>
 #include <utility>
 #include <type_traits>
 
@@ -324,6 +327,42 @@ namespace Msg {
         uint16_t mSeqID;    // Sequence ID for which the reply is being sent
         bool mStatus = false;
         T mReplyData;       // Optional reply data to be sent back to the adapter
+    };
+
+    class CommsPipePacket {
+    public:
+        struct WireHeader {
+            uint16_t seqID;
+            int32_t commandID;
+            uint8_t status;
+            uint32_t payloadSize;
+        } __attribute__((__packed__));
+
+        static std::vector<uint8_t> serialize(const MessageAck<std::vector<char>>& ack) {
+            WireHeader header{};
+            header.seqID = ack.mSeqID;
+            header.commandID = ack.mCommandID;
+            header.status = ack.GetStatus() ? 1 : 0;
+            header.payloadSize = static_cast<uint32_t>(ack.mReplyData.size());
+
+            std::vector<uint8_t> frame(sizeof(WireHeader) + ack.mReplyData.size());
+            std::memcpy(frame.data(), &header, sizeof(WireHeader));
+            if (!ack.mReplyData.empty()) {
+                std::memcpy(frame.data() + sizeof(WireHeader), ack.mReplyData.data(), ack.mReplyData.size());
+            }
+            return frame;
+        }
+
+        template<typename SocketT>
+        static bool send(SocketT& socket, const std::vector<uint8_t>& frame, const std::string& destIP) {
+            if (frame.empty() || destIP.empty()) {
+                return false;
+            }
+
+            std::string ip = destIP;
+            uint8_t* payload = const_cast<uint8_t*>(frame.data());
+            return socket.transmit(payload, frame.size(), ip);
+        }
     };
 
     template <typename T>

@@ -28,15 +28,18 @@ public:
 
     }
 
+    explicit Sockets(boost::asio::io_context& io_context)
+        : Sockets(io_context, 0) {}
+
     virtual ~Sockets() {
 
     }
 
-    virtual bool transmit(uint8_t* pBuf, size_t length, std::string& ip) {
+    virtual bool transmit(const uint8_t* pBuf, size_t length, std::string& ip) {
         return true;
     }
 
-    virtual bool transmit(uint8_t* pBuf, size_t length) {
+    virtual bool transmit(const uint8_t* pBuf, size_t length) {
         return true;
     }
 
@@ -60,6 +63,25 @@ public:
      */
     std::string getHostIP() const {
         return m_HostIP;
+    }
+
+    void setRemoteEndpoint(const std::string& hostIP, int port) {
+        if (!hostIP.empty()) {
+            m_HostIP = hostIP;
+        }
+        if (port > 0) {
+            m_Port = port;
+            dport_ = port;
+        }
+    }
+
+    /**
+     * @brief Get the port number of the remote host
+     * 
+     * @return int 
+     */
+    int getPort() const {
+        return m_Port;
     }
     
 
@@ -113,6 +135,10 @@ public:
         m_RxBytes = 0;
     }
 
+    virtual bool openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize=1024, bool broadcast=false) {
+        return true;
+    }
+
 protected:
     bool threadCanRun = true;
 
@@ -130,6 +156,7 @@ protected:
     
     std::string m_AdapterName;
     std::string m_HostIP;
+    int m_Port = -1;
     udp::socket socket_;
     udp::endpoint remoteEndpoint;
     // std::array<char, 32768> m_RecvBuffer;
@@ -137,6 +164,9 @@ protected:
 
     size_t m_TxBytes = 0;
     size_t m_RxBytes = 0;
+    
+    /** Socket is opened flag */
+    bool mSocketOpened{false};
 };
 
 } // namespace Network

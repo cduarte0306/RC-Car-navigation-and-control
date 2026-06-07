@@ -129,8 +129,8 @@ int VisionControls::init(void) {
 
     Logger* logger = Logger::getLoggerInst();
     // Initialize the network adapters
-    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
-    m_EthAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, STREAM_IN_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_TxAdapter       = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_EthAdapter      = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, STREAM_IN_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
     m_SimVideoAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, STREAM_IN_PORT, 0, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
 
     m_TxAdapter->setParent(this->getName());
@@ -892,7 +892,8 @@ void VisionControls::cmdRdParamsHandler(val_type_t val, const std::vector<char>&
     jsonResponse["minAgreeingPixels"]   = m_CamSettings.minAgreeingPixels;
     jsonResponse["colorThreshold"]      = m_CamSettings.colorThreshold;
 
-    std::vector<char> responseVec(jsonResponse.dump().begin(), jsonResponse.dump().end());
+    const std::string responseStr = jsonResponse.dump();
+    std::vector<char> responseVec(responseStr.begin(), responseStr.end());
     Base::DoAck(true, responseVec);
     return;
 }
@@ -925,7 +926,19 @@ void VisionControls::cmdLoadStoredVideosHandler(val_type_t val, const std::vecto
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
-    m_VideoRecorder.listRecordedFiles();
+    std::vector<std::string> videoFiles = m_VideoRecorder.listRecordedFiles();
+    std::stringstream ss;
+    for (const auto& file : videoFiles) {
+        ss << file << ";";
+    }
+
+    nlohmann::json jsonResponse;
+    jsonResponse["loaded-video"] = m_VideoRecorder.getLoadedVideoName();
+    jsonResponse["video-list"] = ss.str();
+
+    const std::string responseStr = jsonResponse.dump();
+    std::vector<char> responseVec(responseStr.begin(), responseStr.end());
+    Base::DoAck(true, responseVec);
     return;
 }
 

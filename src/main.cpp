@@ -21,9 +21,15 @@
 #include "Modules/RcCarTelemetry.hpp"
 #include "Modules/RcUpdater.hpp"
 
+#include "utils/Utils.hpp"
+
 
 int main(int argc, char* argv[]) {
     int ret;
+
+    Utils::ConfigCores();
+    Utils::install_crash_handler();
+
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "RC Car navigation and control V%u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
 
