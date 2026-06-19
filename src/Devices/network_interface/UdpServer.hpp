@@ -42,11 +42,9 @@ public:
      */
     bool openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize=1024, bool broadcast=false);
 
-    virtual void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_, bool asyncTx=true) override;
+    virtual void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_) override;
 protected:
     void startReceive_(void);
-
-    std::string getNetMask(std::string& iface);
 
     static constexpr int BUFFER_SIZE = 1024;
     static constexpr int MAX_CONNECTIONS = 10;

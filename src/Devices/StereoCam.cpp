@@ -322,7 +322,13 @@ int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t
     xAccel = gyroData.ax;
     yAccel = gyroData.ay;
     zAccel = gyroData.az;
-    m_StereoBuffer.pop();
+
+    try {
+        m_StereoBuffer.pop();   
+    } catch (const std::exception& e) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to pop from stereo buffer: %s\n", e.what());
+        return -1;
+    }
     return 0;
 }
 
@@ -502,8 +508,16 @@ void StereoCam::streamConsumer() {
             // Aligned: pop both and publish.
             auto leftOut = left;
             auto rightOut = right;
-            m_ProducerLeftBuffer.pop();
-            m_ProducerRightBuffer.pop();
+
+            try {
+                m_ProducerLeftBuffer.pop();
+                m_ProducerRightBuffer.pop();
+            } catch (const std::exception& e) {
+                Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+                                             "Exception while popping synchronized frames: %s\n",
+                                             e.what());
+                continue; // Skip this pair and wait for the next one
+            }
 
             int idx = 0;
             Device::GyroScope::GyroData prevData = gyroData;
@@ -523,7 +537,14 @@ void StereoCam::streamConsumer() {
             }
 
             while (idx--) {
-                gyroHist.pop();
+                try {
+                    gyroHist.pop();
+                } catch (const std::exception& e) {
+                    Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
+                                                 "Exception while popping gyro history: %s\n",
+                                                 e.what());
+                    break;
+                }
             }
 
             // Read gyro and append

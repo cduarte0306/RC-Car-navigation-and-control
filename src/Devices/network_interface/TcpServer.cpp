@@ -209,10 +209,8 @@ bool TcpServer::receive(uint8_t* pBuf, size_t length) {
 }
 
 
-void TcpServer::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_, bool asyncTx) {
-    dataReceivedCallback = std::move(dataReceivedCallback_);
-    m_AsyncTx = asyncTx;
-
+void TcpServer::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback) {
+    dataReceivedCallback = std::move(dataReceivedCallback);
     if (!clientSocket_.is_open() && acceptConnection() != 0) {
         return;
     }
@@ -235,21 +233,6 @@ void TcpServer::startReceive_(void) {
                 if (dataReceivedCallback) {
                     std::vector<char> dataReceived(m_RecvBuffer.begin(), m_RecvBuffer.begin() + bytes_recvd);
                     dataReceivedCallback(dataReceived);
-
-                    if (m_AsyncTx && !dataReceived.empty()) {
-                        auto txData = std::make_shared<std::vector<char>>(std::move(dataReceived));
-                        boost::asio::async_write(
-                            clientSocket_,
-                            boost::asio::buffer(*txData),
-                            [this, txData](const boost::system::error_code& writeEc, std::size_t bytes_sent) {
-                                if (!writeEc) {
-                                    m_TxBytes += bytes_sent;
-                                    return;
-                                }
-                                Logger* logger = Logger::getLoggerInst();
-                                logger->log(Logger::LOG_LVL_ERROR, "TCP async send error: %s\r\n", writeEc.message().c_str());
-                            });
-                    }
                 }
 
                 this->startReceive_();

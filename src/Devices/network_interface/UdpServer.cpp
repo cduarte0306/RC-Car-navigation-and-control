@@ -88,7 +88,7 @@ bool UdpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_
 
     // Fill host field with broadcast version
     if (m_Broadcast) {
-        std::string netMask = getNetMask(adapterName);
+        std::string netMask = Sockets::getNetMask(adapterName);
         std::vector<char> ipOctets;
         std::vector<char> maskOctets;
 
@@ -138,45 +138,12 @@ bool UdpServer::setBroadcast(bool broadcast) {
 
 
 /**
- * @brief Reads MAC address from device
- * 
- * @return std::string 
- */
-std::string UdpServer::getNetMask(std::string& iface) {
-    ifaddrs* ifaddr = nullptr;
-    if (getifaddrs(&ifaddr) != 0)
-        return std::string("");
-
-    std::string result("");
-
-    for (auto* ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
-        if (!ifa->ifa_addr || !ifa->ifa_netmask)
-            continue;
-
-        if (iface != ifa->ifa_name)
-            continue;
-
-        if (ifa->ifa_addr->sa_family == AF_INET) {
-            auto* nm = reinterpret_cast<sockaddr_in*>(ifa->ifa_netmask);
-            result = inet_ntoa(nm->sin_addr);  // dotted-decimal
-            break;
-        }
-    }
-
-    freeifaddrs(ifaddr);
-    return result;
-
-}
-
-
-/**
  * @brief Start receiving data asynchronously
  * 
  * @param dataReceivedCallback_ Callback function to handle received data
  */
-void UdpServer::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_, bool asyncTx) {
+void UdpServer::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_) {
     dataReceivedCallback = dataReceivedCallback_;
-    m_AsyncTx = asyncTx;
     this->startReceive_();
 }
 
@@ -196,29 +163,14 @@ void UdpServer::startReceive_(void) {
                     std::vector<char> dataReceived(m_RecvBuffer.begin(), m_RecvBuffer.begin() + bytes_recvd);
                     m_HostIP = remoteEndpoint.address().to_string();
                     m_Port = remoteEndpoint.port();
+                    dport_ = remoteEndpoint.port();
                     if (!m_HostFound) {
-                        if (dport_ <= 0) {
-                            dport_ = remoteEndpoint.port();
-                        }
                         logger->log(Logger::LOG_LVL_INFO, "Host found: %s:%d\n", m_HostIP.c_str(), dport_);
                         m_HostFound = true;
                     }
 
                     dataReceivedCallback(dataReceived);
-                    if (dataReceived.size() > m_RecvBuffer.size()) {
-                        m_RecvBuffer.resize(dataReceived.size());
-                    }
-                    std::copy(dataReceived.begin(), dataReceived.end(), m_RecvBuffer.begin());
-                    // Reply with the receive buffer
-                    if (m_AsyncTx) {
-                        socket_.async_send_to(
-                            boost::asio::buffer(m_RecvBuffer.data(), dataReceived.size()), remoteEndpoint,
-                            [&](const boost::system::error_code& ec, std::size_t bytes_sent) {
-                                if (ec) {
-                                    logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s\r\n", ec.message().c_str());
-                                }
-                        });
-                    }
+                    dataReceived.clear();
                 }
             }
             // Continue receiving
@@ -249,9 +201,6 @@ bool UdpServer::transmit(const uint8_t* pBuf, size_t length, std::string& ip) {
         return false;
     }
 
-    if (m_Broadcast) {
-        ip = m_BroadcastIP;
-    }
     udp::endpoint remoteEndpoint(
         boost::asio::ip::address::from_string(ip),
         dport_

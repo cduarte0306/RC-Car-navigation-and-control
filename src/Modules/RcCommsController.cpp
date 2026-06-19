@@ -5,15 +5,24 @@
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <sys/socket.h>
+#include <nlohmann/json.hpp>
 #include "utils/logger.hpp"
-
 
 using namespace std;
 using namespace Adapter;
 
 namespace Modules {
 
-const std::string replyStr = "HANDSHAKE_ACK";
+
+static constexpr uint8_t HostConnectionTimeout = 3; // 3 seconds of no contact 
+static const std::string replyStr = "HANDSHAKE_ACK";
+
+
+static std::atomic<bool> hostDetected{false};
+static std::atomic<bool> wlanLinkDetected{false};
+static std::atomic<bool> ethLinkDetected{false};
+
+static uint8_t hostTmr = 0;
 
 
 NetworkComms::NetworkComms(ModuleDefs::DeviceType moduleID, std::string name) 
@@ -51,7 +60,7 @@ int NetworkComms::init(void) {
         io_context, "wlP1p1s0", kHandshakePort, 0);  // Use ephemeral local port to avoid colliding with ETH handshake listener
 
     m_EthSocket = std::make_shared<Network::UdpServer>(
-        io_context, "enP8p1s0", kHandshakePort, 0, 1024, true);  // Broadcast receive on handshake port
+        io_context, "enP8p1s0", kHandshakePort, 0);  // Broadcast receive on handshake port
 
     // Module command dispatchers
     m_EthCmdDispatcher = std::make_shared<Network::UdpServer>(
@@ -63,7 +72,7 @@ int NetworkComms::init(void) {
     m_WlanSocket->startReceive(std::bind(&NetworkComms::OnWlanHandShakeRecv, this, std::placeholders::_1));
     m_EthSocket->startReceive( std::bind(&NetworkComms::OnEthHandShakeRecv,  this, std::placeholders::_1));
 
-    // Initialize command dispatcher ports
+    // Initialize command dispatcher ports. Disabling asynch reply to ensure replies are only handed by modules
     m_EthCmdDispatcher->startReceive( std::bind(&NetworkComms::OnEthCmdRecv,  this, std::placeholders::_1));
     m_WlanCmdDispatcher->startReceive(std::bind(&NetworkComms::OnWlanCmdRecv, this, std::placeholders::_1));
 
@@ -80,6 +89,9 @@ void NetworkComms::OnEthCmdRecv(std::vector<char>& data) {
         logger->log(Logger::LOG_LVL_ERROR, "Received command with invalid sequence ID: %d\r\n", hdr->seqID);
         return;
     }
+
+    hostTmr = HostConnectionTimeout;
+    
     m_LastCommandSource[hdr->seqID] = EthAdapter;
     if (m_EthCmdDispatcher) {
         m_EthCmdDispatcher->setRemoteEndpoint(m_EthCmdDispatcher->getHostIP(), m_EthCmdDispatcher->getPort());
@@ -97,6 +109,8 @@ void NetworkComms::OnWlanCmdRecv(std::vector<char>& data) {
         logger->log(Logger::LOG_LVL_ERROR, "Received command with invalid sequence ID: %d\r\n", hdr->seqID);
         return;
     }
+
+    hostTmr = HostConnectionTimeout;
 
     // Submit to pool
     m_LastCommandSource[hdr->seqID] = WlanAdapter;
@@ -171,8 +185,6 @@ int NetworkComms::OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& ca
  */
 void NetworkComms::OnWlanHandShakeRecv(std::vector<char>& data) {
     Logger* logger = Logger::getLoggerInst();
-    // Process handshake data
-    logger->log(Logger::LOG_LVL_INFO, "Received handshake data on WLAN (%zu bytes)\r\n", data.size());
 
     // Build reply
     data.clear();
@@ -184,10 +196,22 @@ void NetworkComms::OnWlanHandShakeRecv(std::vector<char>& data) {
 
     if (!hostMap[NetworkComms::WlanAdapter].length())
         logger->log(Logger::LOG_LVL_INFO, "WLAN Host IP: %s\r\n", m_WlanSocket->getHostIP().c_str());
-    data.insert(data.end(), replyStr.begin(), replyStr.end());
+    wlanLinkDetected.store(true);
 
+    // Build reply json
+    std::optional<std::string> ethIP = Network::Sockets::findInterface(ETHAdapter);
+
+    nlohmann::json replyJson;
+    replyJson["message"] = replyStr;
+    replyJson["eth_ip"]  = ethIP.value_or("");
+    std::string wlanIfName = WLANAdapter;
+    replyJson["net_mask"] = Network::Sockets::getNetMask(wlanIfName);
+
+    const std::string replyPayload = replyJson.dump();
+    data.insert(data.end(), replyPayload.begin(), replyPayload.end());
     std::string destIP = m_WlanSocket->getHostIP();
     // Reply over the wlan handshake socket
+    logger->log(Logger::LOG_LVL_INFO, "Received handshake data on WLAN (%zu bytes) from %s:%d\r\n", data.size(), destIP.c_str(), m_WlanSocket->getPort());
     bool ok = m_WlanSocket->transmit(reinterpret_cast<const uint8_t*>(data.data()), data.size(), destIP);
 }
 
@@ -199,8 +223,6 @@ void NetworkComms::OnWlanHandShakeRecv(std::vector<char>& data) {
  */
 void NetworkComms::OnEthHandShakeRecv(std::vector<char>& data) {
     Logger* logger = Logger::getLoggerInst();
-    // Process handshake data
-    logger->log(Logger::LOG_LVL_INFO, "Received handshake data on Ethernet (%zu bytes)\r\n", data.size());
 
     // Build reply
     data.clear();
@@ -213,7 +235,10 @@ void NetworkComms::OnEthHandShakeRecv(std::vector<char>& data) {
         logger->log(Logger::LOG_LVL_INFO, "Ethernet Host IP: %s\r\n", m_EthSocket->getHostIP().c_str());
     data.insert(data.end(), replyStr.begin(), replyStr.end());
     std::string destIP = m_EthSocket->getHostIP();
+    ethLinkDetected.store(true);
+
     // Reply over the eth handshake socket
+    logger->log(Logger::LOG_LVL_INFO, "Received handshake data on Ethernet (%zu bytes) from %s:%d\r\n", data.size(), destIP.c_str(), m_EthSocket->getPort());
     bool ok = m_EthSocket->transmit(reinterpret_cast<const uint8_t*>(data.data()), data.size(), destIP);
 }
 
@@ -253,36 +278,26 @@ int NetworkComms::configureUDPAdapter(
     if (!selectedSocket) {
         return -1;
     }
+    netAdapter.EthPresent = [this](void) -> bool {
+        return ethLinkDetected.load();
+    };
 
-    Network::UdpServer* udpSocket = selectedSocket;
-
-    // Set up the transmit callback
-    netAdapter.sendCallback = [this, udpSocket, &netAdapter](
-        const uint8_t* data, size_t length) {
-        if (!data || length == 0 || !netAdapter.connected) return -1;
-        if (!udpSocket) return -1;
-
-        // UdpServer::transmit expects a non-const buffer pointer
-        uint8_t* buf = const_cast<uint8_t*>(data);
-        std::string& destIp_ = hostMap[NetworkComms::WlanAdapter];
-
-        if (!hostMap[NetworkComms::EthAdapter].empty()) {
-            destIp_ = hostMap[NetworkComms::EthAdapter];
-        }
-
-        if (destIp_.empty()) {
-            return -1;
-        }
-        
-        bool ok = udpSocket->transmit(buf, length, destIp_);
-        return ok ? 0 : -1;
+    netAdapter.hostPresentCB = [this](void) -> bool {
+        return hostDetected.load();
     };
 
     netAdapter.sPort = selectedSocket->getSrcPort();
     netAdapter.dPort = selectedSocket->getDstPort();
 
     netAdapter.socketDesc = m_RegisteredPorts.size();
-    m_RegisteredPorts.insert_or_assign(m_RegisteredPorts.size(), std::move(udpPort));
+    m_RegisteredPorts.insert_or_assign(netAdapter.socketDesc, std::move(udpPort));
+
+    auto registeredPortIt = m_RegisteredPorts.find(netAdapter.socketDesc);
+    if (registeredPortIt == m_RegisteredPorts.end() || !registeredPortIt->second) {
+        return -1;
+    }
+
+    auto& registeredPort = static_cast<NetUtils::NetworkPort<Network::UdpServer>&>(*registeredPortIt->second);
 
     // Keep a non-owning pointer for runtime access/stats
     Network::Sockets* socketPtr = selectedSocket;
@@ -300,6 +315,65 @@ int NetworkComms::configureUDPAdapter(
     if (m_AdapterMap.find(netAdapter.adapter) == m_AdapterMap.end()) {
         m_AdapterMap[netAdapter.adapter] = socketPtr;
     }
+
+    // Set up the transmit callback after the port is owned by m_RegisteredPorts so the reference stays valid.
+    netAdapter.sendCallback = [this, &registeredPort, &netAdapter](
+        const uint8_t* data, size_t length) -> int {
+        if (!data || length == 0 || !netAdapter.connected) return -1;
+
+        uint8_t* buf = const_cast<uint8_t*>(data);
+        if (ethLinkDetected.load()) {
+            Network::UdpServer* udpSocketEth = registeredPort.eth();
+            if (udpSocketEth && !hostMap[NetworkComms::EthAdapter].empty()) {
+                std::string& destIp = hostMap[NetworkComms::EthAdapter];
+                return udpSocketEth->transmit(buf, length, destIp) ? 0 : -1;
+            }
+        }
+
+        Network::UdpServer* udpSocketWlan = registeredPort.wlan();
+        if (udpSocketWlan && !hostMap[NetworkComms::WlanAdapter].empty()) {
+            std::string& destIp = hostMap[NetworkComms::WlanAdapter];
+            return udpSocketWlan->transmit(buf, length, destIp) ? 0 : -1;
+        }
+
+        return -1;
+    };
+
+    netAdapter.sendCallbacEth = [this, &registeredPort, &netAdapter](
+        const uint8_t* data, size_t length) {
+        if (!data || length == 0 || !netAdapter.connected) return -1;
+
+        Network::UdpServer* udpSocketEth = registeredPort.eth();
+        if (!udpSocketEth) return -1;
+
+        uint8_t* buf = const_cast<uint8_t*>(data);
+        std::string& destIp_ = hostMap[NetworkComms::EthAdapter];
+
+        if (destIp_.empty()) {
+            return -1;
+        }
+
+        bool ok = udpSocketEth->transmit(buf, length, destIp_);
+        return ok ? 0 : -1;
+    };
+
+    netAdapter.sendCallbackWlan = [this, &registeredPort, &netAdapter](
+        const uint8_t* data, size_t length) {
+        if (!data || length == 0 || !netAdapter.connected) return -1;
+
+        Network::UdpServer* udpSocketWlan = registeredPort.wlan();
+        if (!udpSocketWlan) return -1;
+
+        uint8_t* buf = const_cast<uint8_t*>(data);
+        std::string& destIp_ = hostMap[NetworkComms::WlanAdapter];
+
+        if (destIp_.empty()) {
+            return -1;
+        }
+
+        bool ok = udpSocketWlan->transmit(buf, length, destIp_);
+        return ok ? 0 : -1;
+    };
 
     netAdapter.connected = true;
 
@@ -340,26 +414,18 @@ int NetworkComms::configureTCPAdapter(Adapter::CommsAdapter::NetworkAdapter& net
     if (!selectedSocket) {
         return -1;
     }
-
-    Network::TcpServer* tcpSocket = selectedSocket;
-
-    // Set up the transmit callback
-    netAdapter.sendCallbackTcp = [this, tcpSocket, &netAdapter](const uint8_t* data, size_t length) {
-        if (!data || length == 0 || !netAdapter.connected) return -1;
-
-        if (!tcpSocket) return -1;
-
-        // TcpServer::transmit expects a non-const buffer pointer
-        uint8_t* buf = const_cast<uint8_t*>(data);
-        bool ok = tcpSocket->transmit(buf, length);
-        return ok ? 0 : -1;
-    };
-
     netAdapter.sPort = selectedSocket->getSrcPort();
     netAdapter.dPort = selectedSocket->getDstPort();
 
     netAdapter.socketDesc = adapterIdx;
     m_RegisteredPorts.insert_or_assign(netAdapter.socketDesc, std::move(tcpPort));
+
+    auto registeredPortIt = m_RegisteredPorts.find(netAdapter.socketDesc);
+    if (registeredPortIt == m_RegisteredPorts.end() || !registeredPortIt->second) {
+        return -1;
+    }
+
+    auto& registeredPort = static_cast<NetUtils::NetworkPort<Network::TcpServer>&>(*registeredPortIt->second);
 
     // Keep a non-owning pointer for runtime access/stats
     Network::TcpServer* socketPtr = selectedSocket;
@@ -378,6 +444,17 @@ int NetworkComms::configureTCPAdapter(Adapter::CommsAdapter::NetworkAdapter& net
         m_AdapterMap[netAdapter.adapter] = socketPtr;
     }
 
+    netAdapter.sendCallbackTcp = [this, &registeredPort, &netAdapter](const uint8_t* data, size_t length) {
+        if (!data || length == 0 || !netAdapter.connected) return -1;
+
+        Network::TcpServer* tcpSocket = registeredPort.preferred();
+        if (!tcpSocket) return -1;
+
+        uint8_t* buf = const_cast<uint8_t*>(data);
+        bool ok = tcpSocket->transmit(buf, length);
+        return ok ? 0 : -1;
+    };
+
     netAdapter.connected = true;
     return 0;
 }
@@ -390,6 +467,7 @@ int NetworkComms::configureTCPAdapter(Adapter::CommsAdapter::NetworkAdapter& net
  * @param dataReceivedCommand_ Function to process received data
  */
 void NetworkComms::configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx) {
+    (void)asyncTx; // Currently unused since async transmit was removed, but can be re-enabled in the future if needed.
     auto it = m_OpenedSockets.find(adapter.id);
     if (it == m_OpenedSockets.end() || !it->second.socket) {
         Logger* logger = Logger::getLoggerInst();
@@ -405,7 +483,7 @@ void NetworkComms::configureReceiveCallback(NetworkAdapter& adapter, std::functi
     }
 
     // Start listening for inbound payloads using the provided handler
-    it->second.socket->startReceive(std::move(dataReceivedCommand_), asyncTx);
+    it->second.socket->startReceive(std::move(dataReceivedCommand_));
 }
 
 
@@ -489,6 +567,20 @@ std::string NetworkComms::readStats() {
  * 
  */
 void NetworkComms::OnTimer(void) {
+    static bool hostState = false;
+    if (hostTmr > 0) hostTmr --;
+
+    if (hostTmr == 0) hostDetected.store(false);
+    else              hostDetected.store(true);
+
+    if (hostDetected && !hostState) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Host detected\r\n");
+        hostState = true;
+    } else if (!hostDetected && hostState) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Host connection timeout\r\n");
+        hostState = false;
+    }
+
     for (auto& [idx, socket] : m_OpenedSockets) {
         socket.txRate = (static_cast<double>(socket.socket->GetTxBytes()) * 8.0) / 1000000.0;
         socket.rxRate = (static_cast<double>(socket.socket->GetRxBytes()) * 8.0) / 1000000.0;

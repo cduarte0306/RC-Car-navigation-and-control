@@ -18,12 +18,16 @@
 #include <boost/bind/bind.hpp>
 #include <functional>
 
+#define ETHAdapter "enP8p1s0"
+#define WLANAdapter "wlP1p1s0"
+
 using boost::asio::ip::udp;
 
 namespace Network {
 
 class Sockets {
 public:
+
     Sockets(boost::asio::io_context& io_context, unsigned short port) : socket_(io_context) {
 
     }
@@ -54,7 +58,7 @@ public:
     boost::signals2::signal<void(const uint8_t* data, size_t length)> onDataReceived;
 
     // Receive callback uses a mutable vector buffer to avoid raw pointer/length pairs.
-    virtual void startReceive(std::function<void(std::vector<char>&)> callback, bool asyncTx=true) = 0;
+    virtual void startReceive(std::function<void(std::vector<char>&)> callback) = 0;
 
     /**
      * @brief Read the host IP
@@ -137,6 +141,36 @@ public:
 
     virtual bool openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize=1024, bool broadcast=false) {
         return true;
+    }
+
+    /**
+     * @brief Reads MAC address from device
+     * 
+     * @return std::string 
+     */
+    static std::string getNetMask(std::string& iface) {
+        ifaddrs* ifaddr = nullptr;
+        if (getifaddrs(&ifaddr) != 0)
+            return std::string("");
+
+        std::string result("");
+
+        for (auto* ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_addr || !ifa->ifa_netmask)
+                continue;
+
+            if (iface != ifa->ifa_name)
+                continue;
+
+            if (ifa->ifa_addr->sa_family == AF_INET) {
+                auto* nm = reinterpret_cast<sockaddr_in*>(ifa->ifa_netmask);
+                result = inet_ntoa(nm->sin_addr);  // dotted-decimal
+                break;
+            }
+        }
+
+        freeifaddrs(ifaddr);
+        return result;
     }
 
 protected:

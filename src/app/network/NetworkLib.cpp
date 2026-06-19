@@ -55,6 +55,8 @@ bool NetworkPort<Network::UdpServer>::hasWlan() const {
 }
 
 int NetworkPort<Network::UdpServer>::sendEth(std::string& targetIP, const std::vector<char>& data) {
+    if (targetIP.empty()) return -1;
+    
     if (m_Eth) {
         m_Eth->transmit(reinterpret_cast<const uint8_t*>(data.data()), data.size(), targetIP);
     } else {
@@ -64,6 +66,7 @@ int NetworkPort<Network::UdpServer>::sendEth(std::string& targetIP, const std::v
 }
 
 int NetworkPort<Network::UdpServer>::sendWlan(std::string& targetIP, const std::vector<char>& data) {
+    if (targetIP.empty()) return -1;
     if (m_Wlan) {
         m_Wlan->transmit(reinterpret_cast<const uint8_t*>(data.data()), data.size(), targetIP);
     } else {

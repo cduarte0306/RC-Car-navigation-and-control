@@ -406,6 +406,16 @@ int CommsAdapter::NetworkAdapter::send(const uint8_t* data, size_t length, std::
 	return -1;
 }
 
+bool CommsAdapter::NetworkAdapter::IsEthPresent(void) const {
+	if (!EthPresent) return false;
+	return EthPresent();
+}
+
+bool CommsAdapter::NetworkAdapter::IsHostPresent(void) const {
+	if (!hostPresentCB) return false;
+	return hostPresentCB();
+}
+
 void CommsAdapter::NetworkAdapter::setParent(const std::string& name) {
 	parent = name;
 }

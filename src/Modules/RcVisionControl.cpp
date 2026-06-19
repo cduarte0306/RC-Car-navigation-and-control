@@ -130,20 +130,18 @@ int VisionControls::init(void) {
     Logger* logger = Logger::getLoggerInst();
     // Initialize the network adapters
     m_TxAdapter       = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
-    m_EthAdapter      = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, STREAM_IN_PORT, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
     m_SimVideoAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, STREAM_IN_PORT, 0, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
 
     m_TxAdapter->setParent(this->getName());
-    m_EthAdapter->setParent(this->getName());
     m_SimVideoAdapter->setParent(this->getName());
 
-    if (!m_TxAdapter || !m_EthAdapter || !m_SimVideoAdapter) {
+    if (!m_TxAdapter || !m_SimVideoAdapter) {
         logger->log(Logger::LOG_LVL_WARN, "Failed to create vision network adapters\r\n");
         throw std::runtime_error("Failed to create vision network adapters");
     }
 
     // Create the streamer only once the TX adapter exists; otherwise we'd bind a dangling reference.
-    m_VideoStreamer = std::make_unique<Vision::VideoStreamer>(*m_TxAdapter, *m_EthAdapter, 100);
+    m_VideoStreamer = std::make_unique<Vision::VideoStreamer>(*m_TxAdapter, 100);
 
     m_LaneNet = std::make_unique<Vision::LaneNet>(laneNetOnnxPath, laneNetEnginePath);
 
@@ -676,6 +674,7 @@ int VisionControls::moduleCommand_(std::vector<char>& buffer) {
 }
 
 void VisionControls::cmdStartStreamHandler(val_type_t val, const std::vector<char>& payload) {
+    // return;
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
@@ -1173,10 +1172,9 @@ void VisionControls::mainProc() {
                     processStereo(frameStereo, pointCloud, stereoFramePair, Q);
                     std::chrono::steady_clock::time_point endTime = std::chrono::steady_clock::now();
                     auto processingTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
-                    // std::cout << "Lane detection processing time: " << processingTime << " ms" << std::endl;
-
                     // Select the frame base on the ethernet link status
-                    if (m_EthAdapter->ethLinkDetected.load()) {
+
+                    if (m_TxAdapter->IsEthPresent()) {
                         frameOut = pointCloud;
                     } else {                        
                         // Resize disparity before transmission and scale Q accordingly.

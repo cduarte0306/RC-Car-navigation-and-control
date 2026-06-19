@@ -321,9 +321,14 @@ namespace Adapter {
         public:
             NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048);
             ~NetworkAdapter();
+            std::function<int(const uint8_t*, size_t)> sendCallbacEth = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallbackWlan = nullptr;
             std::function<int(const uint8_t*, size_t)> sendCallback = nullptr;
             std::function<int(const uint8_t*, size_t)> sendCallbackTcp = nullptr;
+            std::function<bool(void)>                  EthPresent = nullptr;
+            std::function<bool(void)>                  hostPresentCB = nullptr;
             std::function<void()> onConnected = nullptr;
+
             int id = -1;
             int typeID = -1;
             int sPort = -1;
@@ -340,6 +345,10 @@ namespace Adapter {
             int socketDesc{-1};
 
             int send(const uint8_t* data, size_t length, std::string destIp="");
+
+            bool IsEthPresent(void) const;
+
+            bool IsHostPresent(void) const;
 
             void setParent(const std::string& name);
             

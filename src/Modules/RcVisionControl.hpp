@@ -288,9 +288,6 @@ protected:
     // Transmission port
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TxAdapter{nullptr};
 
-    // Reception port
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_EthAdapter{nullptr};
-
     // Training video input port
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_SimVideoAdapter{nullptr};
 

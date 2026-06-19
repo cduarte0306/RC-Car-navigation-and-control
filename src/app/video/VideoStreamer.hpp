@@ -179,24 +179,12 @@ public:
     /**
      * @brief Construct a streamer.
      * @param txAdapter outbound network adapter used to send packets.
-     * @param destIpProvider callable returning the current destination IP (thread-safe in caller).
-     * @param jpegQuality JPEG quality [0-100]; defaults to 35.
-     * @param bufferCapacity number of frames buffered for jitter smoothing.
-     */
-    VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
-                  std::function<std::string()> destIpProvider,
-                  int jpegQuality = 35,
-                  std::size_t bufferCapacity = 100);
-
-    /**
-     * @brief Construct a streamer.
-     * @param txAdapter outbound network adapter used to send packets.
      * @param txAdapter outbound network adapter used to send packets (Ethernet)
      * @param destIpProvider callable returning the current destination IP (thread-safe in caller).
      * @param jpegQuality JPEG quality [0-100]; defaults to 35.
      * @param bufferCapacity number of frames buffered for jitter smoothing.
      */
-    VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter, Adapter::CommsAdapter::NetworkAdapter& txAdapterEth,
+    VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
                   std::size_t bufferCapacity = 100);
 
     /**
@@ -417,7 +405,6 @@ private:
     std::atomic<int> frameIntervalMs{33};  // default ~30 FPS
     int m_EncodeQuality = 35;
     Adapter::CommsAdapter::NetworkAdapter& m_TxAdapter;
-    Adapter::CommsAdapter::NetworkAdapter& m_TxAdapterEth;
     std::string m_DestIp;
 
     uint32_t m_FrameID = 0;

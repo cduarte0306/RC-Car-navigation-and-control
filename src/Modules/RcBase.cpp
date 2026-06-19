@@ -339,6 +339,12 @@ namespace Modules {
             return -1;
         }
 
+        // Catch null commands meant for pinging
+        if (it == m_CommandHandlers.end()) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Received null/ping command. No action taken.\r\n");
+            return 0;
+        }
+
         m_AckCache.clear();
         it->second(commandData, extraPayload);
         if (m_AckCache.size() && capsule.isAckRequested()) {

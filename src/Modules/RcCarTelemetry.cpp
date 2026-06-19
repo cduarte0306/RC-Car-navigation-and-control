@@ -13,6 +13,7 @@
 
 namespace Modules {
 static nlohmann::json tempTlm;
+static std::mutex tempTlmMutex;
 
 RcCarTelemetry::RcCarTelemetry(ModuleDefs::DeviceType moduleID, std::string name) : Modules::Base(moduleID, name), Adapter::TlmAdapter(name) {
     setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::TlmAdapter*>(this)));
@@ -99,15 +100,20 @@ void RcCarTelemetry::OnTimer() {
         {"/sys/devices/virtual/thermal/thermal_zone2/temp", "SOC_TEMP"},
     };
 
-    for (const auto& [path, label] : zones) {
-        std::ifstream file(path);
-        if (!file.is_open()) continue;
+    try {
+        std::lock_guard<std::mutex> lock(tempTlmMutex);
+        for (const auto& [path, label] : zones) {
+            std::ifstream file(path);
+            if (!file.is_open()) continue;
 
-        int raw;
-        file >> raw;
+            int raw;
+            file >> raw;
 
-        // Data is millicelcius
-        tempTlm[label] = raw / 1000.0;
+            // Data is millicelcius
+            tempTlm[label] = raw / 1000.0;
+        }
+    } catch (std::exception& e) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Exception detected: %s", e.what());
     }
 }
 
@@ -136,17 +142,27 @@ void RcCarTelemetry::mainProc() {
         while (!m_TlmBuffer.isEmpty()) {
             std::lock_guard<std::mutex> lock(m_txMutex);
             nlohmann::json tlmData = m_TlmBuffer.getHead();
-            
+
+            nlohmann::json tempSnapshot;
+            {
+                std::lock_guard<std::mutex> tempLock(tempTlmMutex);
+                tempSnapshot = tempTlm;
+            }
+
             // Append temperature telemetry
-            for (auto& [key, value] : tempTlm.items()) {
+            for (auto& [key, value] : tempSnapshot.items()) {
                 tlmData[key] = value;
             }
-            
+
             m_TlmBuffer.pop();
             std::string payload = tlmData.dump();
-            m_TxAdapter->send(
+            
+            if (m_TxAdapter->IsHostPresent())
+            {
+                m_TxAdapter->send(
                 reinterpret_cast<const uint8_t*>(payload.data()),
                 payload.size());
+            }
         }
 
         std::this_thread::sleep_for(std::chrono::microseconds(100));
