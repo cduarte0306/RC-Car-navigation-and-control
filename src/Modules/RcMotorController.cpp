@@ -97,9 +97,11 @@ int MotorController::moduleCommand_(char* pbuf, size_t len) {
     switch (cmd->command)
     {
     case MotorCmdSetSpeed:
+        logger->log(Logger::LOG_LVL_INFO, "Setting motor speed to %d\r\n", cmd->data_1.i32);
         break;
 
     case MotorCmdSteer:
+        logger->log(Logger::LOG_LVL_INFO, "Steering to %d\r\n", cmd->data_1.i32);
         /* code */
         break;
 
@@ -231,6 +233,7 @@ void MotorController::cmdHandlerSteer(val_type_t val, const std::vector<char>& p
 
 void MotorController::cmdHandlerDisable(val_type_t val, const std::vector<char>& payload) {
     (void)payload;
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Disable command received: %d\r\n", val.u8);
     if (val.u8) {
         if (stop() < 0) {
             Base::DoAck(false, {});
