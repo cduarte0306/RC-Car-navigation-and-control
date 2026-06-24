@@ -15,8 +15,6 @@ set(SOURCE
     Modules/AdapterBase.cpp
     Modules/RcMotorController.cpp
     Modules/RcMotorController.hpp
-    Modules/RcCommandAndControl.hpp
-    Modules/RcCommandAndControl.cpp
     Modules/RcCommsController.hpp
     Modules/RcCommsController.cpp
     Modules/RcVisionControl.cpp

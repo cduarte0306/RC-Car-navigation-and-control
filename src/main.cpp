@@ -16,7 +16,6 @@
 #include "Modules/RcBase.hpp"
 #include "Modules/RcMotorController.hpp"
 #include "Modules/RcCommsController.hpp"
-#include "Modules/RcCommandAndControl.hpp"
 #include "Modules/RcVisionControl.hpp"
 #include "Modules/RcCarTelemetry.hpp"
 #include "Modules/RcUpdater.hpp"
