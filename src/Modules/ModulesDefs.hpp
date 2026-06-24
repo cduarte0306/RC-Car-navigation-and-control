@@ -2,14 +2,13 @@
 
 namespace ModuleDefs {
     enum class DeviceType {
-        WIRELESS_COMMS,
-        COMMAND_CONTROLLER,
-        MOTOR_CONTROLLER,
-        TELEMETRY_MODULE,
-        CAMERA_CONTROLLER,
-        VIDEO_STREAMER,
-        CLI_INTERFACE,
-        UPDATER_MODULE
+        NullModule  = 0,
+        MotorControllerModule,
+        CameraControllerModule,
+        UpdaterModule,
+        CommsModule,
+        CliModule,
+        TelemetryModule
     };
 
     enum class AdapterId {
@@ -20,6 +19,21 @@ namespace ModuleDefs {
         CameraAdapterID,
         TlmAdapterID,
         UpdateAdapterID,
+    };
+
+    enum class NetworkPorts : unsigned int {
+        // Command/control listener used by CommandController over ETH/WLAN.
+        CommandDispatcherPort = 65000,
+
+        // Video streaming ports.
+        StreamPort = 5005,
+        StreamOutPort = 5006,
+
+        // Telemetry uplink port.
+        TelemetryPort = 6000,
+
+        // NetworkComms handshake listener.
+        HandshakePort = 8192
     };
 }
 

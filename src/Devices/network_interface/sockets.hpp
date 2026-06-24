@@ -18,25 +18,32 @@
 #include <boost/bind/bind.hpp>
 #include <functional>
 
+#define ETHAdapter "enP8p1s0"
+#define WLANAdapter "wlP1p1s0"
+
 using boost::asio::ip::udp;
 
 namespace Network {
 
 class Sockets {
 public:
+
     Sockets(boost::asio::io_context& io_context, unsigned short port) : socket_(io_context) {
 
     }
+
+    explicit Sockets(boost::asio::io_context& io_context)
+        : Sockets(io_context, 0) {}
 
     virtual ~Sockets() {
 
     }
 
-    virtual bool transmit(uint8_t* pBuf, size_t length, std::string& ip) {
+    virtual bool transmit(const uint8_t* pBuf, size_t length, std::string& ip) {
         return true;
     }
 
-    virtual bool transmit(uint8_t* pBuf, size_t length) {
+    virtual bool transmit(const uint8_t* pBuf, size_t length) {
         return true;
     }
 
@@ -51,7 +58,7 @@ public:
     boost::signals2::signal<void(const uint8_t* data, size_t length)> onDataReceived;
 
     // Receive callback uses a mutable vector buffer to avoid raw pointer/length pairs.
-    virtual void startReceive(std::function<void(std::vector<char>&)> callback, bool asyncTx=true) = 0;
+    virtual void startReceive(std::function<void(std::vector<char>&)> callback) = 0;
 
     /**
      * @brief Read the host IP
@@ -60,6 +67,25 @@ public:
      */
     std::string getHostIP() const {
         return m_HostIP;
+    }
+
+    void setRemoteEndpoint(const std::string& hostIP, int port) {
+        if (!hostIP.empty()) {
+            m_HostIP = hostIP;
+        }
+        if (port > 0) {
+            m_Port = port;
+            dport_ = port;
+        }
+    }
+
+    /**
+     * @brief Get the port number of the remote host
+     * 
+     * @return int 
+     */
+    int getPort() const {
+        return m_Port;
     }
     
 
@@ -113,6 +139,40 @@ public:
         m_RxBytes = 0;
     }
 
+    virtual bool openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize=1024, bool broadcast=false) {
+        return true;
+    }
+
+    /**
+     * @brief Reads MAC address from device
+     * 
+     * @return std::string 
+     */
+    static std::string getNetMask(std::string& iface) {
+        ifaddrs* ifaddr = nullptr;
+        if (getifaddrs(&ifaddr) != 0)
+            return std::string("");
+
+        std::string result("");
+
+        for (auto* ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_addr || !ifa->ifa_netmask)
+                continue;
+
+            if (iface != ifa->ifa_name)
+                continue;
+
+            if (ifa->ifa_addr->sa_family == AF_INET) {
+                auto* nm = reinterpret_cast<sockaddr_in*>(ifa->ifa_netmask);
+                result = inet_ntoa(nm->sin_addr);  // dotted-decimal
+                break;
+            }
+        }
+
+        freeifaddrs(ifaddr);
+        return result;
+    }
+
 protected:
     bool threadCanRun = true;
 
@@ -130,6 +190,7 @@ protected:
     
     std::string m_AdapterName;
     std::string m_HostIP;
+    int m_Port = -1;
     udp::socket socket_;
     udp::endpoint remoteEndpoint;
     // std::array<char, 32768> m_RecvBuffer;
@@ -137,6 +198,9 @@ protected:
 
     size_t m_TxBytes = 0;
     size_t m_RxBytes = 0;
+    
+    /** Socket is opened flag */
+    bool mSocketOpened{false};
 };
 
 } // namespace Network

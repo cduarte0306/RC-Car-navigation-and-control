@@ -13,10 +13,9 @@
 
 
 namespace Vision {
-VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter, Adapter::CommsAdapter::NetworkAdapter& txAdapterEth,
+VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
                             std::size_t bufferCapacity)
       : m_TxAdapter(txAdapter),
-        m_TxAdapterEth(txAdapterEth),
         m_Buffer(bufferCapacity), 
         m_BufferStereo(bufferCapacity),
         m_BufferStereoMono(bufferCapacity) {}
@@ -148,7 +147,7 @@ int VideoStreamer::decodePacket(const char* pbuf, size_t len, VideoPacket& packe
 
 
 void VideoStreamer::pushFrame(const cv::Mat& frame,  int16_t xGyro, int16_t yGyro, int16_t zGyro, int16_t xAccel, int16_t yAccel, int16_t zAccel, cv::Matx44d& Q) {
-    if (!m_Running.load()) return;
+    if (!m_Running.load() || !m_TxAdapter.IsHostPresent()) return;
     if (frame.empty()) return;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
     stereoPayload payload{};
@@ -293,7 +292,7 @@ int VideoStreamer::transmitFrame(stereoPayload& stereoFrame) {
         if (dataLen > 0) {
             std::memcpy(body.data(), frame.data, dataLen);
         }
-    } else if (m_TxAdapterEth.ethLinkDetected.load()) {
+    } else if (m_TxAdapter.IsEthPresent()) {
         if (frame.channels() == 3) {
             cv::cvtColor(frame, converted, cv::COLOR_BGR2RGB);
             headerFrame = &converted;
@@ -408,13 +407,7 @@ int VideoStreamer::xfer(unsigned char* pBuf, size_t length) {
     }
 
     // Check if the ethernet adapter is connected
-    if (m_TxAdapterEth.ethLinkDetected.load()) {
-        m_TxAdapterEth.send(reinterpret_cast<uint8_t*>(pBuf), length);
-    } else {
-        m_TxAdapter.send(reinterpret_cast<uint8_t*>(pBuf), length);
-    }
-
-    return 0;
+    return m_TxAdapter.send(reinterpret_cast<uint8_t*>(pBuf), length);
 }
 
 } // namespace Vision

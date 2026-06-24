@@ -9,6 +9,8 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <thread>
+#include <condition_variable>
 
 #include "ModulesDefs.hpp"
 
@@ -34,7 +36,7 @@ namespace Adapter {
          * @param dispatchFunc The dispatch function to bind, which should match the signature of dispatchCommand (taking a MessageCapsule and returning an int)
          * @return int Status code (0 for success, -1 for failure)
          */
-        int bindCommandDispatch(std::function<int(Msg::MessageCapsule<char>& capsule)> dispatchFunc);
+        int bindCommandDispatch(std::function<int(Msg::MessageCapsule<std::vector<char>>& capsule)> dispatchFunc);
 
         /**
          * @brief Bind module message reception callback. This allows the adapter to forward 
@@ -69,7 +71,7 @@ namespace Adapter {
          * @brief Default implementation of moduleCommand. Modules or adapters that need to
          * provide custom handling should override this.
          */
-        virtual int dispatchCommand(Msg::MessageCapsule<char>& capsule);
+        virtual int dispatchCommand(Msg::MessageCapsule<std::vector<char>>& capsule);
 
         /**
          * Default handler for moduleCommand. Modules or adapters that need to
@@ -88,18 +90,31 @@ namespace Adapter {
         virtual int cliCommand(std::vector<std::string>& buffer);
 
         /**
-         * @brief Add a module name to the bound modules list
-         * 
-         * @param moduleName Name of the module to add
-         */
-        void addAdapter(std::string moduleName);
-
-        /**
          * @brief Get the parent name
          * 
          * @return std::string parent module name 
          */
         std::string getParentName() const;
+        
+        /**
+         * @brief Get the device type associated with this adapter
+         * 
+         * @return ModuleDefs::AdapterId The adapter's device type identifier
+         */
+        const ModuleDefs::AdapterId getDeviceType() const {
+            return adapterId;
+        }
+
+        /**
+         * @brief Acknowledge a received message by sending a reply back to the adapter. This can be used by command 
+         * handlers to provide any necessary response data back to the adapter after processing a command.
+         * 
+         * @param capsule The message capsule containing the original command and data
+         * @param reply Buffer containing any response data to be sent back to the adapter
+         * @param len Length of the reply buffer
+         * @return int Error code indicating success or failure of the acknowledgment process
+         */
+        virtual int AckMsg(Msg::MessageCapsule<std::vector<char>>& capsule, char* reply, int len);
 
         /**
          * @brief Get the parent module's ID
@@ -109,18 +124,49 @@ namespace Adapter {
         int GetParentID() const {
             return m_ModuleID;
         }
+
+        /**
+         * @brief Set the Mod Dispatch Callback for adapter-module comms
+         * 
+         * @param modDispatchCB Callback for module command dispatching
+         * @return int 
+         */
+        int SetModDispatchCallback(std::function<int(Msg::MessageCapsule<std::vector<char>>&)> modDispatchCB);
+
+        /**
+         * @brief Set the reply handler callback for processing module acknowledgments
+         * 
+         * @param replyHandlerCB Callback for handling module acknowledgments
+         * @return int 
+         */
+        int SetReplyHandlerCallback(std::function<int(Msg::MessageAck<std::vector<char>>&)> replyHandlerCB);
+
+        /**
+         * @brief Forward a module acknowledgment through the bound reply callback chain.
+         *
+         * This is typically called by module-side code to route a reply back to
+         * the adapter that originated the command.
+         */
+        int ConnectModuleReply(Msg::MessageAck<std::vector<char>>& ack);
     protected:
+        std::thread m_ReplyProcThread;
+        std::thread m_InputProcThread;
         std::string parentName;
-        std::list<std::string> boundModules;
         std::unordered_map<std::string, AdapterBase*> adapterMap;
         std::function< int(char* pbuf, size_t len) > moduleWriteCmd = nullptr;
         std::function< int(std::vector<std::string>&) > moduleCliCmd = nullptr;
         std::function< int(std::vector<char>&)     > moduleWriteCmdVector = nullptr;
-        std::function< int(char* pbuf, size_t len) > moduleWriteAsyncCmd = nullptr;
         std::function<std::string(void)> readStatsCommand = nullptr;
-        std::function<int(Msg::MessageCapsule<char>& capsule)> dispatchCommandFunc = nullptr;
+        std::function<int(Msg::MessageCapsule<std::vector<char>>&)> dispatchCommandFunc = nullptr;
         std::function<int(std::vector<char>& buffer)> OnModuleMsgReceivedFunc = nullptr;
+        std::function<int(Msg::MessageCapsule<std::vector<char>>&)> moduleDispatchCmd = nullptr;
+        std::function<int(Msg::MessageAck<std::vector<char>>&)> moduleReplyCmd = nullptr;
+        std::function<int(Msg::MessageAck<std::vector<char>>&)> replyHandlerFunc = nullptr;
+        Msg::CircularBuffer<Msg::MessageAck<std::vector<char>>> m_ReplyMailBox;
+        Msg::CircularBuffer<Msg::MessageCapsule<std::vector<char>>> m_InputMailBox;
+        
         int m_ModuleID = -1;
+        bool m_ReplyThreadRunning{true};
 
         const ModuleDefs::AdapterId adapterId;
 
@@ -128,9 +174,41 @@ namespace Adapter {
 
         virtual int moduleCommand_(std::vector<char>& buffer);
 
-        virtual int moduleCommandAsync_(char* pbuf, size_t len);
-
         virtual int moduleCliCmd_(std::vector<std::string>& buffer);
+
+        void procReplyThread(void);
+
+        void procInputThread(void);
+
+        /**
+         * @brief Submit a message capsule to the adapter's input mailbox for processing by the module. This can be used by command handlers or other adapter logic to forward messages to the module for handling.
+         * 
+         * @param capsule The message capsule containing the command and data to be submitted to the module
+         * @return int Error code indicating success or failure of the submission process
+         */
+        int SubmitMailBox(Msg::MessageCapsule<std::vector<char>>& capsule) {
+            if (m_InputMailBox.isFull()) {
+                return -1;
+            }
+
+            m_InputMailBox.push(capsule);
+            return 0; 
+        }
+
+        /**
+         * @brief Submit an acknowledgment to the adapter's reply mailbox for processing by the reply thread. This can be used by command handlers to send acknowledgments back to the adapter, which can then be forwarded to the appropriate destination (e.g. network adapter) for transmission back to the original sender.
+         * 
+         * @param ack The acknowledgment object containing the acknowledgment data to be sent back to the sender module thread
+         * @return int Error code indicating success or failure of the submission process
+         */
+        int SubmitReplyMailBox(Msg::MessageAck<std::vector<char>>& ack) {
+            if (m_ReplyMailBox.isFull()) {
+                return -1;
+            }
+
+            m_ReplyMailBox.push(ack);
+            return 0; 
+        }
     };
 
     class MotorAdapter : public AdapterBase {
@@ -171,7 +249,6 @@ namespace Adapter {
         std::function<int(void)                     > getDevice            = nullptr;
 
         virtual int bind_(AdapterBase* Adapter) override;
-
 
         void bindInterface(MotorAdapter* adapter);
 
@@ -240,37 +317,44 @@ namespace Adapter {
             TcpAdapterType = 2
         };
 
-        struct NetworkAdapter {
-            NetworkAdapter(const std::string& adapter_,  int sPort_, int dPort_, size_t bufferSize_=2048);
+        class NetworkAdapter {
+        public:
+            NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048);
             ~NetworkAdapter();
-            std::function<int(std::string, const uint8_t*, size_t)> sendCallback = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallbacEth = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallbackWlan = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallback = nullptr;
             std::function<int(const uint8_t*, size_t)> sendCallbackTcp = nullptr;
-            std::function<void(void)> OnEthDetected = nullptr;
+            std::function<bool(void)>                  EthPresent = nullptr;
+            std::function<bool(void)>                  hostPresentCB = nullptr;
             std::function<void()> onConnected = nullptr;
-            std::function<std::string()> hostResolver = nullptr;
+
             int id = -1;
             int typeID = -1;
-            std::string adapter;
             int sPort = -1;
             int dPort = -1;
             const size_t bufferSize = 0;
             bool connected = false;
+            std::string adapter;
             std::string parent;
             std::atomic<bool> wlanLinkDetected;
             std::atomic<bool> ethLinkDetected;
             bool broadcast = false;
             int adapterType = -1;
 
+            int socketDesc{-1};
+
             int send(const uint8_t* data, size_t length, std::string destIp="");
 
-            void setParent(const std::string& name);
+            bool IsEthPresent(void) const;
 
-            std::string getHostIP() const;
+            bool IsHostPresent(void) const;
+
+            void setParent(const std::string& name);
             
             void OnEthLinkDetected(bool state);
 
             void OnWlanLinkDetected(bool state);
-
         };
 
         CommsAdapter(std::string parentName_="");
@@ -299,14 +383,6 @@ namespace Adapter {
          * @param callback Callback function to handle received data
          */
         virtual int startReceive(NetworkAdapter& adapter);
-
-        /**
-         * @brief Get the host IP address associated with the adapter
-         * 
-         * @param adapter Reference to the network adapter
-         * @return std::string Host IP address as a string
-         */
-        virtual std::string getHostIP(NetworkAdapter& adapter);
 
         /**
          * @brief Open an adapter for a given parent module
@@ -339,7 +415,6 @@ namespace Adapter {
         std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, const std::string&, size_t, bool)> openAdapterCommand    = nullptr;
         std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, const std::string&, size_t, bool)> openTcpAdapterCommand = nullptr;
 
-        std::function<int (const char* pbuf, size_t len)                                                > recvDataCallback      = nullptr;
         std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)> dataReceivedCommand = nullptr;
         std::function<std::string(NetworkAdapter& adapter)> hostIPQueryCommand = nullptr;
         std::atomic<bool> ethConnectionState{false};
@@ -373,9 +448,6 @@ namespace Adapter {
         virtual void startReceive_(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true);
 
         virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> callback, bool asyncTx=true);
-
-        virtual std::string getHostIP_(NetworkAdapter& adapter);
-
 
         /**
          * @brief Transmit data on behalf of caller

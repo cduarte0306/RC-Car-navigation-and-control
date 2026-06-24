@@ -15,6 +15,11 @@
 
 #include "logger.hpp"
 
+#ifndef LEVEL_DEBUG
+#define LOG_LEVEL Logger::LOG_LVL_ERROR
+#else
+#define LOG_LEVEL Logger::LOG_LVL_DEBUG
+#endif
 
 #define INFO_PREPEND "[INFO]"
 #define WARN_PREPEND "[WARN]"
@@ -36,6 +41,9 @@ Logger* Logger::getLoggerInst(void) {
 
 
 void Logger::log(int logLvl, const char* format, ...) {
+    if (logLvl > LOG_LEVEL) {
+        return;
+    }
     char buffer[1024];
     va_list args;
     va_start(args, format);
@@ -65,7 +73,8 @@ void Logger::log(int logLvl, const char* format, ...) {
             break;
 
         case Logger::LOG_LVL_DEBUG:
-            return;
+            level = LOG_DEBUG;
+            prepend = "[DEBUG]";
             break;
         
         default:

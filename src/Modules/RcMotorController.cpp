@@ -14,6 +14,8 @@ namespace Modules {
 MotorController::MotorController(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::MotorAdapter(name) {
     Logger* logger = Logger::getLoggerInst();
 
+    setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::MotorAdapter*>(this)));
+
     try {
         this->peripheralDriver = std::make_unique<Device::PeripheralCtrl>();
 
@@ -59,6 +61,12 @@ int MotorController::init(void) {
         return -1;
     }
 
+    // Register commands,
+    Base::moduleRegisterCommand(MotorCmdSetSpeed, &MotorController::cmdHandlerSetSpeed);
+    Base::moduleRegisterCommand(MotorCmdSteer, &MotorController::cmdHandlerSteer);
+    Base::moduleRegisterCommand(MotorCmdDisable, &MotorController::cmdHandlerDisable);
+    Base::DefinePayloadLoc(sizeof(MotorCommand_t));  // Define the payload location and size for incoming commands
+
     logger->log(Logger::LOG_LVL_INFO, "Opened motor telemetry network adapter at port 65001\r\n");
     return 0;
 }
@@ -69,6 +77,7 @@ int MotorController::stop(void) {
     logger->log(Logger::LOG_LVL_INFO, "Stopping motor operations...\r\n");
     peripheralDriver->setDriveMode(false);   // Set to manual
     peripheralDriver->setMotorState(false);  // Disable motor
+    return 0;
 }
 
 
@@ -88,9 +97,11 @@ int MotorController::moduleCommand_(char* pbuf, size_t len) {
     switch (cmd->command)
     {
     case MotorCmdSetSpeed:
+        logger->log(Logger::LOG_LVL_INFO, "Setting motor speed to %d\r\n", cmd->data_1.i32);
         break;
 
     case MotorCmdSteer:
+        logger->log(Logger::LOG_LVL_INFO, "Steering to %d\r\n", cmd->data_1.i32);
         /* code */
         break;
 
@@ -202,6 +213,33 @@ int MotorController::steer_(int counts)
     }
 
     return 0;
+}
+
+void MotorController::cmdHandlerSetSpeed(val_type_t val, const std::vector<char>& payload) {
+    (void)payload;
+    if (setMotorSpeed_(val.i32) < 0) {
+        Base::DoAck(false, {});
+    }
+    return;
+}
+
+void MotorController::cmdHandlerSteer(val_type_t val, const std::vector<char>& payload) {
+    (void)payload;
+    if (steer_(val.i32) < 0) {
+        Base::DoAck(false, {});
+    }
+    return;
+}
+
+void MotorController::cmdHandlerDisable(val_type_t val, const std::vector<char>& payload) {
+    (void)payload;
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Disable command received: %d\r\n", val.u8);
+    if (val.u8) {
+        if (stop() < 0) {
+            Base::DoAck(false, {});
+        }
+    }
+    return;
 }
 
 

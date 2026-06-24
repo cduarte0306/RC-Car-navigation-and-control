@@ -8,75 +8,131 @@
 
 namespace Msg {
 
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, const storage_type& data, int source)
+	: MessageCapsule(seqID, cmd, static_cast<uint8_t>(0), static_cast<val_type_t>(0), data, source) {
+}
+
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, storage_type&& data, int source)
+	: MessageCapsule(seqID, cmd, static_cast<uint8_t>(0), static_cast<val_type_t>(0), std::move(data), source) {
+}
+
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, const storage_type& data, int source)
+	: MessageCapsule(seqID, cmd, modCmd, static_cast<val_type_t>(0), data, source) {
+}
+
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, storage_type&& data, int source)
+	: MessageCapsule(seqID, cmd, modCmd, static_cast<val_type_t>(0), std::move(data), source) {
+}
+
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, val_type_t dataField, const storage_type& data, int source)
+	: seqID(seqID), command(cmd), mModCmd(modCmd), wrtData(dataField), rawData(data), data(data), source(source), m_MessageAck(seqID, {}) {
+}
+
+template<typename T, typename StorageT>
+MessageCapsule<T, StorageT>::MessageCapsule(uint16_t seqID, uint8_t cmd, uint8_t modCmd, val_type_t dataField, storage_type&& data, int source)
+	: seqID(seqID), command(cmd), mModCmd(modCmd), wrtData(dataField), rawData(data), data(std::move(data)), source(source), m_MessageAck(seqID, {}) {
+}
+
+template<typename T, typename StorageT>
+typename MessageCapsule<T, StorageT>::storage_type& MessageCapsule<T, StorageT>::getData() {
+	return data;
+}
+
+template<typename T, typename StorageT>
+const typename MessageCapsule<T, StorageT>::storage_type& MessageCapsule<T, StorageT>::getData() const {
+	return data;
+}
+
+template<typename T, typename StorageT>
+void MessageCapsule<T, StorageT>::setData(const storage_type& d) {
+	data = d;
+}
+
+template<typename T, typename StorageT>
+int MessageCapsule<T, StorageT>::getSource() const {
+	return source;
+}
+
+template<typename T, typename StorageT>
+void MessageCapsule<T, StorageT>::setSource(int src) {
+	source = src;
+}
+
+template<typename T, typename StorageT>
+uint16_t MessageCapsule<T, StorageT>::getSeqID() const {
+	return seqID;
+}
+
+template<typename T, typename StorageT>
+int MessageCapsule<T, StorageT>::SendAck(uint16_t seqID, char* reply, int len) {
+	if (!reply) {
+		return -1; // Invalid reply buffer
+	}
+	if (len < 0) {
+		return -1;
+	}
+
+	if constexpr (is_std_vector<storage_type>::value && std::is_same<typename storage_type::value_type, char>::value) {
+		m_ReplyData.assign(reply, reply + len);
+	} else {
+		return -1;
+	}
+
+	// Store the reply sequence ID and data in the capsule for later retrieval by the adapter
+	m_ReplySeqID = seqID;
+	m_ReplyPresent = true; // Mark that a reply has been sent for this message
+	return 0; // Success
+}
+
+template<typename T, typename StorageT>
+int MessageCapsule<T, StorageT>::SendAck(uint16_t seqID, const storage_type& replyData) {
+	m_ReplySeqID = seqID;
+	m_ReplyData = replyData;
+	m_ReplyPresent = true;
+	return 0;
+}
+
+template<typename T, typename StorageT>
+typename MessageCapsule<T, StorageT>::storage_type& MessageCapsule<T, StorageT>::GetAckRaw() {
+	m_ReplyPresent = false; // Mark that the reply has been retrieved 
+	return m_ReplyData;
+}
+
+// MessageAck implementation
 template<typename T>
-MessageCapsule<T>::MessageCapsule() {
+MessageAck<T>::MessageAck(int commandID, uint16_t seqID, const T& replyData)
+	: mCommandID(commandID), mSeqID(seqID), mReplyData(replyData) {
 }
 
 template<typename T>
-MessageCapsule<T>::~MessageCapsule() {
+MessageAck<T>::~MessageAck() {
 }
 
 template<typename T>
-MessageCapsule<T>::MessageCapsule(int command, const std::vector<T>& data, int source)
-	: cmd(command), data(data), source(source) {
-}
-
-template<typename T>
-MessageCapsule<T>& MessageCapsule<T>::operator=(const MessageCapsule& other) {
+MessageAck<T>& MessageAck<T>::operator=(const MessageAck<T>& other) {
 	if (this != &other) {
-		cmd = other.cmd;
-		source = other.source;
-		data = other.data;
+		mReplyDestID = other.mReplyDestID;
+		mCommandID = other.mCommandID;
+		mSeqID 	= other.mSeqID;
+		mStatus = other.mStatus;
+		mReplyData = other.mReplyData;
 	}
 	return *this;
 }
 
 template<typename T>
-std::vector<T>& MessageCapsule<T>::getData() {
-	return data;
+int MessageAck<T>::getCommandID() const {
+	return mCommandID;
 }
 
 template<typename T>
-const std::vector<T>& MessageCapsule<T>::getData() const {
-	return data;
-}
-
-template<typename T>
-void MessageCapsule<T>::setData(const std::vector<T>& d) {
-	data = d;
-}
-
-template<typename T>
-int MessageCapsule<T>::getSource() const {
-	return source;
-}
-
-template<typename T>
-void MessageCapsule<T>::setSource(int src) {
-	source = src;
-}
-
-template<typename T>
-int MessageCapsule<T>::getCommand() const {
-	return cmd;
-}
-
-template<typename T>
-int MessageCapsule<T>::SendAck(int commandID, char* reply, int len) {
-	if (!reply) {
-		return -1; // Invalid reply buffer
-	}
-	// Store the reply command ID and data in the capsule for later retrieval by the adapter
-	m_ReplyCommandID = commandID;
-	m_ReplyData.assign(reply, reply + len);
-	m_ReplyPresent = true; // Mark that a reply has been sent for this message
-	return 0; // Success
-}
-
-template<typename T>
-std::vector<T>& MessageCapsule<T>::GetAck() {
-	m_ReplyPresent = false; // Mark that the reply has been retrieved 
-	return m_ReplyData;
+uint16_t MessageAck<T>::getSeqID() const {
+	return mSeqID;
 }
 
 template<typename T>
@@ -90,9 +146,6 @@ CircularBuffer<T>::CircularBuffer(size_t capacity)
 		throw std::invalid_argument("Capacity cannot be zero.");
 	}
 }
-
-template<typename T>
-CircularBuffer<T>::~CircularBuffer() = default;
 
 template<typename T>
 void CircularBuffer<T>::killProcess() {
@@ -175,7 +228,7 @@ T& CircularBuffer<T>::getHead(int timeout) {
 			m_BufferCv.wait(lock, [this] { return !isEmpty(); });
 		} else {
 			if (!m_BufferCv.wait_for(lock, std::chrono::milliseconds(timeout), [this] { return !isEmpty(); })) {
-				throw std::runtime_error("Timeout waiting for buffer item.");
+				// throw std::runtime_error("Timeout waiting for buffer item.");
 			}
 		}
 	}
@@ -186,10 +239,14 @@ T& CircularBuffer<T>::getHead(int timeout) {
 
 template<typename T>
 const T& CircularBuffer<T>::getHead() const {
-	if (size_ == 0) {
-		throw std::out_of_range("Buffer is empty.");
+	std::unique_lock<std::mutex> lock(bufferMutex);
+
+	// If the buffer is empty, we wait for the signal that an item has been added
+	if (isEmpty()) {
+		m_BufferCv.wait(lock, [this] { return !isEmpty(); });
 	}
-	size_t idx = (tail_ + size_ - 1) % capacity_;
+
+	size_t idx = (head_ + capacity_ - 1) % capacity_;
 	return buffer_[idx];
 }
 

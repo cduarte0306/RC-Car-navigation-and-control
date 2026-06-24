@@ -8,13 +8,14 @@
 #include "Devices/network_interface/UdpServer.hpp"
 #include "Devices/network_interface/TcpServer.hpp"
 
+#include "app/network/NetworkLib.hpp"
+
 using namespace std;
 using namespace Adapter;
 
 namespace Modules {
 class NetworkComms : public Base, public Adapter::CommsAdapter {
 public:
-
     NetworkComms(ModuleDefs::DeviceType moduleID, std::string name);
     ~NetworkComms();
 
@@ -51,9 +52,6 @@ public:
     // Override transmitData_ to route data via UDP
     virtual int transmitData_(const uint8_t* data, size_t length) override;
 
-    // Provide host IP lookup for bound adapters
-    virtual std::string getHostIP_(NetworkAdapter& adapter) override;
-
     // CLI spefic stats reading
     virtual std::string readStats() override;
 
@@ -76,16 +74,37 @@ protected:
         double txRate;
         double rxRate;
         std::string moduleName;
-        std::unique_ptr<Network::Sockets> socket;
+        Network::Sockets* socket = nullptr;
         Adapter::CommsAdapter::NetworkAdapter* netAdapter = nullptr;
     };
 
     void OnWlanHandShakeRecv(std::vector<char>& data);
     void OnEthHandShakeRecv(std::vector<char>& data);
 
-    constexpr static uint32_t EthHandshakePort = 8192;
-    constexpr static uint32_t WlanHandshakePort = 8193;
-    
+    void OnWlanCmdRecv(std::vector<char>& data);
+    void OnEthCmdRecv(std::vector<char>& data);
+
+    /**
+     * @brief Handler for module message routing
+     * 
+     * @param capsule Reference to the message capsule containing the command and data
+     * @return int Status code indicating success or failure of message processing
+     */
+    virtual int OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& capsule) override;
+
+    /**
+     * @brief Handler for processing replies from the module. This function is called by the reply processing thread 
+     * to handle any messages that are sent back from the module to the adapter as part of command acknowledgments or 
+     * responses. The adapter can implement this function to process the reply messages and take appropriate actions 
+     * based on the content of the replies.
+     * 
+    * @param ack Reference to the acknowledgment object containing reply data from the module
+     * @return int Status code indicating success or failure of reply processing
+     */
+    virtual int OnReply(Msg::MessageAck<std::vector<char>>& ack) override;
+
+    using AdapterPair = NetUtils::PortManager;
+
     // Map of UDP sockets by adapter ID
     std::unordered_map<int, NetStats> m_OpenedSockets;
 
@@ -107,12 +126,34 @@ protected:
     // ETH socket for handshaking
     std::shared_ptr<Network::UdpServer> m_EthSocket{nullptr};
 
+    // Eth command dispatcher port
+    std::shared_ptr<Network::UdpServer> m_EthCmdDispatcher{nullptr};
+    
+    // WLAN command dispatcher port
+    std::shared_ptr<Network::UdpServer> m_WlanCmdDispatcher{nullptr};
+
+    // Eth announce port
+    std::shared_ptr<Network::UdpServer> m_EthAnnouncer{nullptr};
+
     // List of adapter names that failed to open
     std::vector<std::pair<int, Adapter::CommsAdapter::NetworkAdapter*>> m_FailedAdapters;
 
     // Map of adapter IDs to failed adapter structs for quick lookup
     std::map<int, Adapter::CommsAdapter::NetworkAdapter*> m_FailedAdapterMap;
 
-    
+    std::string hostMap[MaxAdapter] = {"", ""}; // Map of adapter ID to host IP for quick lookup
+
+    // Command containing port source of the last sent command
+    uint8_t* m_LastCommandSource{nullptr};
+
+    // Command containing length of the last sent command
+    std::vector<NetUtils::NetworkPort<Network::UdpServer>> m_UdpPorts;
+
+    // Command containing port source of the last sent command
+    std::vector<NetUtils::NetworkPort<Network::TcpServer>> m_TcpPorts;
+
+    // Registerd socket map
+    std::map<int, std::unique_ptr<AdapterPair>> m_RegisteredPorts{};
 };
+
 };

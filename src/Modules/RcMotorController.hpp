@@ -91,6 +91,33 @@ protected:
     virtual int steer_(int counts) override;
 
     /**
+     * @brief Handler for set speed command received from adapter
+     * 
+     * @param val Command value (e.g. speed)
+     * @param payload Command payload (if any)
+     * @return int Return status
+     */
+    void cmdHandlerSetSpeed(val_type_t val, const std::vector<char>& payload);
+
+    /**
+     * @brief Handler for steer command received from adapter
+     * 
+     * @param val Command value (e.g. steering angle)
+     * @param payload Command payload (if any)
+     * @return int Return status
+     */
+    void cmdHandlerSteer(val_type_t val, const std::vector<char>& payload);
+
+    /**
+     * @brief Handler for disable command received from adapter
+     * 
+     * @param val Command value (e.g. disable/enable)
+     * @param payload Command payload (if any)
+     * @return int Return status
+     */
+    void cmdHandlerDisable(val_type_t val, const std::vector<char>& payload);
+
+    /**
      * @brief Peripheral driver instance
      * 
      */

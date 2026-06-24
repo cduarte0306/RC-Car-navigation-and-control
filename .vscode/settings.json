@@ -1,4 +1,9 @@
 {
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "C_Cpp.default.compilerPath": "/opt/poky/5.0.11/sysroots/x86_64-pokysdk-linux/usr/bin/aarch64-poky-linux/aarch64-poky-linux-g++",
+    "C_Cpp.default.cppStandard": "gnu++20",
+    "C_Cpp.default.intelliSenseMode": "linux-gcc-arm64",
     "python.autoComplete.extraPaths": [
         "${workspaceFolder}/sources/poky/bitbake/lib",
         "${workspaceFolder}/sources/poky/meta/lib"

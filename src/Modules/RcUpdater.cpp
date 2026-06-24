@@ -7,13 +7,15 @@
 #include "utils/logger.hpp"
 
 
-static constexpr char* tempFilePath = "/data/firmware/";
+static const char* tempFilePath = "/data/firmware/";
 static CFile updateFile;
 
 namespace Modules {
 Updater::Updater(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::UpdateAdapter(name), m_Buffer(10) {
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Updater object initialized\r\n");
+
+    setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::UpdateAdapter*>(this)));
 }
 
 
@@ -43,15 +45,15 @@ int Updater::init(void) {
 }
 
 
-int Updater::prepareForUpdateHandler(val_type_t val, const std::vector<char>& payload) {
+void Updater::prepareForUpdateHandler(val_type_t val, const std::vector<char>& payload) {
+    (void)val;
     // Perform necessary steps to prepare the system for an update, such as stopping motors and closing connections
     if (payload.size() == 0) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "PrepareForUpdate command received with empty payload\r\n");
-        return -1;
+        Base::DoAck(false, {});
+        return;
     }
-
-    int ret = 0;
 
     std::string fileName(payload.begin(), payload.end());
     m_UpdateFileInfo.fileName = fileName;
@@ -60,36 +62,41 @@ int Updater::prepareForUpdateHandler(val_type_t val, const std::vector<char>& pa
     if (!updateFile.isOpen()) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to open update file\r\n");
-        return -1;
+        Base::DoAck(false, {});
+        return;
     }
 
     // Command motor shut off
-    ret = motorAdapter->stopCmd();
+    if (motorAdapter && motorAdapter->stopCmd() < 0) {
+        Base::DoAck(false, {});
+        return;
+    }
     
     // TODO: Add command to notify update app that we are starting the update process and it can start sending firmware data
     
-    return ret;
+    return;
 }
 
 
-int Updater::uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload) {
+void Updater::uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload) {
     (void) val;
     std::vector<uint8_t> firmwareData(payload.begin(), payload.end());
     m_Buffer.push(firmwareData);
-    return 0;
+    return;
 }
 
 
-int Updater::verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload) {
-    (void) val;
-    return 0;
-}
-
-
-int Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& payload) {
+void Updater::verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload) {
     (void) val;
     (void) payload;
-    return 0;
+    return;
+}
+
+
+void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& payload) {
+    (void) val;
+    (void) payload;
+    return;
 }
 
 
@@ -106,7 +113,7 @@ int Updater::moduleCommand_(std::vector<char>& buffer) {
 
 void Updater::mainProc() {
     // Implementation of the main processing loop for the updater
-    static constexpr char* tempFilePath = "/data/rc_updater/";
+    static const char* tempFilePath = "/data/rc_updater/";
     
     if (std::filesystem::exists(tempFilePath)) {
         std::filesystem::remove_all(tempFilePath);

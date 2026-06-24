@@ -76,7 +76,7 @@ protected:
      * @param payload Command payload containing any necessary information for preparing for the update (e.g., target file name)
      * @return int Error code indicating success or failure of the preparation step
      */
-    int prepareForUpdateHandler(val_type_t val, const std::vector<char>& payload);
+    void prepareForUpdateHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
     * @brief Handle the upload firmware data command, which involves receiving chunks of firmware data and writing them to a temporary file for later verification and installation
@@ -84,7 +84,7 @@ protected:
     * @param payload Command payload containing the chunk of firmware data to be written
     * @return int Error code indicating success or failure of the data upload step
     */
-    int uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload);
+    void uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
      * @brief Handle the verify firmware command, which involves checking the integrity and authenticity of the received firmware data (e.g., by comparing hashes) before allowing installation
@@ -92,7 +92,7 @@ protected:
      * @param payload Command payload containing any necessary information for verifying the firmware (e.g., expected hash value)
      * @return int Error code indicating success or failure of the verification step
      */
-    int verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload);
+    void verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
      * @brief Handle the install firmware command, which involves replacing the existing firmware with the new verified firmware and performing any necessary cleanup or reboot steps
@@ -100,7 +100,7 @@ protected:
      * @param payload Command payload containing any necessary information for installing the firmware (e.g., installation instructions)
      * @return int Error code indicating success or failure of the installation step
      */
-    int installFirmwareHandler(val_type_t val, const std::vector<char>& payload);
+    void installFirmwareHandler(val_type_t val, const std::vector<char>& payload);
 
     static constexpr char* IMAGE_LOCATION = (char*)"/data/rc_updater/";
 

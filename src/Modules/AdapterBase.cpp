@@ -1,9 +1,15 @@
 #include "AdapterBase.hpp"
 #include "lib/RegisterMap.hpp"
+#include "utils/logger.hpp"
 
 namespace Adapter {
 
-AdapterBase::AdapterBase(ModuleDefs::AdapterId id, std::string parentName_) : parentName(parentName_), adapterId(id) {
+AdapterBase::AdapterBase(ModuleDefs::AdapterId id, std::string parentName_) : 
+parentName(parentName_), 
+adapterId(id),
+m_ReplyMailBox(100),
+m_InputMailBox(100),
+m_ReplyThreadRunning(true) {
 	// Resolve the parent module's ID
 	RegisterMap* regMap = RegisterMap::getInstance();
 	if (regMap) {
@@ -14,9 +20,73 @@ AdapterBase::AdapterBase(ModuleDefs::AdapterId id, std::string parentName_) : pa
 			}
 		}
 	}
+
+	// Start the reply listening thread
+	m_ReplyProcThread = std::thread(&AdapterBase::procReplyThread, this);
+	m_InputProcThread = std::thread(&AdapterBase::procInputThread, this);
 }
 
 AdapterBase::~AdapterBase() {
+	m_ReplyThreadRunning = false;
+	m_ReplyMailBox.flush();
+	m_InputMailBox.flush();
+
+	if (m_ReplyProcThread.joinable()) {
+		m_ReplyProcThread.join();
+	}
+	if (m_InputProcThread.joinable()) {
+		m_InputProcThread.join();
+	}
+}
+
+void AdapterBase::procReplyThread(void) {
+	int ret = 0;
+	while (m_ReplyThreadRunning) {
+		Msg::MessageAck<std::vector<char>>& ack = m_ReplyMailBox.getHead();
+		Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Adapter %s processing reply for Command ID: %d, Seq ID: %d, Adapter parent module ID: %d\r\n",
+			parentName.c_str(), ack.mCommandID, ack.mSeqID, m_ModuleID);
+
+		if (replyHandlerFunc) {
+			ret = replyHandlerFunc(ack);
+			if (ret < 0) {
+				Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Error processing reply in adapter\r\n");
+			}
+		}
+		m_ReplyMailBox.pop();
+	}
+}
+
+void AdapterBase::procInputThread(void) {
+	int ret = 0;
+	while (true) {
+		auto& capsule = m_InputMailBox.getHead();
+		if (moduleDispatchCmd) {
+			ret = moduleDispatchCmd(capsule);
+			if (ret < 0) {
+				Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Error dispatching input capsule in adapter\r\n");
+			}
+		} else if (OnModuleMsgReceivedFunc) {
+			auto& buffer = capsule.getData();
+			ret = OnModuleMsgReceivedFunc(buffer);
+			if (ret < 0) {
+				Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Error processing input message in adapter\r\n");
+			}
+		}
+
+		m_InputMailBox.pop();
+	}
+}
+
+int AdapterBase::SetModDispatchCallback(std::function<int(Msg::MessageCapsule<std::vector<char>>&)> modDispatchCB) {
+	if (modDispatchCB == nullptr) return -1;
+	moduleDispatchCmd = modDispatchCB;
+	return 0;
+}
+
+int AdapterBase::SetReplyHandlerCallback(std::function<int(Msg::MessageAck<std::vector<char>>&)> replyHandlerCB) {
+	if (replyHandlerCB == nullptr) return -1;
+	replyHandlerFunc = replyHandlerCB;
+	return 0;
 }
 
 int AdapterBase::bind(AdapterBase* Adapter) {
@@ -30,10 +100,19 @@ int AdapterBase::bind(AdapterBase* Adapter) {
 		return Adapter->moduleCommand_(buffer);
 	};
 
+	this->dispatchCommandFunc = [Adapter](Msg::MessageCapsule<std::vector<char>>& capsule) {
+		return Adapter->SubmitMailBox(capsule);
+	};
+	
+	// Route replies from this source adapter to the bound destination adapter.
+	this->moduleReplyCmd = [Adapter](Msg::MessageAck<std::vector<char>>& ack) {
+		return Adapter->SubmitReplyMailBox(ack);
+	};
+
 	return bind_(Adapter);
 }
 
-int AdapterBase::bindCommandDispatch(std::function<int(Msg::MessageCapsule<char>& capsule)> dispatchFunc) {
+int AdapterBase::bindCommandDispatch(std::function<int(Msg::MessageCapsule<std::vector<char>>& capsule)> dispatchFunc) {
 	if (!dispatchFunc) {
 		return -1;
 	}
@@ -63,7 +142,7 @@ int AdapterBase::stopCmd(void) {
 	return 0;
 }
 
-int AdapterBase::dispatchCommand(Msg::MessageCapsule<char>& capsule) {
+int AdapterBase::dispatchCommand(Msg::MessageCapsule<std::vector<char>>& capsule) {
 	if (!dispatchCommandFunc) {
 		return -1;
 	}
@@ -100,12 +179,33 @@ int AdapterBase::cliCommand(std::vector<std::string>& buffer) {
 	return moduleCliCmd(buffer);
 }
 
-void AdapterBase::addAdapter(std::string moduleName) {
-	boundModules.push_back(moduleName);
-}
-
 std::string AdapterBase::getParentName() const {
 	return parentName;
+}
+
+int AdapterBase::AckMsg(Msg::MessageCapsule<std::vector<char>>& capsule, char* reply, int len) {
+	if (!reply || len <= 0) {
+		return -1;
+	}
+
+	int ret = capsule.SendAck(capsule.getSeqID(), reply, len);
+	if (ret != 0) {
+		return ret;
+	}
+
+	Msg::MessageAck<std::vector<char>> ack(true, capsule.GetAckRaw());
+	ack.mCommandID = capsule.getCommand();
+	ack.mSeqID = capsule.getSeqID();
+	ack.mReplyDestID = capsule.getSource();
+	return ConnectModuleReply(ack);
+}
+
+int AdapterBase::ConnectModuleReply(Msg::MessageAck<std::vector<char>>& ack) {
+	if (moduleReplyCmd) {
+		return moduleReplyCmd(ack);
+	}
+
+	return SubmitReplyMailBox(ack);
 }
 
 int AdapterBase::moduleCommand_(char* pbuf, size_t len) {
@@ -116,12 +216,6 @@ int AdapterBase::moduleCommand_(char* pbuf, size_t len) {
 
 int AdapterBase::moduleCommand_(std::vector<char>& buffer) {
 	(void)buffer;
-	return -1;
-}
-
-int AdapterBase::moduleCommandAsync_(char* pbuf, size_t len) {
-	(void)pbuf;
-	(void)len;
 	return -1;
 }
 
@@ -297,7 +391,7 @@ void UpdateAdapter::bindInterface(UpdateAdapter* adapter) {
 }
 
 CommsAdapter::NetworkAdapter::NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_)
-	: adapter(adapter_), sPort(sPort_), dPort(dPort_), bufferSize(bufferSize_) {
+	: sPort(sPort_), dPort(dPort_), bufferSize(bufferSize_), adapter(adapter_) {
 }
 
 CommsAdapter::NetworkAdapter::~NetworkAdapter() {
@@ -307,20 +401,23 @@ int CommsAdapter::NetworkAdapter::send(const uint8_t* data, size_t length, std::
 	if (sendCallbackTcp) {
 		return sendCallbackTcp(data, length);
 	} else if (sendCallback) {
-		return sendCallback(destIp, data, length);
+		return sendCallback(data, length);
 	}
 	return -1;
 }
 
-void CommsAdapter::NetworkAdapter::setParent(const std::string& name) {
-	parent = name;
+bool CommsAdapter::NetworkAdapter::IsEthPresent(void) const {
+	if (!EthPresent) return false;
+	return EthPresent();
 }
 
-std::string CommsAdapter::NetworkAdapter::getHostIP() const {
-	if (hostResolver) {
-		return hostResolver();
-	}
-	return std::string();
+bool CommsAdapter::NetworkAdapter::IsHostPresent(void) const {
+	if (!hostPresentCB) return false;
+	return hostPresentCB();
+}
+
+void CommsAdapter::NetworkAdapter::setParent(const std::string& name) {
+	parent = name;
 }
 
 void CommsAdapter::NetworkAdapter::OnEthLinkDetected(bool state) {
@@ -349,13 +446,6 @@ int CommsAdapter::startReceive(NetworkAdapter& adapter, std::function<void(std::
 
 	dataReceivedCommand(adapter, callback, asyncTx);
 	return 0;
-}
-
-std::string CommsAdapter::getHostIP(NetworkAdapter& adapter) {
-	if (!hostIPQueryCommand) {
-		return std::string();
-	}
-	return hostIPQueryCommand(adapter);
 }
 
 int CommsAdapter::startReceive(NetworkAdapter& adapter) {
@@ -423,10 +513,6 @@ void CommsAdapter::bindInterface(CommsAdapter* adapter) {
 		return 0;
 	};
 
-	this->hostIPQueryCommand = [adapter](NetworkAdapter& netAdp) -> std::string {
-		return adapter->getHostIP_(netAdp);
-	};
-
 	this->readStatsCommand = [adapter]() -> std::string {
 		return adapter->readStats();
 	};
@@ -442,10 +528,6 @@ void CommsAdapter::configureReceiveCallback(NetworkAdapter& adapter, std::functi
 	(void)adapter;
 	(void)callback;
 	(void)asyncTx;
-}
-
-std::string CommsAdapter::getHostIP_(NetworkAdapter& adapter) {
-	return adapter.getHostIP();
 }
 
 int CommsAdapter::transmitData_(const uint8_t* data, size_t length) {
@@ -573,10 +655,6 @@ void TlmAdapter::bindInterface(TlmAdapter* adapter) {
 
 	this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
 		return adapter->moduleCommand_(pbuf, len);
-	};
-
-	this->moduleWriteAsyncCmd = [adapter](char* pbuf, size_t len) {
-		return adapter->moduleCommandAsync_(pbuf, len);
 	};
 }
 

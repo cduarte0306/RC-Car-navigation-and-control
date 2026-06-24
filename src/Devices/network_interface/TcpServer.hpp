@@ -19,9 +19,11 @@ public:
 
     bool receive(uint8_t* pBuf, size_t length) override;
 
-    bool transmit(uint8_t* pBuf, size_t length) override;
+    bool transmit(const uint8_t* pBuf, size_t length) override;
 
-    virtual void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_, bool asyncTx=true) override;
+    bool openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize=1024, bool broadcast=false) override;
+
+    virtual void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_) override;
 
     int acceptConnection();
     void onConnectionEstablished(std::function<void()> callback);

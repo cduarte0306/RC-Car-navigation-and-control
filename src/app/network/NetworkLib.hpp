@@ -1,0 +1,89 @@
+#pragma once
+
+#include <memory>
+
+#include "Devices/network_interface/sockets.hpp"
+#include "Devices/network_interface/UdpServer.hpp"
+#include "Devices/network_interface/TcpServer.hpp"
+
+namespace NetUtils {
+template<typename T>
+class NetworkPort;
+
+class PortManager {
+public:
+    PortManager(boost::asio::io_context& ioContext, int srcPort = 0, int dstPort = 0) : srcPort_(srcPort), dstPort_(dstPort) {}
+    virtual ~PortManager() = default;
+
+    virtual int open(int srcPort = 0, int dstPort = 0) = 0;
+    virtual int sendEth(std::string& targetIP, const std::vector<char>& data) = 0;
+    virtual int sendWlan(std::string& targetIP, const std::vector<char>& data) = 0;
+    virtual int setReceiveCallback(std::function<void(std::vector<char>&)> callback) = 0;
+    virtual std::string getHostIP() = 0;
+protected:
+    int srcPort_;
+    int dstPort_;
+    size_t bufferSize{1024};
+};
+
+template<>
+class NetworkPort<Network::UdpServer> : public PortManager {
+public:
+    NetworkPort(boost::asio::io_context& ioContext, int srcPort = 0, int dstPort = 0, size_t bufferSize_=1024);
+    explicit NetworkPort(boost::asio::io_context& ioContext);
+    ~NetworkPort();
+    NetworkPort(const NetworkPort&) = delete;
+    NetworkPort& operator=(const NetworkPort&) = delete;
+    NetworkPort(NetworkPort&&) = delete;
+    NetworkPort& operator=(NetworkPort&&) = delete;
+
+    Network::UdpServer* eth() const;
+    Network::UdpServer* wlan() const;
+    Network::UdpServer* preferred() const;
+
+    bool hasEth() const;
+    bool hasWlan() const;
+
+    virtual int open(int srcPort = 0, int dstPort = 0);
+    virtual int sendEth(std::string& targetIP, const std::vector<char>& data) override;
+    virtual int sendWlan(std::string& targetIP, const std::vector<char>& data) override;
+    virtual int setReceiveCallback(std::function<void(std::vector<char>&)> callback) override;
+    virtual std::string getHostIP() override;
+
+private:
+    std::unique_ptr<Network::UdpServer> m_Eth;
+    std::unique_ptr<Network::UdpServer> m_Wlan;
+};
+
+template<>
+class NetworkPort<Network::TcpServer> : public PortManager {
+public:
+    NetworkPort(boost::asio::io_context& ioContext, int srcPort = 0, int dstPort = 0, size_t bufferSize_=1024);
+    explicit NetworkPort(boost::asio::io_context& ioContext);
+    ~NetworkPort();
+    NetworkPort(const NetworkPort&) = delete;
+    NetworkPort& operator=(const NetworkPort&) = delete;
+    NetworkPort(NetworkPort&&) = delete;
+    NetworkPort& operator=(NetworkPort&&) = delete;
+
+    Network::TcpServer* eth() const;
+    Network::TcpServer* wlan() const;
+    Network::TcpServer* preferred() const;
+
+    bool hasEth() const;
+    bool hasWlan() const;
+
+    virtual int open(int srcPort = 0, int dstPort = 0);
+    virtual int sendEth(std::string& targetIP, const std::vector<char>& data) override;
+    virtual int sendWlan(std::string& targetIP, const std::vector<char>& data) override;
+    virtual int setReceiveCallback(std::function<void(std::vector<char>&)> callback) override;
+    virtual std::string getHostIP() override;
+
+private:
+    std::unique_ptr<Network::TcpServer> m_Eth;
+    std::unique_ptr<Network::TcpServer> m_Wlan;
+};
+ 
+}
+
+#pragma endregion
