@@ -17,10 +17,19 @@ CFile::~CFile() {
 int CFile::open(const char* filePath, const char* mode) {
     if (m_File) {
         fclose(m_File);
+        m_File = nullptr;
+        m_Size = 0;
+        internalFilePath.clear();
+    }
+    std::filesystem::path path(filePath);
+    if (!std::filesystem::exists(filePath)) {
+        std::filesystem::create_directories(path.parent_path());
     }
 
-
     m_File = fopen(filePath, mode);
+    if (m_File) {
+        internalFilePath = filePath;
+    }
     return m_File ? 0 : -1;
 }
 
@@ -30,6 +39,8 @@ void CFile::close() {
         m_File = nullptr;
         m_Size = 0;
     }
+
+    m_Offset = 0;  // Reset the offset
 }
 
 std::vector<char> CFile::read(size_t length) {
@@ -76,7 +87,7 @@ std::vector<char> CFile::read(size_t length) {
     return buffer;
 }
 
-int CFile::GetSha256Hash(std::vector<uint8_t>& hashOutput) {
+int CFile::GetSha256Hash(std::vector<char>& hashOutput) {
     if (!m_File) {
         return -1; // File not open
     }
@@ -94,18 +105,31 @@ int CFile::GetSha256Hash(std::vector<uint8_t>& hashOutput) {
     fread(buffer.data(), sizeof(char), fileSize, m_File);
 
     hashOutput.resize(SHA256_DIGEST_LENGTH);
-    SHA256(reinterpret_cast<const unsigned char*>(buffer.data()), buffer.size(), hashOutput.data());
-    
+    SHA256(reinterpret_cast<const unsigned char*>(buffer.data()), buffer.size(),
+           reinterpret_cast<unsigned char*>(hashOutput.data()));
     return 0; // Success
 }
 
-size_t CFile::write(const uint8_t* data, size_t length, size_t offset) {
+size_t CFile::write(const uint8_t* data, size_t length) {
     if (!m_File) {
         return 0; // File not open
     }
 
-    fseek(m_File, offset, SEEK_SET);
+    fseek(m_File, m_Offset, SEEK_SET);
+    m_Offset += length;
     size_t bytesWritten = fwrite(data, sizeof(uint8_t), length, m_File);
-    m_Size = std::max(m_Size, offset + bytesWritten); // Update file size if we wrote past the previous end
+    m_Size = std::max(m_Size, m_Offset + bytesWritten); // Update file size if we wrote past the previous end
     return bytesWritten;
+}
+
+int CFile::remove() {
+    if (!m_File || internalFilePath.empty()) {
+        return -1; // File not open
+    }
+    std::string filePath = internalFilePath;
+    close();
+    if (filePath.empty()) {
+        return -1; // No file path available
+    }
+    return std::remove(filePath.c_str());
 }

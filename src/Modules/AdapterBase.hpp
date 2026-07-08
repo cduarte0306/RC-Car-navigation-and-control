@@ -264,6 +264,7 @@ namespace Adapter {
 
     protected:
         std::function<std::string()> readStats = nullptr;
+        std::function<int(bool)>     setStreamingStateCommand = nullptr;
 
         virtual int bind_(AdapterBase* Adapter) override;
 
@@ -278,6 +279,12 @@ namespace Adapter {
 
         int setCameraState(bool state);
 
+        int StartStreaming();
+
+        int StopStreaming();
+
+        int SetStreamingState(bool state);
+
         /**
          * @brief Read stats from module
          * 
@@ -287,10 +294,16 @@ namespace Adapter {
 
     protected:
         std::function<int(bool)>                    setCameraStateCommand    = nullptr;
+        std::function<int(void)>                    startStreamingCommand    = nullptr;
+        std::function<int(void)>                    stopStreamingCommand     = nullptr;
 
         virtual int bind_(AdapterBase* Adapter) override;
 
         void bindInterface(CameraAdapter* adapter);
+
+        virtual int startStreaming_();
+
+        virtual int stopStreaming_();
 
         virtual int setCameraState_(int direction);
 

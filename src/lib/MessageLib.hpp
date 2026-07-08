@@ -15,6 +15,9 @@
 
 namespace Msg {
 
+    template<typename>
+    struct dependent_false : std::false_type {};
+
     template<typename T>
     using DefaultCapsuleStorage = std::conditional_t<std::is_same<T, char>::value, std::vector<T>, T>;
 
@@ -32,6 +35,146 @@ namespace Msg {
 
     template<typename T>
     class MessageAck;  // Forward declaration of MessageAck for use in MessageCapsule
+
+    template<typename T, typename Enable = void>
+    struct PayloadSerializer {
+        static std::vector<char> serialize(const T&) {
+            static_assert(dependent_false<T>::value, "PayloadSerializer: unsupported type. Provide a specialization.");
+            return {};
+        }
+
+        static bool deserialize(const char*, size_t, T&) {
+            static_assert(dependent_false<T>::value, "PayloadSerializer: unsupported type. Provide a specialization.");
+            return false;
+        }
+
+        static bool deserialize(const std::vector<char>& payload, T& out) {
+            return deserialize(payload.data(), payload.size(), out);
+        }
+    };
+
+    template<>
+    struct PayloadSerializer<std::vector<char>, void> {
+        static std::vector<char> serialize(const std::vector<char>& value) {
+            return value;
+        }
+
+        static bool deserialize(const char* data, size_t size, std::vector<char>& out) {
+            if (size == 0) {
+                out.clear();
+                return true;
+            }
+
+            if (!data) {
+                return false;
+            }
+
+            out.assign(data, data + size);
+            return true;
+        }
+
+        static bool deserialize(const std::vector<char>& payload, std::vector<char>& out) {
+            out = payload;
+            return true;
+        }
+    };
+
+    template<>
+    struct PayloadSerializer<std::string, void> {
+        static std::vector<char> serialize(const std::string& value) {
+            return std::vector<char>(value.begin(), value.end());
+        }
+
+        static bool deserialize(const char* data, size_t size, std::string& out) {
+            if (size == 0) {
+                out.clear();
+                return true;
+            }
+
+            if (!data) {
+                return false;
+            }
+
+            out.assign(data, data + size);
+            return true;
+        }
+
+        static bool deserialize(const std::vector<char>& payload, std::string& out) {
+            out.assign(payload.begin(), payload.end());
+            return true;
+        }
+    };
+
+    template<typename T>
+    struct PayloadSerializer<T, std::enable_if_t<std::is_trivially_copyable<T>::value>> {
+        static std::vector<char> serialize(const T& value) {
+            std::vector<char> bytes(sizeof(T));
+            std::memcpy(bytes.data(), &value, sizeof(T));
+            return bytes;
+        }
+
+        static bool deserialize(const char* data, size_t size, T& out) {
+            if (size != sizeof(T) || !data) {
+                return false;
+            }
+
+            std::memcpy(&out, data, sizeof(T));
+            return true;
+        }
+
+        static bool deserialize(const std::vector<char>& payload, T& out) {
+            return deserialize(payload.data(), payload.size(), out);
+        }
+    };
+
+    template<typename U>
+    struct PayloadSerializer<std::vector<U>, std::enable_if_t<std::is_trivially_copyable<U>::value && !std::is_same<U, char>::value>> {
+        static std::vector<char> serialize(const std::vector<U>& value) {
+            std::vector<char> bytes(value.size() * sizeof(U));
+            if (!value.empty()) {
+                std::memcpy(bytes.data(), value.data(), bytes.size());
+            }
+            return bytes;
+        }
+
+        static bool deserialize(const char* data, size_t size, std::vector<U>& out) {
+            if (size == 0) {
+                out.clear();
+                return true;
+            }
+
+            if (!data || (size % sizeof(U)) != 0) {
+                return false;
+            }
+
+            const size_t count = size / sizeof(U);
+            out.resize(count);
+            std::memcpy(out.data(), data, size);
+            return true;
+        }
+
+        static bool deserialize(const std::vector<char>& payload, std::vector<U>& out) {
+            return deserialize(payload.data(), payload.size(), out);
+        }
+    };
+
+    class PayloadCodec {
+    public:
+        template<typename T>
+        static std::vector<char> serialize(const T& value) {
+            return PayloadSerializer<std::decay_t<T>>::serialize(value);
+        }
+
+        template<typename T>
+        static bool deserialize(const std::vector<char>& payload, T& out) {
+            return PayloadSerializer<std::decay_t<T>>::deserialize(payload, out);
+        }
+
+        template<typename T>
+        static bool deserialize(const char* data, size_t size, T& out) {
+            return PayloadSerializer<std::decay_t<T>>::deserialize(data, size, out);
+        }
+    };
     
     template<typename T, typename StorageT = DefaultCapsuleStorage<T>>
     class MessageCapsule {

@@ -1,8 +1,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include "RcUpdater.hpp"
-
 #include "utils/CFile.hpp"
 #include "utils/logger.hpp"
 
@@ -34,7 +34,7 @@ Updater::~Updater() {
 int Updater::init(void) {
     int ret = 0;
 
-    ret = Base::moduleRegisterCommand(PrepareForUpdate,   &Updater::prepareForUpdateHandler);
+    ret = Base::moduleRegisterCommand(PrepareForUpdate,   &Updater::initUpdateHandler);
     ret = Base::moduleRegisterCommand(UploadFirmwareData, &Updater::uploadFirmwareDataHandler);
     ret = Base::moduleRegisterCommand(VerifyFirmware,     &Updater::verifyFirmwareHandler);
     ret = Base::moduleRegisterCommand(InstallFirmware,    &Updater::installFirmwareHandler);
@@ -45,7 +45,7 @@ int Updater::init(void) {
 }
 
 
-void Updater::prepareForUpdateHandler(val_type_t val, const std::vector<char>& payload) {
+void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload) {
     (void)val;
     // Perform necessary steps to prepare the system for an update, such as stopping motors and closing connections
     if (payload.size() == 0) {
@@ -55,10 +55,23 @@ void Updater::prepareForUpdateHandler(val_type_t val, const std::vector<char>& p
         return;
     }
 
+    m_MissingChunksBuff.clear();
+
+    // If open, close before starting a new update
+    if (updateFile.isOpen()) {
+        // Do file cleanup
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_INFO, "Closing previously opened update file\r\n");
+        updateFile.close();
+    }
+
     std::string fileName(payload.begin(), payload.end());
     m_UpdateFileInfo.fileName = fileName;
-    
-    updateFile.open(std::string(tempFilePath) + fileName, "wb");
+
+    // Strip filepath
+    std::filesystem::path path(std::string(tempFilePath) + fileName);
+    fileName = std::string(tempFilePath) + path.filename().string();
+    updateFile.open(fileName, "wb");
     if (!updateFile.isOpen()) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to open update file\r\n");
@@ -71,17 +84,56 @@ void Updater::prepareForUpdateHandler(val_type_t val, const std::vector<char>& p
         Base::DoAck(false, {});
         return;
     }
-    
-    // TODO: Add command to notify update app that we are starting the update process and it can start sending firmware data
-    
-    return;
+
+    // Open network adapter for firmware file transfers
+    if (!m_fwFileAdapter) {
+        m_fwFileAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::TcpAdapterType, 0, 0, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+        if (!m_fwFileAdapter) {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for firmware file transfers\r\n");
+            Base::DoAck(false, {});
+            return;
+        }
+        m_fwFileAdapter->setParent(this->getName());
+    }
+
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Initializing update file with name: %s\r\n", fileName.c_str());
+    Base::DoAck(true, m_fwFileAdapter->sPort);
 }
 
 
 void Updater::uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload) {
     (void) val;
+    typedef struct {
+        uint64_t chunkID;
+        uint64_t fileSize;
+        uint64_t chunkSize;
+    } updateInfo;
+
+    static uint64_t lastChunkID = 0;
+    updateInfo* info = reinterpret_cast<updateInfo*>(const_cast<char*>(payload.data()));
+    if (info->chunkID != lastChunkID + 1) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Received out-of-order file chunk: %llu\r\n", info->chunkID);
+        std::vector<uint64_t> missingIds;
+        for (uint64_t i = lastChunkID + 1; i < info->chunkID; ++i) {
+            missingIds.push_back(i);
+        }
+        for (auto id : missingIds) {
+            char buff[8] = {0};
+            std::memcpy(buff, &id, sizeof(uint64_t));
+            for (int i = 0; i < 8; ++i) {
+                m_MissingChunksBuff.push_back(buff[i]);
+            }
+        }
+    }
+    lastChunkID = info->chunkID;
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Received file chunk of size: %d\r\n", payload.size());
     std::vector<uint8_t> firmwareData(payload.begin(), payload.end());
-    m_Buffer.push(firmwareData);
+    auto bytesWritten = updateFile.write(payload);
+    if (payload.size() && (bytesWritten != payload.size())) {
+        Base::DoAck(false, {});
+    }
+
+    Base::DoAck(true, m_MissingChunksBuff);
     return;
 }
 
@@ -89,6 +141,14 @@ void Updater::uploadFirmwareDataHandler(val_type_t val, const std::vector<char>&
 void Updater::verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload) {
     (void) val;
     (void) payload;
+    std::vector<char> fileHash;
+    int ret = updateFile.GetSha256Hash(fileHash);
+    if (ret < 0)
+    {
+        Base::DoAck(false, {});
+    }
+
+    Base::DoAck(true, fileHash);
     return;
 }
 
@@ -100,41 +160,5 @@ void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& pa
 }
 
 
-/**
- * @brief Handle module commands
- * 
- * @param buffer Vector containing the command data
- * @return int Error code
- */
-int Updater::moduleCommand_(std::vector<char>& buffer) {
-    return 0;
-}
-
-
-void Updater::mainProc() {
-    // Implementation of the main processing loop for the updater
-    static const char* tempFilePath = "/data/rc_updater/";
-    
-    if (std::filesystem::exists(tempFilePath)) {
-        std::filesystem::remove_all(tempFilePath);
-    } else if (!std::filesystem::create_directories(tempFilePath)) {
-        Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to create updater temp directory\r\n");
-        return;
-    }
-    
-    while (m_ThreadCanRun) {
-        // Data received. Write to file and signal updater server if needed
-        std::vector<uint8_t>& data = m_Buffer.getHead();
-        if (!updateFile.isOpen()) {
-            Logger* logger = Logger::getLoggerInst();
-            logger->log(Logger::LOG_LVL_ERROR, "Failed to open update file\r\n");
-            continue;
-        }
-
-        // Write the received data to the file
-        
-        m_Buffer.pop();
-    }
-}
+void Updater::mainProc() { }
 }

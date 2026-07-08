@@ -178,17 +178,17 @@ public:
     void createAdapter() {
         static_assert(std::is_base_of<Adapter::AdapterBase, U>::value, "createAdapter: U must derive from AdapterBase");
         if constexpr (std::is_same<U, Adapter::MotorAdapter>::value) {
-            motorAdapter = std::make_unique<Adapter::MotorAdapter>();
+            motorAdapter = std::make_unique<Adapter::MotorAdapter>(m_name);
         } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
-            CameraAdapter = std::make_unique<Adapter::CameraAdapter>();
+            CameraAdapter = std::make_unique<Adapter::CameraAdapter>(m_name);
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
-            CommsAdapter = std::make_unique<Adapter::CommsAdapter>();
+            CommsAdapter = std::make_unique<Adapter::CommsAdapter>(m_name);
         } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
-            CommandAdapter = std::make_unique<Adapter::CommandAdapter>();
+            CommandAdapter = std::make_unique<Adapter::CommandAdapter>(m_name);
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
-            TlmAdapter = std::make_unique<Adapter::TlmAdapter>();
+            TlmAdapter = std::make_unique<Adapter::TlmAdapter>(m_name);
         } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
-            UpdateAdapter = std::make_unique<Adapter::UpdateAdapter>();
+            UpdateAdapter = std::make_unique<Adapter::UpdateAdapter>(m_name);
         } else {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
             static_assert(!std::is_same<U, U>::value, "createAdapter: unsupported adapter type");
@@ -245,16 +245,34 @@ public:
         }
 
         if constexpr (std::is_same<U, Adapter::MotorAdapter>::value) {
+            if (!motorAdapter) {
+                return -1;
+            }
             motorAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
+            if (!CameraAdapter) {
+                return -1;
+            }
             CameraAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
+            if (!CommsAdapter) {
+                return -1;
+            }
             CommsAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
+            if (!CommandAdapter) {
+                return -1;
+            }
             CommandAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
+            if (!TlmAdapter) {
+                return -1;
+            }
             TlmAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
+            if (!UpdateAdapter) {
+                return -1;
+            }
             UpdateAdapter->bind(adapter);
         } else {
             return -1;
@@ -410,6 +428,16 @@ protected:
      * @return int Error code indicating success or failure of the acknowledgment handling process
      */
     int DoAck(bool status, const std::vector<char>& replyData);
+
+    template<typename T>
+    int DoAck(bool status, const T& replyData) {
+        return DoAck(status, Msg::PayloadCodec::serialize(replyData));
+    }
+
+    template<typename T>
+    static bool DecodePayload(const std::vector<char>& payload, T& out) {
+        return Msg::PayloadCodec::deserialize(payload, out);
+    }
 
     /**
      * @brief Submit the acknowledgement back to the sender module thread

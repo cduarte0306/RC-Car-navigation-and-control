@@ -60,15 +60,6 @@ protected:
     virtual void mainProc() override;
 
     /**
-     * @brief Raw serial interface with the motor cotroller
-     * 
-     * @param pbuf Data pointer
-     * @param len Length of data
-     * @return int 
-     */
-    virtual int moduleCommand_(char* pbuf, size_t len) override;
-
-    /**
      * @brief Transmit telemetry data to the host
      * 
      */

@@ -222,6 +222,12 @@ protected:
     /** @brief Periodic timer callback. */
     virtual void OnTimer(void) override;
 
+    /** @brief Start camera video streaming. */
+    virtual int startStreaming_() override;
+
+    /** @brief Stop camera video streaming. */
+    virtual int stopStreaming_() override;
+
     /** @brief Decode one JPEG frame entry into an OpenCV matrix. */
     void decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameEntry);
 

@@ -64,7 +64,7 @@ int main(int argc, char* argv[]) {
     rcTelemetry->createAdapter<Adapter::CommsAdapter>();
 
     rcUpdater->createAdapter<Adapter::MotorAdapter>();
-    rcUpdater->createAdapter<Adapter::UpdateAdapter>();
+    rcUpdater->createAdapter<Adapter::CommsAdapter>();
 
     // Bind modules
     networkComms->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
@@ -79,6 +79,7 @@ int main(int argc, char* argv[]) {
     rcVision->moduleBind<Adapter::TlmAdapter>(rcTelemetry->getInputAdapter());
     rcTelemetry->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     rcUpdater->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
+    rcUpdater->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
 
     // Preliminary initialization
     motorController->init();

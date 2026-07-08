@@ -39,13 +39,6 @@ public:
      */
     virtual int init(void) override;
 
-    /**
-     * @brief Get the input adapter
-     * 
-     * @return Adapter::AdapterBase* Pointer to the input adapter
-     */
-    virtual int moduleCommand_(std::vector<char>& buffer);
-
 protected:
     enum {
         PrepareForUpdate = 1,  // Command to prepare the system for an update (e.g., stop motors, close connections)
@@ -76,7 +69,7 @@ protected:
      * @param payload Command payload containing any necessary information for preparing for the update (e.g., target file name)
      * @return int Error code indicating success or failure of the preparation step
      */
-    void prepareForUpdateHandler(val_type_t val, const std::vector<char>& payload);
+    void initUpdateHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
     * @brief Handle the upload firmware data command, which involves receiving chunks of firmware data and writing them to a temporary file for later verification and installation
@@ -111,10 +104,22 @@ protected:
     Msg::CircularBuffer<std::vector<uint8_t>> m_Buffer;
 
     /**
+     * @brief Vector to keep track of missing chunks during the firmware update process
+     * 
+     */
+    std::vector<char> m_MissingChunksBuff{};
+
+    /**
      * @brief Update file info struct to hold metadata about the incoming firmware update
      * 
      */
     FileInfo m_UpdateFileInfo;
+    
+    /**
+     * @brief Network adapter for handling firmware file transfers
+     * 
+     */
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_fwFileAdapter{nullptr};
 };
 }
 

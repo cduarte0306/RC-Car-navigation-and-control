@@ -1022,6 +1022,17 @@ std::string VisionControls::readStats() {
 }
 
 
+int VisionControls::startStreaming_() {
+    m_VideoStreamer->start();
+    return 0;
+}
+
+int VisionControls::stopStreaming_() {
+    m_VideoStreamer->stop();
+    return 0;
+}
+
+
 /**
  * @brief Thread timer handler
  * 

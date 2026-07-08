@@ -13,6 +13,9 @@ JETSON_USER="root"
 JETSON_TARGET_DIR="/tmp/"
 REMOTE_APP_PATH="${JETSON_TARGET_DIR}/rc-car-nav"
 GDBSERVER_PATH="/usr/bin/gdbserver"    # explicit path
+LOCAL_GDBSERVER_LOG="./gdbserver.log"
+LOCAL_GDBSERVER_LOG_COMPAT="./gdbservr.log"
+FOLLOWER_PID_FILE="./.gdbserver-log-follow.pid"
 
 MODE="$1"
 
@@ -35,6 +38,17 @@ elif [[ "$MODE" == "remote" ]]; then
     ssh "${JETSON_USER}@${JETSON_IP}" \
         "pkill -9 gdbserver || true; rm -f ${JETSON_TARGET_DIR}/gdbserver.log"
 
+    if [[ -f "${FOLLOWER_PID_FILE}" ]]; then
+        old_follower_pid="$(cat "${FOLLOWER_PID_FILE}")"
+        if [[ -n "${old_follower_pid}" ]] && kill -0 "${old_follower_pid}" 2>/dev/null; then
+            kill "${old_follower_pid}" 2>/dev/null || true
+        fi
+        rm -f "${FOLLOWER_PID_FILE}"
+    fi
+
+    : > "${LOCAL_GDBSERVER_LOG}"
+    ln -sf "$(basename "${LOCAL_GDBSERVER_LOG}")" "${LOCAL_GDBSERVER_LOG_COMPAT}"
+
     echo "[*] Uploading app to Jetson..."
     scp "$APP" "${JETSON_USER}@${JETSON_IP}:${JETSON_TARGET_DIR}/" \
         || { echo "[!] SCP failed"; exit 0; }
@@ -43,6 +57,11 @@ elif [[ "$MODE" == "remote" ]]; then
     ssh "${JETSON_USER}@${JETSON_IP}" \
         "nohup ${GDBSERVER_PATH} :${PORT} ${REMOTE_APP_PATH} > ${JETSON_TARGET_DIR}/gdbserver.log 2>&1 &"
 
+    echo "[*] Mirroring remote gdbserver log to ${LOCAL_GDBSERVER_LOG}..."
+    ssh "${JETSON_USER}@${JETSON_IP}" \
+        "tail -n +1 -F ${JETSON_TARGET_DIR}/gdbserver.log" > "${LOCAL_GDBSERVER_LOG}" 2>&1 &
+    echo $! > "${FOLLOWER_PID_FILE}"
+
     sleep 1  # Give gdbserver time to start and begin logging
     
     # wait for port to open
@@ -50,7 +69,9 @@ elif [[ "$MODE" == "remote" ]]; then
     for i in {1..20}; do
       if nc -z "${JETSON_IP}" "${PORT}"; then
         echo "[*] gdbserver is up!"
-        echo "[*] Log file: ${JETSON_TARGET_DIR}/gdbserver.log"
+                echo "[*] Remote log file: ${JETSON_TARGET_DIR}/gdbserver.log"
+                echo "[*] Local mirrored log: ${LOCAL_GDBSERVER_LOG}"
+                echo "[*] Compatibility path: ${LOCAL_GDBSERVER_LOG_COMPAT}"
         exit 0
       fi
       sleep 0.3

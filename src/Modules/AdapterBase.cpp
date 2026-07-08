@@ -320,6 +320,24 @@ int CameraAdapter::setCameraState(bool state) {
 	return 0;
 }
 
+int CameraAdapter::StartStreaming() {
+	if (startStreamingCommand) {
+		return startStreamingCommand();
+	}
+	return 0;
+}
+
+int CameraAdapter::StopStreaming() {
+	if (stopStreamingCommand) {
+		return stopStreamingCommand();
+	}
+	return 0;
+}
+
+int CameraAdapter::SetStreamingState(bool state) {
+	return state ? StartStreaming() : StopStreaming();
+}
+
 std::string CameraAdapter::readStats() {
 	if (readStatsCommand) {
 		return readStatsCommand();
@@ -339,6 +357,14 @@ void CameraAdapter::bindInterface(CameraAdapter* adapter) {
 
 	this->setCameraStateCommand = [adapter](bool state) -> int {
 		return adapter->setCameraState_(state);
+	};
+
+	this->startStreamingCommand = [adapter]() -> int {
+		return adapter->startStreaming_();
+	};
+
+	this->stopStreamingCommand = [adapter]() -> int {
+		return adapter->stopStreaming_();
 	};
 
 	this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
@@ -365,6 +391,14 @@ int CameraAdapter::setCameraState_(int direction) {
 
 int CameraAdapter::configurePipeline_(const std::string& host) {
 	(void)host;
+	return 0;
+}
+
+int CameraAdapter::startStreaming_() {
+	return 0;
+}
+
+int CameraAdapter::stopStreaming_() {
 	return 0;
 }
 

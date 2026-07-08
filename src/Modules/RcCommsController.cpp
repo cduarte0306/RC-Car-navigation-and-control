@@ -162,7 +162,7 @@ int NetworkComms::OnReply(Msg::MessageAck<std::vector<char>>& ack) {
     }
 
     const std::vector<uint8_t> frame = Msg::CommsPipePacket::serialize(ack);
-    logger->log(Logger::LOG_LVL_INFO, "%s Processing reply for Command ID %d, Sequence ID %d, Status %s, Dest Host IP: %s:%d\r\n",
+    logger->log(Logger::LOG_LVL_DEBUG, "%s Processing reply for Command ID %d, Sequence ID %d, Status %s, Dest Host IP: %s:%d\r\n",
                 adapterName, ack.mCommandID, ack.mSeqID, ack.GetStatus() ? "Success" : "Failure", destIP.c_str(), socket->getDstPort());
 
     bool ok = Msg::CommsPipePacket::send(*socket, frame, destIP);

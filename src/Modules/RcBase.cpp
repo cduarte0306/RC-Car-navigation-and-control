@@ -363,9 +363,7 @@ namespace Modules {
     int Base::DoReply(Msg::MessageAck<std::vector<char>>& ack) {
         // In a real implementation, this would involve sending the acknowledgment back to the sender module thread. For now, we simply log the acknowledgment data.
         Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_INFO, "Submitting reply - Command ID: %d, Seq ID: %d, Status: %s, Reply data size: %zu\r\n", 
-                    ack.mCommandID, ack.mSeqID, ack.GetStatus() ? "Success" : "Failure", ack.mReplyData.size());
-     
+
         // Route the Ack to the adapter
         const std::unordered_map<
             ModuleDefs::DeviceType, Adapter::AdapterBase*
@@ -385,6 +383,8 @@ namespace Modules {
             return -1;
         }
 
+        logger->log(Logger::LOG_LVL_DEBUG, "Submitting reply - Command ID: %d, Seq ID: %d, Status: %s, Reply data size: %zu\r\n", 
+            ack.mCommandID, ack.mSeqID, ack.GetStatus() ? "Success" : "Failure", ack.mReplyData.size());
         return it->second->ConnectModuleReply(ack);
     }
 

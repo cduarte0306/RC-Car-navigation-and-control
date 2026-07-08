@@ -41,8 +41,8 @@ public:
      * @param buffer Buffer containing the data to write
      * @return size_t Number of bytes actually written
      */
-    size_t write(const std::vector<char>& buffer, size_t offset = 0) {
-        return write(reinterpret_cast<const uint8_t*>(buffer.data()), buffer.size(), offset);
+    size_t write(const std::vector<char>& buffer) {
+        return write(reinterpret_cast<const uint8_t*>(buffer.data()), buffer.size());
     }
 
     /**
@@ -72,12 +72,19 @@ public:
     }
 
     /**
+     * @brief Remove the file from the filesystem
+     * 
+     * @return int 0 on success, -1 on failure
+     */
+    int remove();
+
+    /**
      * @brief Get the Sha 256 hash of the file contents
      * 
      * @param hashOutput 
      * @return int 
      */
-    int GetSha256Hash(std::vector<uint8_t>& hashOutput);
+    int GetSha256Hash(std::vector<char>& hashOutput);
 
 private:
 
@@ -88,11 +95,11 @@ private:
      * @param length Number of bytes to write
      * @return size_t Number of bytes actually written
      */
-    size_t write(const uint8_t* data, size_t length, size_t offset = 0);
+    size_t write(const uint8_t* data, size_t length);
 
-    
+    std::string internalFilePath;
+    size_t m_Offset = 0;
     FILE* m_File = nullptr;
-
     size_t m_Size = 0;  // Size of the file in bytes
 };
 
