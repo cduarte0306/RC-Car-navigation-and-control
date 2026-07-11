@@ -292,11 +292,13 @@ void AppCLI::mainProc() {
     uint8_t buffer[128];
     bool connected = false;
         
-    // Simulate the enter key press to show the invitation prompt
-    embeddedCliReceiveChar(this->CLI, '\n');
-    embeddedCliProcess(this->CLI);
+    
 
     m_CliAdapter->onConnected = [this]() {
+        // Simulate the enter key press to show the invitation prompt
+        embeddedCliReceiveChar(this->CLI, '\n');
+        embeddedCliProcess(this->CLI);
+
         this->writeIface("\033[2J\033[H");
         this->writeIface("\r\n*************************RC Car CLI Interface*************************\r\n");
         this->writeIface("Software version: %u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
@@ -328,11 +330,6 @@ void AppCLI::mainProc() {
  * @return int Number of bytes written, or -1 on error
  */
 int AppCLI::writeIface(const char* format, ...) {
-    if (this->fd < 0) {
-        std::cerr << "TTY interface not opened" << std::endl;
-        return -1;
-    }
-
     char buffer[1024];
     va_list args;
     va_start(args, format);

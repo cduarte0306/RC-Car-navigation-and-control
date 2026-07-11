@@ -375,6 +375,51 @@ int NetworkComms::configureUDPAdapter(
         return ok ? 0 : -1;
     };
 
+    netAdapter.preferredSrcPortCb = [this, &registeredPort, &netAdapter]() -> int {
+        if (netAdapter.adapter.find("wl") == 0) {
+            Network::UdpServer* udpSocketWlan = registeredPort.wlan();
+            return udpSocketWlan ? udpSocketWlan->getSrcPort() : netAdapter.sPort;
+        }
+
+        if (netAdapter.adapter.find("en") == 0) {
+            Network::UdpServer* udpSocketEth = registeredPort.eth();
+            return udpSocketEth ? udpSocketEth->getSrcPort() : netAdapter.sPort;
+        }
+
+        if (ethLinkDetected.load()) {
+            Network::UdpServer* udpSocketEth = registeredPort.eth();
+            if (udpSocketEth) {
+                return udpSocketEth->getSrcPort();
+            }
+        }
+
+        Network::UdpServer* udpSocketWlan = registeredPort.wlan();
+        if (udpSocketWlan) {
+            return udpSocketWlan->getSrcPort();
+        }
+
+        return netAdapter.sPort;
+    };
+
+    const int socketDesc = netAdapter.socketDesc;
+    const std::string adapterName = netAdapter.adapter;
+    netAdapter.closeSocketCb = [this, adapterIdx, socketDesc, adapterName]() -> int {
+        auto registeredPortIt = m_RegisteredPorts.find(socketDesc);
+        if (registeredPortIt != m_RegisteredPorts.end() && registeredPortIt->second) {
+            registeredPortIt->second->close();
+            m_RegisteredPorts.erase(registeredPortIt);
+        }
+
+        m_OpenedSockets.erase(adapterIdx);
+
+        auto adapterMapIt = m_AdapterMap.find(adapterName);
+        if (adapterMapIt != m_AdapterMap.end()) {
+            m_AdapterMap.erase(adapterMapIt);
+        }
+
+        return 0;
+    };
+
     netAdapter.connected = true;
 
     return 0;
@@ -393,9 +438,11 @@ int NetworkComms::configureTCPAdapter(Adapter::CommsAdapter::NetworkAdapter& net
 
     try {
         tcpPort = std::make_unique<NetUtils::NetworkPort<Network::TcpServer>>(
-            io_context, netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize);
+            io_context, netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize, netAdapter.adapter == "lo");
 
-        if (netAdapter.adapter.find("wl") == 0) {
+        if (netAdapter.adapter == "lo") {
+            selectedSocket = tcpPort->hasLo() ? tcpPort->preferred() : nullptr;
+        } else if (netAdapter.adapter.find("wl") == 0) {
             selectedSocket = tcpPort->wlan();
         } else if (netAdapter.adapter.find("en") == 0) {
             selectedSocket = tcpPort->eth();
@@ -447,12 +494,50 @@ int NetworkComms::configureTCPAdapter(Adapter::CommsAdapter::NetworkAdapter& net
     netAdapter.sendCallbackTcp = [this, &registeredPort, &netAdapter](const uint8_t* data, size_t length) {
         if (!data || length == 0 || !netAdapter.connected) return -1;
 
-        Network::TcpServer* tcpSocket = registeredPort.preferred();
-        if (!tcpSocket) return -1;
-
         uint8_t* buf = const_cast<uint8_t*>(data);
-        bool ok = tcpSocket->transmit(buf, length);
-        return ok ? 0 : -1;
+
+        if (netAdapter.adapter == "lo") {
+            Network::TcpServer* tcpSocket = registeredPort.preferred();
+            if (!tcpSocket) return -1;
+            return tcpSocket->transmit(buf, length) ? 0 : -1;
+        }
+
+        // Dual-interface TCP adapters may accept on either ETH or WLAN.
+        Network::TcpServer* tcpSocketEth = registeredPort.eth();
+        if (tcpSocketEth && tcpSocketEth->transmit(buf, length)) {
+            return 0;
+        }
+
+        Network::TcpServer* tcpSocketWlan = registeredPort.wlan();
+        if (tcpSocketWlan && tcpSocketWlan->transmit(buf, length)) {
+            return 0;
+        }
+
+        return -1;
+    };
+
+    netAdapter.preferredSrcPortCb = [&registeredPort, &netAdapter]() -> int {
+        Network::TcpServer* tcpSocket = registeredPort.preferred();
+        return tcpSocket ? tcpSocket->getSrcPort() : netAdapter.sPort;
+    };
+
+    const int socketDesc = netAdapter.socketDesc;
+    const std::string adapterName = netAdapter.adapter;
+    netAdapter.closeSocketCb = [this, adapterIdx, socketDesc, adapterName]() -> int {
+        auto registeredPortIt = m_RegisteredPorts.find(socketDesc);
+        if (registeredPortIt != m_RegisteredPorts.end() && registeredPortIt->second) {
+            registeredPortIt->second->close();
+            m_RegisteredPorts.erase(registeredPortIt);
+        }
+
+        m_OpenedSockets.erase(adapterIdx);
+
+        auto adapterMapIt = m_AdapterMap.find(adapterName);
+        if (adapterMapIt != m_AdapterMap.end()) {
+            m_AdapterMap.erase(adapterMapIt);
+        }
+
+        return 0;
     };
 
     netAdapter.connected = true;
@@ -475,6 +560,48 @@ void NetworkComms::configureReceiveCallback(NetworkAdapter& adapter, std::functi
         return;
     }
 
+    auto* primaryTcpSocket = dynamic_cast<Network::TcpServer*>(it->second.socket);
+    if (primaryTcpSocket) {
+        auto registeredPortIt = m_RegisteredPorts.find(adapter.socketDesc);
+        if (registeredPortIt != m_RegisteredPorts.end() && registeredPortIt->second) {
+            auto& tcpPort = static_cast<NetUtils::NetworkPort<Network::TcpServer>&>(*registeredPortIt->second);
+
+            auto armTcpSocket = [&](Network::TcpServer* tcpSocket) {
+                if (!tcpSocket) {
+                    return;
+                }
+
+                if (adapter.onConnected) {
+                    tcpSocket->onConnectionEstablished(adapter.onConnected);
+                }
+
+                tcpSocket->startReceive(dataReceivedCommand_);
+            };
+
+            if (adapter.adapter == "lo") {
+                armTcpSocket(tcpPort.preferred());
+            } else {
+                armTcpSocket(tcpPort.eth());
+                armTcpSocket(tcpPort.wlan());
+            }
+
+            return;
+        }
+    }
+
+    // Start listening for inbound payloads using the provided handler
+    it->second.socket->startReceive(std::move(dataReceivedCommand_));
+}
+
+
+void NetworkComms::configureOnConnectCallback(NetworkAdapter& adapter, std::function<void(std::string& hostIp)> callback) {
+    auto it = m_OpenedSockets.find(adapter.id);
+    if (it == m_OpenedSockets.end() || !it->second.socket) {
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_ERROR, "No UDP socket for adapter %d\r\n", adapter.id);
+        return;
+    }
+
     if (adapter.onConnected) {
         auto* tcp = dynamic_cast<Network::TcpServer*>(it->second.socket);
         if (tcp) {
@@ -483,7 +610,7 @@ void NetworkComms::configureReceiveCallback(NetworkAdapter& adapter, std::functi
     }
 
     // Start listening for inbound payloads using the provided handler
-    it->second.socket->startReceive(std::move(dataReceivedCommand_));
+    // it->second.socket->startReceive(std::move(callback));
 }
 
 

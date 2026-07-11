@@ -55,6 +55,10 @@ public:
         return true;
     }
 
+    virtual int close() {
+        return 0;
+    }
+
     boost::signals2::signal<void(const uint8_t* data, size_t length)> onDataReceived;
 
     // Receive callback uses a mutable vector buffer to avoid raw pointer/length pairs.

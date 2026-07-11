@@ -16,6 +16,7 @@ public:
     virtual ~PortManager() = default;
 
     virtual int open(int srcPort = 0, int dstPort = 0) = 0;
+    virtual int close() = 0;
     virtual int sendEth(std::string& targetIP, const std::vector<char>& data) = 0;
     virtual int sendWlan(std::string& targetIP, const std::vector<char>& data) = 0;
     virtual int setReceiveCallback(std::function<void(std::vector<char>&)> callback) = 0;
@@ -45,6 +46,7 @@ public:
     bool hasWlan() const;
 
     virtual int open(int srcPort = 0, int dstPort = 0);
+    virtual int close() override;
     virtual int sendEth(std::string& targetIP, const std::vector<char>& data) override;
     virtual int sendWlan(std::string& targetIP, const std::vector<char>& data) override;
     virtual int setReceiveCallback(std::function<void(std::vector<char>&)> callback) override;
@@ -58,7 +60,7 @@ private:
 template<>
 class NetworkPort<Network::TcpServer> : public PortManager {
 public:
-    NetworkPort(boost::asio::io_context& ioContext, int srcPort = 0, int dstPort = 0, size_t bufferSize_=1024);
+    NetworkPort(boost::asio::io_context& ioContext, int srcPort = 0, int dstPort = 0, size_t bufferSize_=1024, bool lo=false);
     explicit NetworkPort(boost::asio::io_context& ioContext);
     ~NetworkPort();
     NetworkPort(const NetworkPort&) = delete;
@@ -69,21 +71,23 @@ public:
     Network::TcpServer* eth() const;
     Network::TcpServer* wlan() const;
     Network::TcpServer* preferred() const;
-
     bool hasEth() const;
     bool hasWlan() const;
+    bool hasLo() const;
 
     virtual int open(int srcPort = 0, int dstPort = 0);
+    virtual int close() override;
     virtual int sendEth(std::string& targetIP, const std::vector<char>& data) override;
     virtual int sendWlan(std::string& targetIP, const std::vector<char>& data) override;
     virtual int setReceiveCallback(std::function<void(std::vector<char>&)> callback) override;
     virtual std::string getHostIP() override;
 
 private:
-    std::unique_ptr<Network::TcpServer> m_Eth;
-    std::unique_ptr<Network::TcpServer> m_Wlan;
+    bool lo_{false};
+    std::unique_ptr<Network::TcpServer> m_Eth  = nullptr;
+    std::unique_ptr<Network::TcpServer> m_Wlan = nullptr;
+    std::unique_ptr<Network::TcpServer> m_Lo   = nullptr;
 };
- 
 }
 
 #pragma endregion

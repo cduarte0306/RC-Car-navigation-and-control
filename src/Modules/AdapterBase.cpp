@@ -440,6 +440,26 @@ int CommsAdapter::NetworkAdapter::send(const uint8_t* data, size_t length, std::
 	return -1;
 }
 
+int CommsAdapter::NetworkAdapter::getPreferredSrcPort() const {
+	if (preferredSrcPortCb) {
+		const int port = preferredSrcPortCb();
+		if (port > 0) {
+			return port;
+		}
+	}
+
+	return sPort;
+}
+
+int CommsAdapter::NetworkAdapter::closeSocket() {
+	if (closeSocketCb) {
+		return closeSocketCb();
+	}
+
+	connected = false;
+	return 0;
+}
+
 bool CommsAdapter::NetworkAdapter::IsEthPresent(void) const {
 	if (!EthPresent) return false;
 	return EthPresent();
@@ -539,11 +559,15 @@ void CommsAdapter::bindInterface(CommsAdapter* adapter) {
 	};
 
 	this->openTcpAdapterCommand = [adapter](const std::string& parent, int sPort, int dPort, const std::string& adpName, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
-		return adapter->openTcpAdapter_(parent, sPort, dPort, adpName, bufferSize, broadcast);
-	};
+		return adapter->openTcpAdapter_(parent, sPort, dPort, adpName, bufferSize, broadcast);};
 
 	this->dataReceivedCommand = [adapter](NetworkAdapter& netAdp, std::function<void(std::vector<char>&)> callback, bool asyncTx) -> int {
 		adapter->configureReceiveCallback(netAdp, callback, asyncTx);
+		return 0;
+	};
+
+	this->clientConnectedCommand = [adapter](NetworkAdapter& netAdp, std::function<void(std::string&)> callback) -> int {
+		adapter->configureOnConnectCallback(netAdp, callback);
 		return 0;
 	};
 
@@ -562,6 +586,11 @@ void CommsAdapter::configureReceiveCallback(NetworkAdapter& adapter, std::functi
 	(void)adapter;
 	(void)callback;
 	(void)asyncTx;
+}
+
+void CommsAdapter::configureOnConnectCallback(NetworkAdapter& adapter, std::function<void(std::string& hostIp)> callback) {
+	(void)adapter;
+	(void)callback;
 }
 
 int CommsAdapter::transmitData_(const uint8_t* data, size_t length) {

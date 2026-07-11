@@ -34,6 +34,17 @@ int NetworkPort<Network::UdpServer>::open(int srcPort, int dstPort) {
     return (ethOk && wlanOk) ? 0 : -1;
 }
 
+int NetworkPort<Network::UdpServer>::close() {
+    int ret = 0;
+    if (m_Eth) {
+        ret = m_Eth->close();
+    }
+    if (m_Wlan) {
+        ret = m_Wlan->close();
+    }
+    return ret;
+}
+
 Network::UdpServer* NetworkPort<Network::UdpServer>::eth() const {
     return m_Eth.get();
 }
@@ -95,11 +106,16 @@ std::string NetworkPort<Network::UdpServer>::getHostIP() {
     return "";
 }
 
-NetworkPort<Network::TcpServer>::NetworkPort(boost::asio::io_context& ioContext, int srcPort, int dstPort, size_t bufferSize_) : 
+NetworkPort<Network::TcpServer>::NetworkPort(boost::asio::io_context& ioContext, int srcPort, int dstPort, size_t bufferSize_, bool lo) : 
 PortManager(ioContext, srcPort, dstPort) {
     bufferSize = bufferSize_;
-     m_Eth = std::make_unique<Network::TcpServer>(ioContext, "enP8p1s0", "wlP1p1s0", srcPort, dstPort);
-     m_Wlan = std::make_unique<Network::TcpServer>(ioContext, "wlP1p1s0", "enP8p1s0", srcPort, dstPort);
+    lo_ = lo;
+    if (lo_) {
+        m_Lo = std::make_unique<Network::TcpServer>(ioContext, "lo", "enP8p1s0", srcPort, dstPort);
+        return;
+    }
+    m_Eth = std::make_unique<Network::TcpServer>(ioContext, "enP8p1s0", "wlP1p1s0", srcPort, dstPort);
+    m_Wlan = std::make_unique<Network::TcpServer>(ioContext, "wlP1p1s0", "enP8p1s0", srcPort, dstPort);
 }
 
 NetworkPort<Network::TcpServer>::NetworkPort(boost::asio::io_context& ioContext) : 
@@ -122,6 +138,20 @@ int NetworkPort<Network::TcpServer>::open(int srcPort, int dstPort) {
     return (ethOk && wlanOk) ? 0 : -1;
 }
 
+int NetworkPort<Network::TcpServer>::close() {
+    int ret = 0;
+    if (m_Eth) {
+        ret = m_Eth->close();
+    }
+    if (m_Wlan) {
+        ret = m_Wlan->close();
+    }
+    if (m_Lo) {
+        ret = m_Lo->close();
+    }
+    return ret;
+}
+
 Network::TcpServer* NetworkPort<Network::TcpServer>::eth() const {
     return m_Eth.get();
 }
@@ -129,8 +159,10 @@ Network::TcpServer* NetworkPort<Network::TcpServer>::eth() const {
 Network::TcpServer* NetworkPort<Network::TcpServer>::wlan() const {
     return m_Wlan.get();
 }
-
 Network::TcpServer* NetworkPort<Network::TcpServer>::preferred() const {
+    if (m_Lo) {
+        return m_Lo.get();
+    }
     return m_Eth ? m_Eth.get() : m_Wlan.get();
 }
 
@@ -140,6 +172,10 @@ bool NetworkPort<Network::TcpServer>::hasEth() const {
 
 bool NetworkPort<Network::TcpServer>::hasWlan() const {
     return static_cast<bool>(m_Wlan);
+}
+
+bool NetworkPort<Network::TcpServer>::hasLo() const {
+    return static_cast<bool>(m_Lo);
 }
 
 int NetworkPort<Network::TcpServer>::sendEth(std::string& targetIP, const std::vector<char>& data) {

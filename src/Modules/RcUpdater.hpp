@@ -95,6 +95,13 @@ protected:
      */
     void installFirmwareHandler(val_type_t val, const std::vector<char>& payload);
 
+    /**
+     * @brief Callback function that is called when a chunk of firmware data is written to the update file
+     * 
+     * @param data Vector containing the chunk of firmware data that was written
+     */
+    void OnFileWrite(std::vector<char>& data);
+
     static constexpr char* IMAGE_LOCATION = (char*)"/data/rc_updater/";
 
     /**
@@ -102,12 +109,6 @@ protected:
      * 
      */
     Msg::CircularBuffer<std::vector<uint8_t>> m_Buffer;
-
-    /**
-     * @brief Vector to keep track of missing chunks during the firmware update process
-     * 
-     */
-    std::vector<char> m_MissingChunksBuff{};
 
     /**
      * @brief Update file info struct to hold metadata about the incoming firmware update
@@ -120,6 +121,12 @@ protected:
      * 
      */
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_fwFileAdapter{nullptr};
+
+    /**
+     * @brief Last chunk ID received during the firmware update process
+     * 
+     */
+    uint64_t m_LastChunkID = 0;
 };
 }
 

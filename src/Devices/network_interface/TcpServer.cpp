@@ -89,28 +89,13 @@ bool TcpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_
     }
 
     acceptor_.open(listenEndpoint.protocol(), ec);
-    if (ec) {
-        logger->log(Logger::LOG_LVL_ERROR, "TCP open error: %s\r\n", ec.message().c_str());
-        return false;
-    }
-
     acceptor_.set_option(boost::asio::socket_base::reuse_address(true), ec);
-    if (ec) {
-        logger->log(Logger::LOG_LVL_ERROR, "TCP set_option error: %s\r\n", ec.message().c_str());
-        return false;
-    }
-
     acceptor_.bind(listenEndpoint, ec);
-    if (ec) {
-        logger->log(Logger::LOG_LVL_ERROR, "TCP bind error: %s\r\n", ec.message().c_str());
-        return false;
-    }
+    const auto boundEndpoint = acceptor_.local_endpoint(ec);
 
+    // If caller requested an ephemeral port (0), update cached source port with the assigned one.
+    sport_ = static_cast<int>(boundEndpoint.port());
     acceptor_.listen(boost::asio::socket_base::max_listen_connections, ec);
-    if (ec) {
-        logger->log(Logger::LOG_LVL_ERROR, "TCP listen error: %s\r\n", ec.message().c_str());
-        return false;
-    }
 
     logger->log(Logger::LOG_LVL_INFO, "Opened TCP socket: %s:%d\r\n", ipAddress.c_str(), sport_);
     return true;
@@ -118,6 +103,7 @@ bool TcpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_
 
 
 TcpServer::~TcpServer() {
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Closing TCP server at %s:%d\r\n", acceptor_.local_endpoint().address().to_string().c_str(), acceptor_.local_endpoint().port());
     threadCanRun = false;
     if (clientSocket_.is_open()) {
         boost::system::error_code ec;
@@ -127,35 +113,20 @@ TcpServer::~TcpServer() {
 }
 
 
-int TcpServer::acceptConnection() {
+int TcpServer::close() {
+    boost::system::error_code ec;
     if (clientSocket_.is_open()) {
-        boost::system::error_code ec;
         clientSocket_.close(ec);
     }
-
-    boost::system::error_code ec;
-    acceptor_.accept(clientSocket_, ec);
-    if (ec) {
-        Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_ERROR, "TCP accept error: %s\r\n", ec.message().c_str());
-        return -1;
+    if (acceptor_.is_open()) {
+        acceptor_.close(ec);
     }
+    return 0;
+}
 
-    const auto clientEndpoint = clientSocket_.remote_endpoint(ec);
-    if (ec) {
-        Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_ERROR, "TCP endpoint error: %s\r\n", ec.message().c_str());
-        return -1;
-    }
 
-    m_HostIP = clientEndpoint.address().to_string();
-    Logger* logger = Logger::getLoggerInst();
-    logger->log(Logger::LOG_LVL_INFO, "Client connected: %s:%d\r\n", m_HostIP.c_str(), clientEndpoint.port());
-
-    if (connectionEstablishedCallback_) {
-        connectionEstablishedCallback_();
-    }
-
+int TcpServer::acceptConnection() {
+    beginAccept();
     return 0;
 }
 
@@ -170,7 +141,8 @@ bool TcpServer::transmit(const uint8_t* pBuf, size_t length) {
         return false;
     }
 
-    if (!clientSocket_.is_open() && acceptConnection() != 0) {
+    if (!clientSocket_.is_open()) {
+        beginAccept();
         return false;
     }
 
@@ -192,7 +164,8 @@ bool TcpServer::receive(uint8_t* pBuf, size_t length) {
         return false;
     }
 
-    if (!clientSocket_.is_open() && acceptConnection() != 0) {
+    if (!clientSocket_.is_open()) {
+        beginAccept();
         return false;
     }
 
@@ -210,14 +183,52 @@ bool TcpServer::receive(uint8_t* pBuf, size_t length) {
 
 
 void TcpServer::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback) {
-    dataReceivedCallback = std::move(dataReceivedCallback);
-    if (!clientSocket_.is_open() && acceptConnection() != 0) {
+    this->dataReceivedCallback = std::move(dataReceivedCallback);
+    beginAccept();
+}
+
+void TcpServer::beginAccept() {
+    if (!acceptor_.is_open() || acceptInProgress_.exchange(true)) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "TCP acceptor not open or accept already in progress\r\n");
         return;
     }
 
-    this->startReceive_();
-}
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "TCP acceptor starting async accept @ %s:%d\r\n",
+        acceptor_.local_endpoint().address().to_string().c_str(), acceptor_.local_endpoint().port());
 
+    acceptor_.async_accept([this](const boost::system::error_code& error, boost::asio::ip::tcp::socket socket) {
+        acceptInProgress_.store(false);
+
+        if (error) {
+            Logger* logger = Logger::getLoggerInst();
+            logger->log(Logger::LOG_LVL_ERROR, "TCP accept error: %s\r\n", error.message().c_str());
+            return;
+        }
+
+        boost::system::error_code closeEc;
+        if (clientSocket_.is_open()) {
+            clientSocket_.close(closeEc);
+        }
+
+        clientSocket_ = std::move(socket);
+
+        boost::system::error_code endpointEc;
+        const auto clientEndpoint = clientSocket_.remote_endpoint(endpointEc);
+        if (!endpointEc) {
+            m_HostIP = clientEndpoint.address().to_string();
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Client connected: %s:%d\r\n", m_HostIP.c_str(), clientEndpoint.port());
+        }
+
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "TCP connection established with client %s:%d\r\n",
+            m_HostIP.c_str(), clientEndpoint.port());
+
+        if (connectionEstablishedCallback_) {
+            connectionEstablishedCallback_();
+        }
+
+        startReceive_();
+    });
+}
 
 void TcpServer::startReceive_(void) {
     if (!clientSocket_.is_open()) {
@@ -242,9 +253,7 @@ void TcpServer::startReceive_(void) {
             Logger* logger = Logger::getLoggerInst();
             logger->log(Logger::LOG_LVL_ERROR, "TCP receive loop ended: %s\r\n", ec.message().c_str());
             clientSocket_.close();
-            if (acceptConnection() == 0) {
-                this->startReceive_();
-            }
+            beginAccept();
         });
 }
 

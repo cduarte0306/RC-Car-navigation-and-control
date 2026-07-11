@@ -1,4 +1,6 @@
 #pragma once
+#ifndef ADAPTERBASE_HPP
+#define ADAPTERBASE_HPP
 
 #include <map>
 #include <string>
@@ -334,17 +336,20 @@ namespace Adapter {
         public:
             NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048);
             ~NetworkAdapter();
-            std::function<int(const uint8_t*, size_t)> sendCallbacEth = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallbacEth   = nullptr;
             std::function<int(const uint8_t*, size_t)> sendCallbackWlan = nullptr;
-            std::function<int(const uint8_t*, size_t)> sendCallback = nullptr;
-            std::function<int(const uint8_t*, size_t)> sendCallbackTcp = nullptr;
-            std::function<bool(void)>                  EthPresent = nullptr;
-            std::function<bool(void)>                  hostPresentCB = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallback     = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallbackTcp  = nullptr;
+            std::function<int(void)>                   preferredSrcPortCb = nullptr;
+            std::function<int(void)>                   closeSocketCb     = nullptr;
+            std::function<bool(void)>                  EthPresent       = nullptr;
+            std::function<bool(void)>                  hostPresentCB    = nullptr;
             std::function<void()> onConnected = nullptr;
 
             int id = -1;
             int typeID = -1;
             int sPort = -1;
+            int sPortEth = -1;
             int dPort = -1;
             const size_t bufferSize = 0;
             bool connected = false;
@@ -358,6 +363,10 @@ namespace Adapter {
             int socketDesc{-1};
 
             int send(const uint8_t* data, size_t length, std::string destIp="");
+
+            int getPreferredSrcPort() const;
+
+            int closeSocket();
 
             bool IsEthPresent(void) const;
 
@@ -429,6 +438,8 @@ namespace Adapter {
         std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, const std::string&, size_t, bool)> openTcpAdapterCommand = nullptr;
 
         std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)> dataReceivedCommand = nullptr;
+        std::function<int(NetworkAdapter& adapter, std::function<void(std::string&)>)> clientConnectedCommand = nullptr;
+        
         std::function<std::string(NetworkAdapter& adapter)> hostIPQueryCommand = nullptr;
         std::atomic<bool> ethConnectionState{false};
         int adapterCounter = -1;
@@ -461,6 +472,14 @@ namespace Adapter {
         virtual void startReceive_(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true);
 
         virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> callback, bool asyncTx=true);
+
+        /**
+         * @brief Configure the tcp on connect callback
+         * 
+         * @param adapter 
+         * @param callback 
+         */
+        virtual void configureOnConnectCallback(NetworkAdapter& adapter, std::function<void(std::string& hostIp)> callback);
 
         /**
          * @brief Transmit data on behalf of caller
@@ -552,3 +571,5 @@ namespace Adapter {
 }
 
 #pragma endregion
+
+#endif // ADAPTERBASE_HPP

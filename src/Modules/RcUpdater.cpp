@@ -55,8 +55,6 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
         return;
     }
 
-    m_MissingChunksBuff.clear();
-
     // If open, close before starting a new update
     if (updateFile.isOpen()) {
         // Do file cleanup
@@ -85,6 +83,12 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
         return;
     }
 
+    if (m_fwFileAdapter != nullptr) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Closing existing network adapter for firmware file transfers\r\n");
+        m_fwFileAdapter->closeSocket();
+        m_fwFileAdapter.reset();
+    }
+
     // Open network adapter for firmware file transfers
     if (!m_fwFileAdapter) {
         m_fwFileAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::TcpAdapterType, 0, 0, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
@@ -93,47 +97,25 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
             Base::DoAck(false, {});
             return;
         }
+        m_fwFileAdapter->onConnected = [this]() {
+            // Simulate the enter key press to show the invitation prompt
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Firmware file transfer network adapter connected\r\n");
+        };
         m_fwFileAdapter->setParent(this->getName());
+        this->CommsAdapter->startReceive(
+            *m_fwFileAdapter,
+            std::bind(&Updater::OnFileWrite, this, std::placeholders::_1),
+            false);
     }
 
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Initializing update file with name: %s\r\n", fileName.c_str());
-    Base::DoAck(true, m_fwFileAdapter->sPort);
+    Base::DoAck(true, m_fwFileAdapter->getPreferredSrcPort());
 }
 
 
 void Updater::uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload) {
     (void) val;
-    typedef struct {
-        uint64_t chunkID;
-        uint64_t fileSize;
-        uint64_t chunkSize;
-    } updateInfo;
-
-    static uint64_t lastChunkID = 0;
-    updateInfo* info = reinterpret_cast<updateInfo*>(const_cast<char*>(payload.data()));
-    if (info->chunkID != lastChunkID + 1) {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Received out-of-order file chunk: %llu\r\n", info->chunkID);
-        std::vector<uint64_t> missingIds;
-        for (uint64_t i = lastChunkID + 1; i < info->chunkID; ++i) {
-            missingIds.push_back(i);
-        }
-        for (auto id : missingIds) {
-            char buff[8] = {0};
-            std::memcpy(buff, &id, sizeof(uint64_t));
-            for (int i = 0; i < 8; ++i) {
-                m_MissingChunksBuff.push_back(buff[i]);
-            }
-        }
-    }
-    lastChunkID = info->chunkID;
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Received file chunk of size: %d\r\n", payload.size());
-    std::vector<uint8_t> firmwareData(payload.begin(), payload.end());
-    auto bytesWritten = updateFile.write(payload);
-    if (payload.size() && (bytesWritten != payload.size())) {
-        Base::DoAck(false, {});
-    }
-
-    Base::DoAck(true, m_MissingChunksBuff);
+    Base::DoAck(true, {});
     return;
 }
 
@@ -157,6 +139,22 @@ void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& pa
     (void) val;
     (void) payload;
     return;
+}
+
+
+void Updater::OnFileWrite(std::vector<char>& data) {
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Firmware data chunk written of size: %zu\r\n", data.size());
+    typedef struct {
+        uint64_t chunkID;
+        uint64_t fileSize;
+        uint64_t chunkSize;
+    } updateInfo;
+
+    updateInfo* info = reinterpret_cast<updateInfo*>(const_cast<char*>(data.data()));
+    m_LastChunkID = info->chunkID;
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Received file chunk of size: %d\r\n", data.size());
+    std::vector<uint8_t> firmwareData(data.begin(), data.end());
+    (void) updateFile.write(data);
 }
 
 

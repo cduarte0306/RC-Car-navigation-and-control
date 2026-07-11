@@ -49,6 +49,9 @@ public:
     // Override startReceive_ to route incoming data via UDP
     virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true) override;
 
+    // Override configure on connect for TCP
+    virtual void configureOnConnectCallback(NetworkAdapter& adapter, std::function<void(std::string& hostIp)> callback);
+
     // Override transmitData_ to route data via UDP
     virtual int transmitData_(const uint8_t* data, size_t length) override;
 
