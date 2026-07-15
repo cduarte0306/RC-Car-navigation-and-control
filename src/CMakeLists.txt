@@ -49,6 +49,9 @@ set(SOURCE
     Devices/network_interface/UdpServer.hpp
     Devices/network_interface/TcpServer.hpp
     Devices/network_interface/TcpServer.cpp
+    Devices/network_interface/TcpServer.hpp
+    Devices/network_interface/TcpClient.hpp
+    Devices/network_interface/TcpClient.cpp
     Devices/GyroScope.cpp
     Devices/GyroScope.hpp
     Devices/StereoCam.cpp

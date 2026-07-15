@@ -22,6 +22,7 @@
 #define WLANAdapter "wlP1p1s0"
 
 using boost::asio::ip::udp;
+using boost::asio::ip::tcp;
 
 namespace Network {
 
@@ -197,6 +198,8 @@ protected:
     int m_Port = -1;
     udp::socket socket_;
     udp::endpoint remoteEndpoint;
+
+    tcp::endpoint tcpEndpoint_;
     // std::array<char, 32768> m_RecvBuffer;
     std::vector<char> m_RecvBuffer;
 

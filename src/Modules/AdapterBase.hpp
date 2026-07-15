@@ -328,13 +328,14 @@ namespace Adapter {
         };
 
         enum {
-            UdpAdapterType = 1,
-            TcpAdapterType = 2
+            UdpAdapterType       = 1,
+            TcpServerAdapterType = 2,
+            TcpClientAdapterType = 3
         };
 
         class NetworkAdapter {
         public:
-            NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048);
+        NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048);
             ~NetworkAdapter();
             std::function<int(const uint8_t*, size_t)> sendCallbacEth   = nullptr;
             std::function<int(const uint8_t*, size_t)> sendCallbackWlan = nullptr;
@@ -359,6 +360,7 @@ namespace Adapter {
             std::atomic<bool> ethLinkDetected;
             bool broadcast = false;
             int adapterType = -1;
+            int type = -1;
 
             int socketDesc{-1};
 
@@ -415,7 +417,32 @@ namespace Adapter {
          */
         virtual int openAdapter(int port, std::string& adapter);
 
-        virtual std::unique_ptr<NetworkAdapter> createNetworkAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, std::string adapter, size_t bufferSize=2048, bool broadcast=false);
+        /**
+         * @brief Create a remote network adapter
+         * 
+         * @param callerName Name of the caller module
+         * @param type Adapter type (UDP/TCP)
+         * @param sPort Source port
+         * @param dPort Destination port
+         * @param adapter Adapter identifier or name
+         * @param bufferSize Size of the buffer
+         * @param broadcast Whether to enable broadcast
+         * @return std::unique_ptr<NetworkAdapter> 
+         */
+        virtual std::unique_ptr<NetworkAdapter> createRemoteAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, std::string adapter, size_t bufferSize=2048, bool broadcast=false);
+
+        /**
+         * @brief Create a loopback network adapter
+         * 
+         * @param callerName Name of the caller module
+         * @param sPort Source port
+         * @param dPort Destination port
+         * @param adapter Adapter identifier or name
+         * @param bufferSize Size of the buffer
+         * @param broadcast Whether to enable broadcast
+         * @return std::unique_ptr<NetworkAdapter> 
+         */
+        virtual std::unique_ptr<NetworkAdapter> createLoopbackAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, size_t bufferSize=2048, bool broadcast=false);
 
         /**
          * @brief Read stats from module
@@ -433,9 +460,10 @@ namespace Adapter {
         virtual bool GetEthConnectionState() const;
     protected:
         // callable to request data transmit; now includes caller identity
-        std::function<int(const uint8_t*, size_t)                                                       > transmitDataCommand   = nullptr;
-        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, const std::string&, size_t, bool)> openAdapterCommand    = nullptr;
-        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, const std::string&, size_t, bool)> openTcpAdapterCommand = nullptr;
+        std::function<int(const uint8_t*, size_t)                                                > transmitDataCommand   = nullptr;
+        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, size_t, bool)> openAdapterCommand         = nullptr;
+        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, size_t, bool)> openLoopbackAdapterCommand = nullptr;
+        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, int, size_t, bool)> openTcpAdapterCommand      = nullptr;
 
         std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)> dataReceivedCommand = nullptr;
         std::function<int(NetworkAdapter& adapter, std::function<void(std::string&)>)> clientConnectedCommand = nullptr;
@@ -444,7 +472,7 @@ namespace Adapter {
         std::atomic<bool> ethConnectionState{false};
         int adapterCounter = -1;
 
-        std::list<std::pair<std::string, std::string>> m_RegisteredCallers;  // List of modules that have opened an adapter here
+        std::list<std::string> m_RegisteredCallers;  // List of modules that have opened an adapter here
         // Fast lookup from caller module name -> adapter pointer (populated on open)
         std::unordered_map<std::string, CommsAdapter*> m_CallerAdapterMap;
 
@@ -500,11 +528,10 @@ namespace Adapter {
          * @param adapter Adapter identifier or name
          * @return int Status code of the operation
          */
-        virtual std::unique_ptr<NetworkAdapter> openAdapter_(const std::string& parent,  int sPort, int dPort, const std::string& adapter, size_t bufferSize, bool broadcast) final;
-
+        virtual std::unique_ptr<NetworkAdapter> openAdapter_(const std::string& parent,  int sPort, int dPort, size_t bufferSize, bool broadcast) final;
 
         /**
-         * @brief Open a TCP adapter for a given parent module
+         * @brief Open a loopback adapter for a given parent module
          * 
          * @param parent Identifier of the parent module requesting the adapter
          * @param sPort Source port number for the adapter
@@ -512,7 +539,21 @@ namespace Adapter {
          * @param adapter Adapter identifier or name
          * @return int Status code of the operation
          */
-        virtual std::unique_ptr<NetworkAdapter> openTcpAdapter_(const std::string& parent,  int sPort, int dPort, const std::string& adapter, size_t bufferSize, bool broadcast);
+        virtual std::unique_ptr<NetworkAdapter> openLoopbackAdapter_(const std::string& parent,  int sPort, int dPort, size_t bufferSize, bool broadcast);
+
+        /**
+         * @brief Open a TCP adapter for a given parent module
+         * 
+         * @param parent Identifier of the parent module requesting the adapter
+         * @param type Type of the TCP adapter (e.g., server or client)
+         * @param sPort Source port number for the adapter
+         * @param dPort Destination port number for the adapter
+         * @param adapter Adapter identifier or name
+         * @param bufferSize Size of the buffer for the adapter
+         * @param broadcast Flag indicating whether broadcasting is enabled
+         * @return int Status code of the operation
+         */
+        virtual std::unique_ptr<NetworkAdapter> openTcpAdapter_(const std::string& parent, int type, int sPort, int dPort, size_t bufferSize, bool broadcast);
 
         
         /**
@@ -531,7 +572,25 @@ namespace Adapter {
          * @param adapter Adapter identifier or name
          * @return int Status code of the operation
          */
-        virtual int configureTCPAdapter(NetworkAdapter& netAdapter, int adapterIdx);
+        virtual int configureTcpServer(NetworkAdapter& netAdapter, int adapterIdx);
+
+        /**
+         * @brief Configure a TCP client adapter for a given port
+         * 
+         * @param port Port number for the adapter
+         * @param adapter Adapter identifier or name
+         * @return int Status code of the operation
+         */
+        virtual int configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx);
+
+        /**
+         * @brief Configure a loopback adapter for a given port
+         * 
+         * @param port Port number for the adapter
+         * @param adapter Adapter identifier or name
+         * @return int Status code of the operation
+         */
+        virtual int configureLoopbackAdapter(NetworkAdapter& netAdapter, int adapterIdx);
     };
 
     class CommandAdapter : public AdapterBase {

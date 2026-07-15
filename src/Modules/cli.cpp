@@ -272,7 +272,12 @@ AppCLI::~AppCLI() {
 }
 
 int AppCLI::init(void) {
-    m_CliAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::TcpAdapterType, CLI_PORT, 0, "lo", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_CliAdapter = this->CommsAdapter->createLoopbackAdapter(
+        getName(),
+        Adapter::CommsAdapter::TcpServerAdapterType,
+        CLI_PORT,
+        0,
+        Adapter::CommsAdapter::MaxUDPPacketSize);
     m_CliAdapter->setParent(this->getName());
 
     return 0;

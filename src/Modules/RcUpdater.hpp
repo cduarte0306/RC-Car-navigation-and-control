@@ -123,6 +123,12 @@ protected:
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_fwFileAdapter{nullptr};
 
     /**
+     * @brief Network adapter for handling internal updater server
+     * 
+     */
+    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_updaterServerAdapter{nullptr};
+
+    /**
      * @brief Last chunk ID received during the firmware update process
      * 
      */

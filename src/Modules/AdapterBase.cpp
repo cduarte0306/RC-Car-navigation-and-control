@@ -519,13 +519,29 @@ int CommsAdapter::openAdapter(int port, std::string& adapter) {
 	return 0;
 }
 
-std::unique_ptr<CommsAdapter::NetworkAdapter> CommsAdapter::createNetworkAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, std::string adapter, size_t bufferSize, bool broadcast) {
-	if (type == UdpAdapterType) {
-		return openAdapterCommand(callerName, sPort, dPort, adapter, bufferSize, broadcast);
-	} else if (type == TcpAdapterType) {
-		return openTcpAdapterCommand(callerName, sPort, dPort, adapter, bufferSize, broadcast);
+std::unique_ptr<CommsAdapter::NetworkAdapter> CommsAdapter::createRemoteAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, std::string adapter, size_t bufferSize, bool broadcast) {
+	(void)adapter;
+	switch (type) {
+		case UdpAdapterType:
+			return openAdapterCommand(callerName, sPort, dPort, bufferSize, broadcast);
+		case TcpServerAdapterType:
+			return openTcpAdapterCommand(callerName, type, sPort, dPort, bufferSize, broadcast);
+		case TcpClientAdapterType:
+			return nullptr;
+		default:
+			return nullptr;
 	}
-	return nullptr;
+}
+
+std::unique_ptr<CommsAdapter::NetworkAdapter> CommsAdapter::createLoopbackAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, size_t bufferSize, bool broadcast) {
+	switch (type) {
+		case UdpAdapterType:
+			return nullptr;  // TODO: Implement UDP loopback adapter creation
+		case TcpServerAdapterType:
+			return openLoopbackAdapterCommand(callerName, sPort, dPort, bufferSize, broadcast);
+		default:
+			return nullptr;
+	}
 }
 
 std::string CommsAdapter::readStats() {
@@ -554,12 +570,16 @@ void CommsAdapter::bindInterface(CommsAdapter* adapter) {
 		return adapter->transmitData_(pData, length);
 	};
 
-	this->openAdapterCommand = [adapter](const std::string& parent, int sPort, int dPort, const std::string& adpName, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
-		return adapter->openAdapter_(parent, sPort, dPort, adpName, bufferSize, broadcast);
+	this->openAdapterCommand = [adapter](const std::string& parent, int sPort, int dPort, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
+		return adapter->openAdapter_(parent, sPort, dPort, bufferSize, broadcast);
 	};
 
-	this->openTcpAdapterCommand = [adapter](const std::string& parent, int sPort, int dPort, const std::string& adpName, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
-		return adapter->openTcpAdapter_(parent, sPort, dPort, adpName, bufferSize, broadcast);};
+	this->openLoopbackAdapterCommand = [adapter](const std::string& parent, int sPort, int dPort, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
+		return adapter->openLoopbackAdapter_(parent, sPort, dPort, bufferSize, broadcast);
+	};
+
+	this->openTcpAdapterCommand = [adapter](const std::string& parent, int type,  int sPort, int dPort, size_t bufferSize, bool broadcast) -> std::unique_ptr<NetworkAdapter> {
+		return adapter->openTcpAdapter_(parent, type, sPort, dPort, bufferSize, broadcast);};
 
 	this->dataReceivedCommand = [adapter](NetworkAdapter& netAdp, std::function<void(std::vector<char>&)> callback, bool asyncTx) -> int {
 		adapter->configureReceiveCallback(netAdp, callback, asyncTx);
@@ -601,9 +621,9 @@ int CommsAdapter::transmitData_(const uint8_t* data, size_t length) {
 	return 0;
 }
 
-std::unique_ptr<CommsAdapter::NetworkAdapter> CommsAdapter::openAdapter_(const std::string& parent, int sPort, int dPort, const std::string& adapter, size_t bufferSize, bool broadcast) {
-	std::pair<std::string, std::string> adapterDesc(parent, adapter);
-	m_RegisteredCallers.push_back(adapterDesc);
+std::unique_ptr<CommsAdapter::NetworkAdapter> CommsAdapter::openAdapter_(const std::string& parent, int sPort, int dPort, size_t bufferSize, bool broadcast) {
+	std::string adapterDesc(parent);
+	m_RegisteredCallers.push_back(parent);
 
 	auto it = adapterMap.find(parent);
 	if (it != adapterMap.end() && it->second) {
@@ -611,7 +631,7 @@ std::unique_ptr<CommsAdapter::NetworkAdapter> CommsAdapter::openAdapter_(const s
 		m_CallerAdapterMap[parent] = boundAdapter;
 	}
 
-	std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapter, sPort, dPort, bufferSize);
+	std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapterDesc, sPort, dPort, bufferSize);
 	adapterCounter++;
 	netAdapter->id = adapterCounter;
 	netAdapter->setParent(parent);
@@ -619,16 +639,16 @@ std::unique_ptr<CommsAdapter::NetworkAdapter> CommsAdapter::openAdapter_(const s
 
 	const int cfgStatus = configureUDPAdapter(*netAdapter, netAdapter->id);
 	if (cfgStatus != 0) {
-		std::string msg("Failed to configure adapter " + adapter + " for parent " + parent + "\n");
+		std::string msg("Failed to configure adapter " + adapterDesc + " for parent " + parent + "\n");
 		(void)msg;
 	}
 
 	return netAdapter;
 }
 
-std::unique_ptr<CommsAdapter::NetworkAdapter> CommsAdapter::openTcpAdapter_(const std::string& parent, int sPort, int dPort, const std::string& adapter, size_t bufferSize, bool broadcast) {
-	std::pair<std::string, std::string> adapterDesc(parent, adapter);
-	m_RegisteredCallers.push_back(adapterDesc);
+std::unique_ptr<CommsAdapter::NetworkAdapter> CommsAdapter::openLoopbackAdapter_(const std::string& parent, int sPort, int dPort, size_t bufferSize, bool broadcast) {
+	std::string adapterDesc("lo");
+	m_RegisteredCallers.push_back(parent);
 
 	auto it = adapterMap.find(parent);
 	if (it != adapterMap.end() && it->second) {
@@ -636,17 +656,56 @@ std::unique_ptr<CommsAdapter::NetworkAdapter> CommsAdapter::openTcpAdapter_(cons
 		m_CallerAdapterMap[parent] = boundAdapter;
 	}
 
-	std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapter, sPort, dPort, bufferSize);
+	std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapterDesc, sPort, dPort, bufferSize);
 	adapterCounter++;
 	netAdapter->id = adapterCounter;
 	netAdapter->setParent(parent);
 	netAdapter->broadcast = broadcast;
 
-	const int cfgStatus = configureTCPAdapter(*netAdapter, netAdapter->id);
+	const int cfgStatus = configureLoopbackAdapter(*netAdapter, netAdapter->id);
 	if (cfgStatus != 0) {
-		std::string msg("Failed to configure adapter " + adapter + " for parent " + parent + "\n");
+		std::string msg("Failed to configure adapter " + adapterDesc + " for parent " + parent + "\n");
 		(void)msg;
 	}
+
+	return netAdapter;
+}
+
+std::unique_ptr<CommsAdapter::NetworkAdapter> CommsAdapter::openTcpAdapter_(const std::string& parent, int type, int sPort, int dPort, size_t bufferSize, bool broadcast) {
+	std::string adapterDesc(parent); 
+	m_RegisteredCallers.push_back(parent);
+
+	auto it = adapterMap.find(parent);
+	if (it != adapterMap.end() && it->second) {
+		CommsAdapter* boundAdapter = reinterpret_cast<CommsAdapter*>(it->second);
+		m_CallerAdapterMap[parent] = boundAdapter;
+	}
+
+	std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapterDesc, sPort, dPort, bufferSize);
+	adapterCounter++;
+	netAdapter->id = adapterCounter;
+	netAdapter->setParent(parent);
+	netAdapter->broadcast = broadcast;
+	netAdapter->type = type;
+
+	int cfgStatus = 0;
+	switch(type) {
+		case TcpServerAdapterType:
+			cfgStatus = configureTcpServer(*netAdapter, netAdapter->id);
+			if (cfgStatus != 0) {
+				std::string msg("Failed to configure adapter " + adapterDesc + " for parent " + parent + "\n");
+				(void)msg;
+			}
+			// TCP server configuration
+			break;
+		case TcpClientAdapterType:
+			
+			break;
+		default:
+			// Unknown type
+			break;
+	}
+	
 
 	return netAdapter;
 }
@@ -657,7 +716,19 @@ int CommsAdapter::configureUDPAdapter(NetworkAdapter& netAdapter, int adapterIdx
 	return 0;
 }
 
-int CommsAdapter::configureTCPAdapter(NetworkAdapter& netAdapter, int adapterIdx) {
+int CommsAdapter::configureTcpServer(NetworkAdapter& netAdapter, int adapterIdx) {
+	(void)netAdapter;
+	(void)adapterIdx;
+	return 0;
+}
+
+int CommsAdapter::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx) {
+	(void)netAdapter;
+	(void)adapterIdx;
+	return 0;
+}
+
+int CommsAdapter::configureLoopbackAdapter(NetworkAdapter& netAdapter, int adapterIdx) {
 	(void)netAdapter;
 	(void)adapterIdx;
 	return 0;

@@ -44,7 +44,13 @@ public:
     virtual int configureUDPAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
 
     // Opens TCP network adapters
-    virtual int configureTCPAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
+    virtual int configureTcpServer(NetworkAdapter& netAdapter, int adapterIdx) override;
+    
+    // Opens TCP client network adapters
+    virtual int configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx) override;
+
+    // Opens loopback network adapters
+    virtual int configureLoopbackAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
 
     // Override startReceive_ to route incoming data via UDP
     virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true) override;
