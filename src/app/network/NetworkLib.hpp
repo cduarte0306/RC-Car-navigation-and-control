@@ -32,7 +32,7 @@ protected:
 template<>
 class NetworkPort<Network::UdpServer> : public PortManager {
 public:
-    NetworkPort(boost::asio::io_context& ioContext, int srcPort = 0, int dstPort = 0, size_t bufferSize_=1024);
+    NetworkPort(boost::asio::io_context& ioContext, int srcPort = 0, int dstPort = 0, size_t bufferSize_=1024, bool lo=false);
     explicit NetworkPort(boost::asio::io_context& ioContext);
     ~NetworkPort();
     NetworkPort(const NetworkPort&) = delete;
@@ -55,8 +55,9 @@ public:
     virtual std::string getHostIP() override;
 
 private:
-    std::unique_ptr<Network::UdpServer> m_Eth;
-    std::unique_ptr<Network::UdpServer> m_Wlan;
+    std::unique_ptr<Network::UdpServer> m_Eth  = nullptr;
+    std::unique_ptr<Network::UdpServer> m_Wlan = nullptr;
+    std::unique_ptr<Network::UdpServer> m_Lo   = nullptr;
 };
 
 template<>

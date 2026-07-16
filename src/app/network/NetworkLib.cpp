@@ -6,8 +6,12 @@ namespace NetUtils {
 const std::string EthAdpt("enP8p1s0");
 const std::string WlanAdpt("wlP1p1s0");
 
-NetworkPort<Network::UdpServer>::NetworkPort(boost::asio::io_context& ioContext, int srcPort, int dstPort, size_t bufferSize_) : 
+NetworkPort<Network::UdpServer>::NetworkPort(boost::asio::io_context& ioContext, int srcPort, int dstPort, size_t bufferSize_, bool lo) : 
 PortManager(ioContext, srcPort, dstPort, bufferSize_) {
+    if (lo) {
+        m_Lo = std::make_unique<Network::UdpServer>(ioContext, "lo", srcPort, dstPort);
+        return;
+    }
     m_Eth = std::make_unique<Network::UdpServer>(ioContext, "enP8p1s0", srcPort,  dstPort);
     m_Wlan = std::make_unique<Network::UdpServer>(ioContext, "wlP1p1s0", srcPort, dstPort);
 }

@@ -40,17 +40,8 @@ public:
     // Main Process
     virtual void mainProc();
 
-    // Opens network adapters
-    virtual int configureUDPAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
-
-    // Opens TCP network adapters
-    virtual int configureTcpServer(NetworkAdapter& netAdapter, int adapterIdx) override;
-    
-    // Opens TCP client network adapters
-    virtual int configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx) override;
-
-    // Opens loopback network adapters
-    virtual int configureLoopbackAdapter(NetworkAdapter& netAdapter, int adapterIdx) override;
+    // Opens network adapter (remote or local)
+    virtual int configureAdapter(NetworkAdapter& netAdapter, int adapterIdx, int type, bool internal=false);
 
     // Override startReceive_ to route incoming data via UDP
     virtual void configureReceiveCallback(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> dataReceivedCommand_, bool asyncTx=true) override;
@@ -100,6 +91,15 @@ protected:
      * @return int Status code indicating success or failure of message processing
      */
     virtual int OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& capsule) override;
+
+    // Opens network adapters
+    int configureUDPAdapter(NetworkAdapter& netAdapter, int adapterIdx, bool internal=true);
+
+    // Opens TCP network adapters
+    int configureTcpServer(NetworkAdapter& netAdapter, int adapterIdx, bool internal=true);
+    
+    // Opens TCP client network adapters
+    int configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx, bool internal=true);
 
     /**
      * @brief Handler for processing replies from the module. This function is called by the reply processing thread 

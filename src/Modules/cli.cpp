@@ -259,7 +259,7 @@ AppCLI::AppCLI(ModuleDefs::DeviceType moduleID, std::string name) : Base(moduleI
         int ret = _cli->m_CliAdapter->send(reinterpret_cast<const uint8_t*>(data.data()), data.size());
         Logger* logger = Logger::getLoggerInst();
         if (ret < 0) {
-            logger->log(Logger::LOG_LVL_ERROR, "%s, %s, Error writing to TTY\r\n", __func__, __LINE__);
+            logger->log(Logger::LOG_LVL_ERROR, "%s, %d, Error writing to TTY\r\n", __func__, __LINE__);
         }
     };
 
@@ -272,7 +272,7 @@ AppCLI::~AppCLI() {
 }
 
 int AppCLI::init(void) {
-    m_CliAdapter = this->CommsAdapter->createLoopbackAdapter(
+    m_CliAdapter = this->CommsAdapter->OpenNetworkLoopbackAdapter(
         getName(),
         Adapter::CommsAdapter::TcpServerAdapterType,
         CLI_PORT,
@@ -296,9 +296,6 @@ int AppCLI::stop(void) {
 void AppCLI::mainProc() {
     uint8_t buffer[128];
     bool connected = false;
-        
-    
-
     m_CliAdapter->onConnected = [this]() {
         // Simulate the enter key press to show the invitation prompt
         embeddedCliReceiveChar(this->CLI, '\n');

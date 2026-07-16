@@ -43,7 +43,7 @@ int Updater::init(void) {
     Base::DefinePayloadLoc(sizeof(UpdaterReqHeader));
 
     // Initialize the network adapter for the internal updater server if needed
-    m_updaterServerAdapter = this->CommsAdapter->createLoopbackAdapter(getName(), Adapter::CommsAdapter::TcpServerAdapterType, 0, 0, Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_updaterServerAdapter = this->CommsAdapter->OpenNetworkLoopbackAdapter(getName(), Adapter::CommsAdapter::TcpServerAdapterType, 0, 0, Adapter::CommsAdapter::MaxUDPPacketSize);
     if (!m_updaterServerAdapter) {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for internal updater server\r\n");
         return -1;
@@ -99,7 +99,7 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
 
     // Open network adapter for firmware file transfers
     if (!m_fwFileAdapter) {
-        m_fwFileAdapter = this->CommsAdapter->createRemoteAdapter(getName(), Adapter::CommsAdapter::TcpServerAdapterType, 0, 0, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+        m_fwFileAdapter = this->CommsAdapter->OpenNetworkAdapter(getName(), Adapter::CommsAdapter::TcpServerAdapterType, 0, 0, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
         if (!m_fwFileAdapter) {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for firmware file transfers\r\n");
             Base::DoAck(false, {});

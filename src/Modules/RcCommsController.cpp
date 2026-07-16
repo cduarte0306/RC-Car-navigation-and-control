@@ -242,6 +242,28 @@ void NetworkComms::OnEthHandShakeRecv(std::vector<char>& data) {
     bool ok = m_EthSocket->transmit(reinterpret_cast<const uint8_t*>(data.data()), data.size(), destIP);
 }
 
+/**
+ * @brief Configure network adapter based on type
+ * 
+ * @param netAdapter Reference to network adapter struct
+ * @param adapterIdx Adapter index
+ * @param type Adapter type (UDP, TCP Server, TCP Client)
+ * @param remote Whether the adapter is remote or local
+ * @return int 0 on success, -1 on failure
+ */
+int NetworkComms::configureAdapter(NetworkAdapter& netAdapter, int adapterIdx, int type, bool internal) {
+    if (type == static_cast<int>(Adapter::CommsAdapter::Udp)) {
+        return this->configureUDPAdapter(netAdapter, adapterIdx, internal);
+    } else if (type == static_cast<int>(Adapter::CommsAdapter::TcpServer)) {
+        return this->configureTcpServer(netAdapter, adapterIdx, internal);
+    } else if (type == static_cast<int>(Adapter::CommsAdapter::TcpClient)) {
+        return this->configureTcpClient(netAdapter, adapterIdx, internal);
+    } else {
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_ERROR, "Unknown adapter type for adapter %s\r\n", netAdapter.adapter.c_str());
+        return -1;
+    }
+}
 
 /**
  * @brief Configure network adapter with port mapping
@@ -251,21 +273,15 @@ void NetworkComms::OnEthHandShakeRecv(std::vector<char>& data) {
  * @return unique_ptr<NetworkAdapter> Configured network adapter
  */
 int NetworkComms::configureUDPAdapter(
-    Adapter::CommsAdapter::NetworkAdapter& netAdapter, int adapterIdx) {
+    Adapter::CommsAdapter::NetworkAdapter& netAdapter, int adapterIdx, bool internal) {
     std::unique_ptr<NetUtils::NetworkPort<Network::UdpServer>> udpPort;
     Network::UdpServer* selectedSocket = nullptr;
 
     try {
         udpPort = std::make_unique<NetUtils::NetworkPort<Network::UdpServer>>(
-            io_context, netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize);
+            io_context, netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize, internal);
 
-        if (netAdapter.adapter.find("wl") == 0) {
-            selectedSocket = udpPort->wlan();
-        } else if (netAdapter.adapter.find("en") == 0) {
-            selectedSocket = udpPort->eth();
-        } else {
-            selectedSocket = udpPort->preferred();
-        }
+        selectedSocket = udpPort->preferred();
     } catch(const std::exception& e) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create UDP socket for adapter: %s\r\n", e.what());
@@ -276,6 +292,8 @@ int NetworkComms::configureUDPAdapter(
     }
 
     if (!selectedSocket) {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "No valid UDP socket found for adapter %s\r\n",
+            netAdapter.adapter.c_str());
         return -1;
     }
     netAdapter.EthPresent = [this](void) -> bool {
@@ -432,23 +450,15 @@ int NetworkComms::configureUDPAdapter(
  * @param netAdapter Reference to network adapter struct
  * @param adapterIdx Adapter index
  */
-int NetworkComms::configureTcpServer(Adapter::CommsAdapter::NetworkAdapter& netAdapter, int adapterIdx) {
+int NetworkComms::configureTcpServer(Adapter::CommsAdapter::NetworkAdapter& netAdapter, int adapterIdx, bool internal) {
     std::unique_ptr<NetUtils::NetworkPort<Network::TcpServer>> tcpPort;
     Network::TcpServer* selectedSocket = nullptr;
 
     try {
         tcpPort = std::make_unique<NetUtils::NetworkPort<Network::TcpServer>>(
-            io_context, netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize, netAdapter.adapter == "lo");
+            io_context, netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize, internal);
 
-        if (netAdapter.adapter == "lo") {
-            selectedSocket = tcpPort->hasLo() ? tcpPort->preferred() : nullptr;
-        } else if (netAdapter.adapter.find("wl") == 0) {
-            selectedSocket = tcpPort->wlan();
-        } else if (netAdapter.adapter.find("en") == 0) {
-            selectedSocket = tcpPort->eth();
-        } else {
-            selectedSocket = tcpPort->preferred();
-        }
+        selectedSocket = tcpPort->preferred();
     } catch(const std::exception& e) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create TCP socket for adapter %s: %s\r\n", netAdapter.adapter.c_str(), e.what());
@@ -476,9 +486,9 @@ int NetworkComms::configureTcpServer(Adapter::CommsAdapter::NetworkAdapter& netA
 
     // Keep a non-owning pointer for runtime access/stats
     Network::TcpServer* socketPtr = selectedSocket;
-    m_OpenedSockets[adapterIdx].socket  = socketPtr;
-    m_OpenedSockets[adapterIdx].sPort   = netAdapter.sPort;
-    m_OpenedSockets[adapterIdx].dPort   = netAdapter.dPort;
+    m_OpenedSockets[adapterIdx].socket     = socketPtr;
+    m_OpenedSockets[adapterIdx].sPort      = netAdapter.sPort;
+    m_OpenedSockets[adapterIdx].dPort      = netAdapter.dPort;
     m_OpenedSockets[adapterIdx].moduleName = netAdapter.parent;
     m_OpenedSockets[adapterIdx].netAdapter = &netAdapter;
 
@@ -496,7 +506,7 @@ int NetworkComms::configureTcpServer(Adapter::CommsAdapter::NetworkAdapter& netA
 
         uint8_t* buf = const_cast<uint8_t*>(data);
 
-        if (netAdapter.adapter == "lo") {
+        if (netAdapter.loopback) {
             Network::TcpServer* tcpSocket = registeredPort.preferred();
             if (!tcpSocket) return -1;
             return tcpSocket->transmit(buf, length) ? 0 : -1;
@@ -545,13 +555,13 @@ int NetworkComms::configureTcpServer(Adapter::CommsAdapter::NetworkAdapter& netA
 }
 
 
-int NetworkComms::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx) {
+int NetworkComms::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx, bool internal) {
     std::unique_ptr<NetUtils::NetworkPort<Network::TcpClient>> tcpPort;
     Network::TcpClient* selectedSocket = nullptr;
 
     try {
         tcpPort = std::make_unique<NetUtils::NetworkPort<Network::TcpClient>>(
-            io_context, netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize, netAdapter.adapter == "lo");
+            io_context, netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize, internal);
 
         selectedSocket = tcpPort->preferred();
     } catch(const std::exception& e) {
@@ -625,118 +635,6 @@ int NetworkComms::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx)
 
 
 /**
- * @brief Configure a loopback network adapter
- * 
- * @param netAdapter Reference to the network adapter to configure
- * @param adapterIdx Index of the adapter
- * @return int Status code indicating success or failure of the configuration
- */
-int NetworkComms::configureLoopbackAdapter(NetworkAdapter& netAdapter, int adapterIdx) {
-    std::unique_ptr<NetUtils::NetworkPort<Network::TcpServer>> tcpPort;
-    Network::TcpServer* selectedSocket = nullptr;
-
-    try {
-        tcpPort = std::make_unique<NetUtils::NetworkPort<Network::TcpServer>>(
-            io_context, netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize, netAdapter.adapter == "lo");
-
-        selectedSocket = tcpPort->hasLo() ? tcpPort->preferred() : nullptr;
-    } catch(const std::exception& e) {
-        Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to create TCP socket for adapter %s: %s\r\n", netAdapter.adapter.c_str(), e.what());
-        std::pair<int, Adapter::CommsAdapter::NetworkAdapter*> adapterInfo{adapterIdx, &netAdapter};
-        m_FailedAdapters.push_back(adapterInfo);
-        m_FailedAdapterMap[adapterIdx] = &netAdapter;
-        return -1;
-    }
-
-    if (!selectedSocket) {
-        return -1;
-    }
-    netAdapter.sPort = selectedSocket->getSrcPort();
-    netAdapter.dPort = selectedSocket->getDstPort();
-
-    netAdapter.socketDesc = adapterIdx;
-    m_RegisteredPorts.insert_or_assign(netAdapter.socketDesc, std::move(tcpPort));
-
-    auto registeredPortIt = m_RegisteredPorts.find(netAdapter.socketDesc);
-    if (registeredPortIt == m_RegisteredPorts.end() || !registeredPortIt->second) {
-        return -1;
-    }
-
-    auto& registeredPort = static_cast<NetUtils::NetworkPort<Network::TcpServer>&>(*registeredPortIt->second);
-
-    // Keep a non-owning pointer for runtime access/stats
-    Network::TcpServer* socketPtr = selectedSocket;
-    m_OpenedSockets[adapterIdx].socket  = socketPtr;
-    m_OpenedSockets[adapterIdx].sPort   = netAdapter.sPort;
-    m_OpenedSockets[adapterIdx].dPort   = netAdapter.dPort;
-    m_OpenedSockets[adapterIdx].moduleName = netAdapter.parent;
-    m_OpenedSockets[adapterIdx].netAdapter = &netAdapter;
-
-    if (!m_UdpSocket) {
-        m_UdpSocket = socketPtr;
-    }
-
-    // Map adapter name to the same non-owning socket pointer, without taking ownership again
-    if (m_AdapterMap.find(netAdapter.adapter) == m_AdapterMap.end()) {
-        m_AdapterMap[netAdapter.adapter] = socketPtr;
-    }
-
-    netAdapter.sendCallbackTcp = [this, &registeredPort, &netAdapter](const uint8_t* data, size_t length) {
-        if (!data || length == 0 || !netAdapter.connected) return -1;
-
-        uint8_t* buf = const_cast<uint8_t*>(data);
-
-        if (netAdapter.adapter == "lo") {
-            Network::TcpServer* tcpSocket = registeredPort.preferred();
-            if (!tcpSocket) return -1;
-            return tcpSocket->transmit(buf, length) ? 0 : -1;
-        }
-
-        // Dual-interface TCP adapters may accept on either ETH or WLAN.
-        Network::TcpServer* tcpSocketEth = registeredPort.eth();
-        if (tcpSocketEth && tcpSocketEth->transmit(buf, length)) {
-            return 0;
-        }
-
-        Network::TcpServer* tcpSocketWlan = registeredPort.wlan();
-        if (tcpSocketWlan && tcpSocketWlan->transmit(buf, length)) {
-            return 0;
-        }
-
-        return -1;
-    };
-
-    netAdapter.preferredSrcPortCb = [&registeredPort, &netAdapter]() -> int {
-        Network::TcpServer* tcpSocket = registeredPort.preferred();
-        return tcpSocket ? tcpSocket->getSrcPort() : netAdapter.sPort;
-    };
-
-    const int socketDesc = netAdapter.socketDesc;
-    const std::string adapterName = netAdapter.adapter;
-    netAdapter.closeSocketCb = [this, adapterIdx, socketDesc, adapterName]() -> int {
-        auto registeredPortIt = m_RegisteredPorts.find(socketDesc);
-        if (registeredPortIt != m_RegisteredPorts.end() && registeredPortIt->second) {
-            registeredPortIt->second->close();
-            m_RegisteredPorts.erase(registeredPortIt);
-        }
-
-        m_OpenedSockets.erase(adapterIdx);
-
-        auto adapterMapIt = m_AdapterMap.find(adapterName);
-        if (adapterMapIt != m_AdapterMap.end()) {
-            m_AdapterMap.erase(adapterMapIt);
-        }
-
-        return 0;
-    };
-
-    netAdapter.connected = true;
-    return 0;
-}
-
-
-/**
  * @brief Configure the receive callback for the network adapter
  * @param asyncTx Flag indicating whether the receive operation should be asynchronous
  * @param adapter Reference to network adapter struct
@@ -769,13 +667,12 @@ void NetworkComms::configureReceiveCallback(NetworkAdapter& adapter, std::functi
                 tcpSocket->startReceive(dataReceivedCommand_);
             };
 
-            if (adapter.adapter == "lo") {
+            if (adapter.loopback) {
                 armTcpSocket(tcpPort.preferred());
             } else {
                 armTcpSocket(tcpPort.eth());
                 armTcpSocket(tcpPort.wlan());
             }
-
             return;
         }
     }
