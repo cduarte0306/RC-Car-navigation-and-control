@@ -25,7 +25,6 @@ Updater::~Updater() {
     }
 }
 
-
 /**
  * @brief Initialize the updater module
  * 
@@ -34,24 +33,24 @@ Updater::~Updater() {
 int Updater::init(void) {
     int ret = 0;
 
-    ret = Base::moduleRegisterCommand(PrepareForUpdate,   &Updater::initUpdateHandler);
+    ret = Base::moduleRegisterCommand(PrepareForUpdate,   &Updater::initUpdateHandler        );
     ret = Base::moduleRegisterCommand(UploadFirmwareData, &Updater::uploadFirmwareDataHandler);
-    ret = Base::moduleRegisterCommand(VerifyFirmware,     &Updater::verifyFirmwareHandler);
-    ret = Base::moduleRegisterCommand(InstallFirmware,    &Updater::installFirmwareHandler);
+    ret = Base::moduleRegisterCommand(VerifyFirmware,     &Updater::verifyFirmwareHandler    );
+    ret = Base::moduleRegisterCommand(InstallFirmware,    &Updater::installFirmwareHandler   );
 
     // Define the module payload
     Base::DefinePayloadLoc(sizeof(UpdaterReqHeader));
 
     // Initialize the network adapter for the internal updater server if needed
-    m_updaterServerAdapter = this->CommsAdapter->OpenNetworkLoopbackAdapter(getName(), Adapter::CommsAdapter::TcpServerAdapterType, 0, 0, Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_updaterServerAdapter = this->CommsAdapter->OpenNetworkLoopbackAdapter(getName(), Adapter::CommsAdapter::TcpClientAdapterType, 0, 0, Adapter::CommsAdapter::MaxUDPPacketSize);
     if (!m_updaterServerAdapter) {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for internal updater server\r\n");
         return -1;
     }
 
+    m_updaterServerAdapter->setParent(this->getName());
     return ret;
 }
-
 
 void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload) {
     (void)val;
@@ -120,13 +119,11 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
     Base::DoAck(true, m_fwFileAdapter->getPreferredSrcPort());
 }
 
-
 void Updater::uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload) {
     (void) val;
     Base::DoAck(true, {});
     return;
 }
-
 
 void Updater::verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload) {
     (void) val;
@@ -142,13 +139,21 @@ void Updater::verifyFirmwareHandler(val_type_t val, const std::vector<char>& pay
     return;
 }
 
-
 void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& payload) {
     (void) val;
     (void) payload;
+
+    using json = nlohmann::json;
+    json j = {
+        {"status", "installing"}
+    };
+    
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Firmware installation status: %s\r\n", j.dump().c_str());
+    m_updaterServerAdapter->send(reinterpret_cast<const uint8_t*>(j.dump().c_str()), j.dump().size());
+    // int ret = m_updaterServerAdapter->receive();
+    Base::DoAck(true, {});
     return;
 }
-
 
 void Updater::OnFileWrite(std::vector<char>& data) {
     Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Firmware data chunk written of size: %zu\r\n", data.size());
@@ -165,6 +170,10 @@ void Updater::OnFileWrite(std::vector<char>& data) {
     (void) updateFile.write(data);
 }
 
+void Updater::OnUpdateServerDoorBell(std::vector<char>& data) {
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Update server received doorbell signal of size: %zu\r\n", data.size());
+    
+}
 
 void Updater::mainProc() { }
-}
+} // namespace Modules

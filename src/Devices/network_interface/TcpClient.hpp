@@ -14,7 +14,7 @@ public:
     TcpClient(boost::asio::io_context& io_context, std::string host, unsigned short sPort, unsigned short dPort, size_t bufferSize=1024, bool broadcast=false);
     ~TcpClient();
 
-    bool receive(uint8_t* pBuf, size_t length);
+    bool receive(std::vector<char>& buffer);
 
     bool transmit(const uint8_t* pBuf, size_t length);
 

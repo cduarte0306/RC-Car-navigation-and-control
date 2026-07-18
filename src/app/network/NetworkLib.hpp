@@ -111,6 +111,7 @@ public:
     bool hasLo() const;
 
     int open(std::string& host, unsigned dstPort);
+    int read(std::vector<char>& buffer);
     virtual int open(int srcPort = 0, int dstPort = 0);
     virtual int close() override;
     virtual int sendEth(std::string& targetIP, const std::vector<char>& data) override;

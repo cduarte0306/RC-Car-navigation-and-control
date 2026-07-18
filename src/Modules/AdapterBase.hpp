@@ -343,14 +343,14 @@ namespace Adapter {
         public:
         NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048);
             ~NetworkAdapter();
-            std::function<int(const uint8_t*, size_t)> sendCallbacEth   = nullptr;
-            std::function<int(const uint8_t*, size_t)> sendCallbackWlan = nullptr;
-            std::function<int(const uint8_t*, size_t)> sendCallback     = nullptr;
-            std::function<int(const uint8_t*, size_t)> sendCallbackTcp  = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallbackEth    = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallbackWlan   = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallback       = nullptr;
+            std::function<int(const uint8_t*, size_t)> sendCallbackTcp    = nullptr;
             std::function<int(void)>                   preferredSrcPortCb = nullptr;
-            std::function<int(void)>                   closeSocketCb     = nullptr;
-            std::function<bool(void)>                  EthPresent       = nullptr;
-            std::function<bool(void)>                  hostPresentCB    = nullptr;
+            std::function<int(void)>                   closeSocketCb      = nullptr;
+            std::function<bool(void)>                  EthPresent         = nullptr;
+            std::function<bool(void)>                  hostPresentCB      = nullptr;
             std::function<void()> onConnected = nullptr;
 
             int id = -1;
@@ -386,6 +386,24 @@ namespace Adapter {
             void OnEthLinkDetected(bool state);
 
             void OnWlanLinkDetected(bool state);
+        };
+
+        class NetworkTcp : public NetworkAdapter {
+        public:
+            std::function<int(const std::vector<char>&)> receiveCallback = nullptr;
+
+            NetworkTcp(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048)
+                : NetworkAdapter(adapter_, sPort_, dPort_, bufferSize_) {
+                adapterType = TcpClientAdapterType;
+            }
+
+            /**
+             * @brief Receive data from the TCP network adapter
+             * 
+             * @param buffer Buffer to store received data
+             * @return int Status code
+             */
+            int receive(std::vector<char>& buffer);
         };
 
         CommsAdapter(std::string parentName_="");

@@ -440,6 +440,13 @@ int CommsAdapter::NetworkAdapter::send(const uint8_t* data, size_t length, std::
 	return -1;
 }
 
+int CommsAdapter::NetworkTcp::receive(std::vector<char>& buffer) {
+	if (receiveCallback) {
+		return receiveCallback(buffer);
+	}
+	return -1;
+}
+
 int CommsAdapter::NetworkAdapter::getPreferredSrcPort() const {
 	if (preferredSrcPortCb) {
 		const int port = preferredSrcPortCb();

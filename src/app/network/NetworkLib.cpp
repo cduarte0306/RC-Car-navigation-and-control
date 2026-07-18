@@ -300,6 +300,19 @@ int NetworkPort<Network::TcpClient>::open(int srcPort, int dstPort) {
     throw std::runtime_error("Open method not implemented for TcpClient NetworkPort.");
 }
 
+int NetworkPort<Network::TcpClient>::read(std::vector<char>& buffer) {
+    if (m_Lo) {
+        return m_Lo->receive(buffer);
+    }
+    if (m_Eth) {
+        return m_Eth->receive(buffer);
+    }
+    if (m_Wlan) {
+        return m_Wlan->receive(buffer);
+    }
+    return -1;
+}
+
 int NetworkPort<Network::TcpClient>::close() {
     int result = 0;
     if (m_Lo) {

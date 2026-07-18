@@ -21,17 +21,17 @@ TcpClient::~TcpClient() {
     }
 }
 
-bool TcpClient::receive(uint8_t* pBuf, size_t length) {
+bool TcpClient::receive(std::vector<char>& buffer) {
     if (!tcpSocket_.is_open()) {
         return false;
     }
     boost::system::error_code ec;
-    size_t bytesRead = boost::asio::read(tcpSocket_, boost::asio::buffer(pBuf, length), ec);
+    size_t bytesRead = boost::asio::read(tcpSocket_, boost::asio::buffer(buffer.data(), buffer.size()), ec);
     if (ec) {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "TCP receive error: %s. Attempting to reconnect\r\n", ec.message().c_str());
         Connect();
     }
-    return !ec && bytesRead == length;
+    return !ec && bytesRead == buffer.size();
 }
 
 bool TcpClient::transmit(const uint8_t* pBuf, size_t length) {

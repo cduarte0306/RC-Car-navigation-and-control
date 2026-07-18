@@ -41,10 +41,11 @@ public:
 
 protected:
     enum {
-        PrepareForUpdate = 1,  // Command to prepare the system for an update (e.g., stop motors, close connections)
-        UploadFirmwareData,  // Download firmware data command
-        VerifyFirmware      ,  // Verify firmware command
-        InstallFirmware        // Install firmware command
+        PrepareForUpdate = 1,   // Command to prepare the system for an update (e.g., stop motors, close connections)
+        UploadFirmwareData,     // Download firmware data command
+        VerifyFirmware,         // Verify firmware command
+        InstallFirmware,        // Install firmware command
+        UpdaterReboot           // Reboot command
     };
 
     struct UpdaterReqHeader {
@@ -101,6 +102,13 @@ protected:
      * @param data Vector containing the chunk of firmware data that was written
      */
     void OnFileWrite(std::vector<char>& data);
+
+    /**
+     * @brief Callback function that is called when the update server receives a doorbell signal
+     * 
+     * @param data Vector containing the doorbell signal data
+     */
+    void OnUpdateServerDoorBell(std::vector<char>& data);
 
     static constexpr char* IMAGE_LOCATION = (char*)"/data/rc_updater/";
 

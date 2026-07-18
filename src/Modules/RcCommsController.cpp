@@ -357,7 +357,7 @@ int NetworkComms::configureUDPAdapter(
         return -1;
     };
 
-    netAdapter.sendCallbacEth = [this, &registeredPort, &netAdapter](
+    netAdapter.sendCallbackEth = [this, &registeredPort, &netAdapter](
         const uint8_t* data, size_t length) {
         if (!data || length == 0 || !netAdapter.connected) return -1;
 
@@ -556,17 +556,18 @@ int NetworkComms::configureTcpServer(Adapter::CommsAdapter::NetworkAdapter& netA
 
 
 int NetworkComms::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx, bool internal) {
+    NetworkTcp* adpt = reinterpret_cast<NetworkTcp*>(&netAdapter);
     std::unique_ptr<NetUtils::NetworkPort<Network::TcpClient>> tcpPort;
     Network::TcpClient* selectedSocket = nullptr;
 
     try {
         tcpPort = std::make_unique<NetUtils::NetworkPort<Network::TcpClient>>(
-            io_context, netAdapter.sPort, netAdapter.dPort, netAdapter.bufferSize, internal);
+            io_context, adpt->sPort, adpt->dPort, adpt->bufferSize, internal);
 
         selectedSocket = tcpPort->preferred();
     } catch(const std::exception& e) {
         Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to create TCP client socket for adapter %s: %s\r\n", netAdapter.adapter.c_str(), e.what());
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to create TCP client socket for adapter %s: %s\r\n", adpt->adapter.c_str(), e.what());
         std::pair<int, Adapter::CommsAdapter::NetworkAdapter*> adapterInfo{adapterIdx, &netAdapter};
         m_FailedAdapters.push_back(adapterInfo);
         m_FailedAdapterMap[adapterIdx] = &netAdapter;
@@ -604,6 +605,16 @@ int NetworkComms::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx,
     if (m_AdapterMap.find(netAdapter.adapter) == m_AdapterMap.end()) {
         m_AdapterMap[netAdapter.adapter] = socketPtr;
     }
+
+    adpt->receiveCallback = [this, &registeredPort, &netAdapter](const std::vector<char>& buffer) -> int {
+        if (!netAdapter.connected) return -1;
+
+        Network::TcpClient* tcpSocketLoopback = registeredPort.preferred();
+        if (tcpSocketLoopback) {
+            return tcpSocketLoopback->receive(const_cast<std::vector<char>&>(buffer));
+        }
+        return -1;
+    };
     
     netAdapter.sendCallbackTcp = [this, &registeredPort, &netAdapter](const uint8_t* data, size_t length) {
         if (!data || length == 0 || !netAdapter.connected) return -1;
