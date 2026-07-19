@@ -10,10 +10,11 @@
 #endif
 
 #include "utils/logger.hpp"
+#include "NetworkTypes.hpp"
 
 
 namespace Vision {
-VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
+VideoStreamer::VideoStreamer(NetworkAdapter& txAdapter,
                             std::size_t bufferCapacity)
       : m_TxAdapter(txAdapter),
         m_Buffer(bufferCapacity), 

@@ -31,7 +31,7 @@ protected:
     Msg::CircularBuffer<nlohmann::json> m_TlmBuffer{400};
     std::mutex m_txMutex;
     std::string m_SysVers{""};
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TxAdapter{nullptr};
+    std::unique_ptr<NetworkAdapter> m_TxAdapter{nullptr};
     std::unordered_set<std::string> m_registeredSources;
 };
 }

@@ -75,7 +75,7 @@ protected:
         double rxRate;
         std::string moduleName;
         Network::Sockets* socket = nullptr;
-        Adapter::CommsAdapter::NetworkAdapter* netAdapter = nullptr;
+        NetworkAdapter* netAdapter = nullptr;
     };
 
     void OnWlanHandShakeRecv(std::vector<char>& data);
@@ -145,10 +145,10 @@ protected:
     std::shared_ptr<Network::UdpServer> m_EthAnnouncer{nullptr};
 
     // List of adapter names that failed to open
-    std::vector<std::pair<int, Adapter::CommsAdapter::NetworkAdapter*>> m_FailedAdapters;
+    std::vector<std::pair<int, NetworkAdapter*>> m_FailedAdapters;
 
     // Map of adapter IDs to failed adapter structs for quick lookup
-    std::map<int, Adapter::CommsAdapter::NetworkAdapter*> m_FailedAdapterMap;
+    std::map<int, NetworkAdapter*> m_FailedAdapterMap;
 
     std::string hostMap[MaxAdapter] = {"", ""}; // Map of adapter ID to host IP for quick lookup
 

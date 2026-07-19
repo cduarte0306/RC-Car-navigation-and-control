@@ -184,7 +184,7 @@ public:
      * @param jpegQuality JPEG quality [0-100]; defaults to 35.
      * @param bufferCapacity number of frames buffered for jitter smoothing.
      */
-    VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
+    VideoStreamer(NetworkAdapter& txAdapter,
                   std::size_t bufferCapacity = 100);
 
     /**
@@ -404,7 +404,7 @@ private:
 
     std::atomic<int> frameIntervalMs{33};  // default ~30 FPS
     int m_EncodeQuality = 35;
-    Adapter::CommsAdapter::NetworkAdapter& m_TxAdapter;
+    NetworkAdapter& m_TxAdapter;
     std::string m_DestIp;
 
     uint32_t m_FrameID = 0;

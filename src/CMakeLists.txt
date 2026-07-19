@@ -20,6 +20,7 @@ set(SOURCE
     Modules/Modules_Lib/AdapterTlm.cpp
     Modules/Modules_Lib/AdapterUpdater.cpp
     Modules/Modules_Lib/ModulesDefs.hpp
+    Modules/Modules_Lib/NetworkTypes.cpp
     Modules/RcMotorController.cpp
     Modules/RcMotorController.hpp
     Modules/RcCommsController.hpp

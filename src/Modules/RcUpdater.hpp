@@ -128,13 +128,13 @@ protected:
      * @brief Network adapter for handling firmware file transfers
      * 
      */
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_fwFileAdapter{nullptr};
+    std::unique_ptr<NetworkAdapter> m_fwFileAdapter{nullptr};
 
     /**
      * @brief Network adapter for handling internal updater server
      * 
      */
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_updaterServerAdapter{nullptr};
+    std::unique_ptr<NetworkAdapter> m_updaterServerAdapter{nullptr};
 
     /**
      * @brief Last chunk ID received during the firmware update process

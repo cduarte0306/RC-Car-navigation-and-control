@@ -292,10 +292,10 @@ protected:
     std::vector<uint8_t> m_ReceivedFrameBuff;
 
     // Transmission port
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TxAdapter{nullptr};
+    std::unique_ptr<NetworkAdapter> m_TxAdapter{nullptr};
 
     // Training video input port
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_SimVideoAdapter{nullptr};
+    std::unique_ptr<NetworkAdapter> m_SimVideoAdapter{nullptr};
 
     // Video recorder
     Vision::VideoRecording m_VideoRecorder;

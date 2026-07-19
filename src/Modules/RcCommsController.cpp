@@ -273,7 +273,7 @@ int NetworkComms::configureAdapter(NetworkAdapter& netAdapter, int adapterIdx, i
  * @return unique_ptr<NetworkAdapter> Configured network adapter
  */
 int NetworkComms::configureUDPAdapter(
-    Adapter::CommsAdapter::NetworkAdapter& netAdapter, int adapterIdx, bool internal) {
+    NetworkAdapter& netAdapter, int adapterIdx, bool internal) {
     std::unique_ptr<NetUtils::NetworkPort<Network::UdpServer>> udpPort;
     Network::UdpServer* selectedSocket = nullptr;
 
@@ -285,7 +285,7 @@ int NetworkComms::configureUDPAdapter(
     } catch(const std::exception& e) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create UDP socket for adapter: %s\r\n", e.what());
-        std::pair<int, Adapter::CommsAdapter::NetworkAdapter*> adapterInfo{adapterIdx, &netAdapter};
+        std::pair<int, NetworkAdapter*> adapterInfo{adapterIdx, &netAdapter};
         m_FailedAdapters.push_back(adapterInfo);
         m_FailedAdapterMap[adapterIdx] = &netAdapter;
         return -1;
@@ -450,7 +450,7 @@ int NetworkComms::configureUDPAdapter(
  * @param netAdapter Reference to network adapter struct
  * @param adapterIdx Adapter index
  */
-int NetworkComms::configureTcpServer(Adapter::CommsAdapter::NetworkAdapter& netAdapter, int adapterIdx, bool internal) {
+int NetworkComms::configureTcpServer(NetworkAdapter& netAdapter, int adapterIdx, bool internal) {
     std::unique_ptr<NetUtils::NetworkPort<Network::TcpServer>> tcpPort;
     Network::TcpServer* selectedSocket = nullptr;
 
@@ -462,7 +462,7 @@ int NetworkComms::configureTcpServer(Adapter::CommsAdapter::NetworkAdapter& netA
     } catch(const std::exception& e) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create TCP socket for adapter %s: %s\r\n", netAdapter.adapter.c_str(), e.what());
-        std::pair<int, Adapter::CommsAdapter::NetworkAdapter*> adapterInfo{adapterIdx, &netAdapter};
+        std::pair<int, NetworkAdapter*> adapterInfo{adapterIdx, &netAdapter};
         m_FailedAdapters.push_back(adapterInfo);
         m_FailedAdapterMap[adapterIdx] = &netAdapter;
         return -1;
@@ -568,7 +568,7 @@ int NetworkComms::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx,
     } catch(const std::exception& e) {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create TCP client socket for adapter %s: %s\r\n", adpt->adapter.c_str(), e.what());
-        std::pair<int, Adapter::CommsAdapter::NetworkAdapter*> adapterInfo{adapterIdx, &netAdapter};
+        std::pair<int, NetworkAdapter*> adapterInfo{adapterIdx, &netAdapter};
         m_FailedAdapters.push_back(adapterInfo);
         m_FailedAdapterMap[adapterIdx] = &netAdapter;
         return -1;

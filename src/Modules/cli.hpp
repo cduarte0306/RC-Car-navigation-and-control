@@ -19,7 +19,7 @@ public:
 protected:
     virtual void mainProc() override;
 
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_CliAdapter{nullptr};
+    std::unique_ptr<NetworkAdapter> m_CliAdapter{nullptr};
 
     std::mutex mutex;
     std::vector<char> cmdBuffer;

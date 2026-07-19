@@ -147,6 +147,6 @@ protected:
     std::mutex mtrControllerMutex;
     
     // Network adapter for telemetry
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TlmNetAdapter;
+    std::unique_ptr<NetworkAdapter> m_TlmNetAdapter;
 };
 } // namespace Modules
