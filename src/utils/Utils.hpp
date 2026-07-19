@@ -1,5 +1,9 @@
 #ifndef UTILS_HPP
+#include <string>
+
 namespace Utils {
+
+    std::string GetOEVersion();
 
     int ConfigCores();
 

@@ -8,7 +8,7 @@
 #include <condition_variable>
 #include <opencv2/opencv.hpp>
 
-#include "Modules/AdapterBase.hpp"
+#include "Modules/Modules_Lib/AdapterBase.hpp"
 #include "lib/MessageLib.hpp"
 
 

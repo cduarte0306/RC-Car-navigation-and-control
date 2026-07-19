@@ -564,18 +564,6 @@ namespace Adapter {
         virtual int configureAdapter(NetworkAdapter& netAdapter, int adapterIdx, int type, bool internal=false);
     };
 
-    class CommandAdapter : public AdapterBase {
-    public:
-        CommandAdapter(std::string parentName_="");
-
-    protected:
-        // callable to request motor speed; empty when not set
-
-        virtual int bind_(AdapterBase* Adapter) final;
-
-        void bindInterface(CommandAdapter* adapter);
-    };
-
     class TlmAdapter : public AdapterBase {
     public:
         TlmAdapter(std::string parentName_="");

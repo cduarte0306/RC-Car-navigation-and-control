@@ -10,9 +10,16 @@ set(SOURCE
     cuda/include/cudaVision.hpp
     Modules/cli.hpp
     Modules/cli.cpp
-    Modules/RcBase.cpp
-    Modules/RcBase.hpp
-    Modules/AdapterBase.cpp
+    Modules/Modules_Lib/RcBase.cpp
+    Modules/Modules_Lib/RcBase.hpp
+    Modules/Modules_Lib/AdapterBase.cpp
+    Modules/Modules_Lib/AdapterComms.cpp
+    Modules/Modules_Lib/AdapterCamera.cpp
+    Modules/Modules_Lib/AdapterCli.cpp
+    Modules/Modules_Lib/AdapterMotor.cpp
+    Modules/Modules_Lib/AdapterTlm.cpp
+    Modules/Modules_Lib/AdapterUpdater.cpp
+    Modules/Modules_Lib/ModulesDefs.hpp
     Modules/RcMotorController.cpp
     Modules/RcMotorController.hpp
     Modules/RcCommsController.hpp
@@ -73,8 +80,7 @@ pkg_check_modules(GPIOD REQUIRED libgpiod)
 
 find_library(GPIOD_LIBRARY gpiod)
 
-add_executable(${PROJECT_NAME} ${SOURCE}
-  Modules/ModulesDefs.hpp)
+add_executable(${PROJECT_NAME} ${SOURCE})
 
 # Jetson Orin Nano typically: 87
 # You can also set this to "native" in newer CMake, but 87 is explicit.
@@ -103,6 +109,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src/cuda/include
     ${CMAKE_SOURCE_DIR}/src/lib
     ${CMAKE_SOURCE_DIR}/src/Modules
+    ${CMAKE_SOURCE_DIR}/src/Modules/Modules_Lib
     ${OPENCV_INCLUDE_DIRS}
 )
 

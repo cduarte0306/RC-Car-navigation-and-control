@@ -150,11 +150,6 @@ namespace Modules {
             registerBoundAdapter(CommsAdapter.get());
             return 0;
         }
-        if (auto p = dynamic_cast<Adapter::CommandAdapter*>(adapter.get())) {
-            CommandAdapter.reset(static_cast<Adapter::CommandAdapter*>(adapter.release()));
-            registerBoundAdapter(CommandAdapter.get());
-            return 0;
-        }
         if (auto p = dynamic_cast<Adapter::TlmAdapter*>(adapter.get())) {
             TlmAdapter.reset(static_cast<Adapter::TlmAdapter*>(adapter.release()));
             registerBoundAdapter(TlmAdapter.get());
@@ -175,7 +170,7 @@ namespace Modules {
         m_TimerCanRun = false;
     }
 
-    void Base::setPeriod(int period) {
+    void Base::SetTimerPeriod(int period) {
         m_SleepPeriod.store(period);
     }
 

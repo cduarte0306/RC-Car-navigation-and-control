@@ -14,7 +14,6 @@ namespace ModuleDefs {
     enum class AdapterId {
         CliAdapterID = 1,
         CommsAdapterID,
-        CommandAdapterID,
         MotorAdapterID, 
         CameraAdapterID,
         TlmAdapterID,

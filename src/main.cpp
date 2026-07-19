@@ -11,9 +11,9 @@
 #include "app/ml/TensorRTEngine.hpp"
 
 #include "lib/MessageLib.hpp"
-#include "Modules/ModulesDefs.hpp"
-#include "Modules/AdapterBase.hpp"
-#include "Modules/RcBase.hpp"
+#include "Modules/Modules_Lib/ModulesDefs.hpp"
+#include "Modules/Modules_Lib/AdapterBase.hpp"
+#include "Modules/Modules_Lib/RcBase.hpp"
 #include "Modules/RcMotorController.hpp"
 #include "Modules/RcCommsController.hpp"
 #include "Modules/RcVisionControl.hpp"
@@ -54,7 +54,6 @@ int main(int argc, char* argv[]) {
 
     rcVision->createAdapter<Adapter::MotorAdapter>();
     rcVision->createAdapter<Adapter::CommsAdapter>();
-    rcVision->createAdapter<Adapter::CommandAdapter>();
     rcVision->createAdapter<Adapter::TlmAdapter>();
 
     cli->createAdapter<Adapter::MotorAdapter>();

@@ -21,7 +21,7 @@
 #include <boost/chrono.hpp>
 
 #include "lib/MessageLib.hpp"
-#include "AdapterBase.hpp"
+#include "Modules_Lib/AdapterBase.hpp"
 #include "ModulesDefs.hpp"
 
 #include "lib/Thread.hpp"
@@ -152,11 +152,6 @@ public:
                 return -1;
             }
             CommsAdapter->bind(adapterPtr);
-        } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
-            if (!CommandAdapter) {
-                return -1;
-            }
-            CommandAdapter->bind(adapterPtr);
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
             if (!TlmAdapter) {
                 return -1;
@@ -183,8 +178,6 @@ public:
             CameraAdapter = std::make_unique<Adapter::CameraAdapter>(m_name);
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
             CommsAdapter = std::make_unique<Adapter::CommsAdapter>(m_name);
-        } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
-            CommandAdapter = std::make_unique<Adapter::CommandAdapter>(m_name);
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
             TlmAdapter = std::make_unique<Adapter::TlmAdapter>(m_name);
         } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
@@ -205,8 +198,6 @@ public:
             return std::move(CameraAdapter);
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
             return std::move(CommsAdapter);
-        } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
-            return std::move(CommandAdapter);
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
             return std::move(TlmAdapter);
         } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
@@ -259,11 +250,6 @@ public:
                 return -1;
             }
             CommsAdapter->bind(adapter);
-        } else if constexpr (std::is_same<U, Adapter::CommandAdapter>::value) {
-            if (!CommandAdapter) {
-                return -1;
-            }
-            CommandAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
             if (!TlmAdapter) {
                 return -1;
@@ -388,7 +374,7 @@ protected:
      * 
      * @param period Period in milliseconds
      */
-    void setPeriod(int period);
+    void SetTimerPeriod(int period);
 
     /**
      * @brief Thread function for handling time-based events. This thread continuously runs and calls the OnTimer function at regular intervals defined by m_SleepPeriod. It can be used by derived classes to implement any periodic tasks or time-based logic that needs to run in the background.
@@ -500,7 +486,6 @@ protected:
     std::unique_ptr<Adapter::AdapterBase   > baseAdapter    = nullptr;
     std::unique_ptr<Adapter::MotorAdapter  > motorAdapter   = nullptr;
     std::unique_ptr<Adapter::CameraAdapter > CameraAdapter  = nullptr;
-    std::unique_ptr<Adapter::CommandAdapter> CommandAdapter = nullptr;
     std::unique_ptr<Adapter::CommsAdapter  > CommsAdapter   = nullptr;
     std::unique_ptr<Adapter::TlmAdapter    > TlmAdapter     = nullptr;
     std::unique_ptr<Adapter::UpdateAdapter > UpdateAdapter  = nullptr;

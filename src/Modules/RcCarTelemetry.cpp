@@ -2,6 +2,7 @@
 #include "lib/RegisterMap.hpp"
 
 #include "utils/logger.hpp"
+#include "utils/Utils.hpp"
 #include <nlohmann/json.hpp>
 
 #include <chrono>
@@ -29,8 +30,8 @@ int RcCarTelemetry::init(void) {
         return -1;
     }
 
-    setPeriod(1000);
-
+    SetTimerPeriod(1000);
+    m_SysVers = Utils::GetOEVersion();
     logger->log(Logger::LOG_LVL_INFO, "Telemetry module initialized\r\n");
     return 0;
 }

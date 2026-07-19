@@ -5,7 +5,7 @@
 #include <string>
 #include <mutex>
 #include <nlohmann/json.hpp>
-#include "Modules/RcBase.hpp"
+#include "Modules/Modules_Lib/RcBase.hpp"
 #include "lib/MessageLib.hpp"
 
 
@@ -30,6 +30,7 @@ protected:
 
     Msg::CircularBuffer<nlohmann::json> m_TlmBuffer{400};
     std::mutex m_txMutex;
+    std::string m_SysVers{""};
     std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TxAdapter{nullptr};
     std::unordered_set<std::string> m_registeredSources;
 };

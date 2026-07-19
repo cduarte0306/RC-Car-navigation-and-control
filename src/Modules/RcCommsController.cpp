@@ -30,7 +30,7 @@ NetworkComms::NetworkComms(ModuleDefs::DeviceType moduleID, std::string name)
     setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CommsAdapter*>(this)));
 
     // Socket instances are created per adapter in configureUDPAdapter.
-    setPeriod(1000);  // Set the timer thread to service ever second
+    SetTimerPeriod(1000);  // Set the timer thread to service ever second
 
     // Instantiate cmd pool
     m_LastCommandSource = new uint8_t[UINT16_MAX];

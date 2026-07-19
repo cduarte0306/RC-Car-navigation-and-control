@@ -113,7 +113,7 @@ VisionControls::VisionControls(ModuleDefs::DeviceType moduleID, std::string name
 
     setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CameraAdapter*>(this)));
 
-    setPeriod(1000);  // Set the timer thread to service ever second
+    SetTimerPeriod(1000);  // Set the timer thread to service ever second
     
     VisionControls::loadStreamingProfile(m_CamSettings);
 }

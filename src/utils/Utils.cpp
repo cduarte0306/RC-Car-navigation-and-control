@@ -1,5 +1,7 @@
 #include "Utils.hpp"
 
+#include <filesystem>
+#include <fstream>
 #include <sys/resource.h>
 #include <stdexcept>
 #include <execinfo.h>
@@ -9,6 +11,18 @@
 
 
 namespace Utils {
+
+    std::string GetOEVersion()
+    {
+        std::string oeVersion;
+        std::ifstream versionFile("/etc/versions/oe-version.txt");
+        if (versionFile.is_open()) {
+            std::string vers;
+            versionFile >> vers;
+            oeVersion = vers;
+        }
+        return oeVersion;
+    }
 
     static void crash_handler(int sig, siginfo_t* info, void* /*ucontext*/) {
         // async-signal-safe write
