@@ -9,6 +9,51 @@ std::string CommsAdapter::readStats() {
 	return "";
 }
 
+CommsAdapter::CommsAdapter(std::string parentName_) : AdapterBase(ModuleDefs::AdapterId::CommsAdapterID, parentName_) {
+}
+
+int CommsAdapter::transmitData(const uint8_t* data, size_t length) {
+	if (!data || length == 0) {
+		return -1;
+	}
+
+	return transmitDataCommand(data, length);
+}
+
+int CommsAdapter::startReceive(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> callback, bool asyncTx) {
+	if (!callback) {
+		return -1;
+	}
+
+	dataReceivedCommand(adapter, callback, asyncTx);
+	return 0;
+}
+
+int CommsAdapter::startReceive(NetworkAdapter& adapter) {
+	if (!OnModuleMsgReceivedFunc) {
+		return -1;
+	}
+	dataReceivedCommand(adapter, [this](std::vector<char>& buffer) {
+		return OnModuleMsgReceivedFunc(buffer);
+	}, true);
+	return 0;
+}
+
+
+int CommsAdapter::openAdapter(int port, std::string& adapter) {
+	(void)port;
+	(void)adapter;
+	return 0;
+}
+
+std::unique_ptr<NetworkAdapter> CommsAdapter::OpenNetworkAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, std::string adapter, size_t bufferSize, bool broadcast) {
+	return openAdapterCommand(callerName, type, sPort, dPort, bufferSize, broadcast, false);
+}
+
+std::unique_ptr<NetworkAdapter> CommsAdapter::OpenNetworkLoopbackAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, size_t bufferSize, bool broadcast) {
+	return openAdapterCommand(callerName, type, sPort, dPort, bufferSize, broadcast, true);
+}
+
 bool CommsAdapter::GetEthConnectionState() const {
 	return ethConnectionState.load();
 }

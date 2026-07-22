@@ -21,8 +21,31 @@ TcpClient::~TcpClient() {
     }
 }
 
+void TcpClient::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_) {
+    dataReceivedCallback = dataReceivedCallback_;
+    asyncReceive = true;
+    startReceive_();
+}
+
+void TcpClient::startReceive_(void) {
+    if (dataReceivedCallback) {
+        std::vector<char> buffer(1024);
+        tcpSocket_.async_read_some(boost::asio::buffer(buffer.data(), buffer.size()),
+            [this, buffer](const boost::system::error_code& ec, std::size_t bytes_transferred) mutable {
+                if (!ec) {
+                    buffer.resize(bytes_transferred);
+                    dataReceivedCallback(buffer);
+                    startReceive_();
+                } else {
+                    Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "TCP receive error: %s. Attempting to reconnect\r\n", ec.message().c_str());
+                    Connect();
+                }
+            });
+    }
+}
+
 bool TcpClient::receive(std::vector<char>& buffer) {
-    if (!tcpSocket_.is_open()) {
+    if (!tcpSocket_.is_open() || asyncReceive) {
         return false;
     }
     boost::system::error_code ec;

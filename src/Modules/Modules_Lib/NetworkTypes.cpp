@@ -19,13 +19,6 @@ int NetworkAdapter::send(const uint8_t* data, size_t length, std::string destIp)
 	return -1;
 }
 
-int NetworkTcp::receive(std::vector<char>& buffer) {
-	if (receiveCallback) {
-		return receiveCallback(buffer);
-	}
-	return -1;
-}
-
 int NetworkAdapter::getPreferredSrcPort() const {
 	if (preferredSrcPortCb) {
 		const int port = preferredSrcPortCb();
@@ -68,51 +61,68 @@ void NetworkAdapter::OnWlanLinkDetected(bool state) {
 	wlanLinkDetected.store(state);
 }
 
-namespace Adapter {
-
-CommsAdapter::CommsAdapter(std::string parentName_) : AdapterBase(ModuleDefs::AdapterId::CommsAdapterID, parentName_) {
+int NetworkTcp::receive(std::vector<char>& buffer) {
+	if (receiveCallback) {
+		return receiveCallback(buffer);
+	}
+	return -1;
 }
 
-int CommsAdapter::transmitData(const uint8_t* data, size_t length) {
-	if (!data || length == 0) {
+int NetworkProxy::
+dispatchWebApp(const std::vector<char>& data) {
+	if (!sendCallback) {
 		return -1;
 	}
 
-	return transmitDataCommand(data, length);
+	ProxyMsgHdr hdr;
+	hdr.srcAddr  = NetworkProxy::MainAppRouteAddr;  // Set appropriate source address
+	hdr.destAddr = NetworkProxy::WebAppRouteAddr; // Set appropriate destination address
+	hdr.len = static_cast<int>(data.size());
+	char* tempBuffer = new char[sizeof(ProxyMsgHdr) + data.size()];
+	std::memcpy(tempBuffer, &hdr, sizeof(ProxyMsgHdr));
+	std::memcpy(tempBuffer + sizeof(ProxyMsgHdr), data.data(), data.size());
+	int result = sendCallback(reinterpret_cast<uint8_t*>(tempBuffer), sizeof(ProxyMsgHdr) + data.size());
+	delete[] tempBuffer;
+	return result;
 }
 
-int CommsAdapter::startReceive(NetworkAdapter& adapter, std::function<void(std::vector<char>&)> callback, bool asyncTx) {
-	if (!callback) {
+int NetworkProxy::dispatchUpdater(const std::vector<char>& data) {
+	if (!sendCallback) {
 		return -1;
 	}
 
-	dataReceivedCommand(adapter, callback, asyncTx);
-	return 0;
+	ProxyMsgHdr hdr;
+	hdr.srcAddr  = NetworkProxy::MainAppRouteAddr;  // Set appropriate source address
+	hdr.destAddr = NetworkProxy::UpdaterRouteAddr; // Set appropriate destination address
+	hdr.len = static_cast<int>(data.size());
+	char* tempBuffer = new char[sizeof(ProxyMsgHdr) + data.size()];
+	std::memcpy(tempBuffer, &hdr, sizeof(ProxyMsgHdr));
+	std::memcpy(tempBuffer + sizeof(ProxyMsgHdr), data.data(), data.size());
+	int result = sendCallback(reinterpret_cast<uint8_t*>(tempBuffer), sizeof(ProxyMsgHdr) + data.size());
+	delete[] tempBuffer;
+	return result;
 }
 
-int CommsAdapter::startReceive(NetworkAdapter& adapter) {
-	if (!OnModuleMsgReceivedFunc) {
-		return -1;
+int NetworkProxy::routeMsg(const std::vector<char>& data) {
+	if (data.size() < sizeof(NetworkProxy::ProxyMsgHdr))
+		return 0;
+	
+	const ProxyMsgHdr* hdr = reinterpret_cast<const ProxyMsgHdr*>(data.data());
+	auto callback = routeCallbacks[hdr->destAddr];
+	if (callback) {
+		return callback(data);
 	}
-	dataReceivedCommand(adapter, [this](std::vector<char>& buffer) {
-		return OnModuleMsgReceivedFunc(buffer);
-	}, true);
-	return 0;
+	return -1;
 }
 
-
-int CommsAdapter::openAdapter(int port, std::string& adapter) {
-	(void)port;
-	(void)adapter;
-	return 0;
+template <typename T>
+int NetworkProxy::registerCallbacks(int (T::*webAppCallback)(const std::vector<char>&),
+                                    int (T::*updaterCallback)(const std::vector<char>&)) {
+    this->webAppCallback = [webAppCallback](const std::vector<char>& data) {
+        return (static_cast<T*>(nullptr)->*webAppCallback)(data);
+    };
+    this->updaterCallback = [updaterCallback](const std::vector<char>& data) {
+        return (static_cast<T*>(nullptr)->*updaterCallback)(data);
+    };
+    return 0;
 }
-
-std::unique_ptr<NetworkAdapter> CommsAdapter::OpenNetworkAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, std::string adapter, size_t bufferSize, bool broadcast) {
-	return openAdapterCommand(callerName, type, sPort, dPort, bufferSize, broadcast, false);
-}
-
-std::unique_ptr<NetworkAdapter> CommsAdapter::OpenNetworkLoopbackAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, size_t bufferSize, bool broadcast) {
-	return openAdapterCommand(callerName, type, sPort, dPort, bufferSize, broadcast, true);
-}
-
-} // namespace Adapter

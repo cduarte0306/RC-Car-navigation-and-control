@@ -105,6 +105,7 @@ public:
 
     Network::TcpClient* eth() const;
     Network::TcpClient* wlan() const;
+    Network::TcpClient* lo() const;
     Network::TcpClient* preferred() const;
     bool hasEth() const;
     bool hasWlan() const;

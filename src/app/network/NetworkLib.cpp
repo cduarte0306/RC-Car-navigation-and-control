@@ -261,6 +261,10 @@ Network::TcpClient* NetworkPort<Network::TcpClient>::wlan() const {
     return m_Wlan.get();
 }
 
+Network::TcpClient* NetworkPort<Network::TcpClient>::lo() const {
+    return m_Lo.get();
+}
+
 Network::TcpClient* NetworkPort<Network::TcpClient>::preferred() const {
     if (m_Lo)   return m_Lo.get();
     if (m_Eth)  return m_Eth.get();

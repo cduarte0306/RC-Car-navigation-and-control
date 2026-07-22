@@ -42,13 +42,18 @@ int Updater::init(void) {
     Base::DefinePayloadLoc(sizeof(UpdaterReqHeader));
 
     // Initialize the network adapter for the internal updater server if needed
-    m_updaterServerAdapter = this->CommsAdapter->OpenNetworkLoopbackAdapter(getName(), Adapter::CommsAdapter::TcpClientAdapterType, 0, 0, Adapter::CommsAdapter::MaxUDPPacketSize);
-    if (!m_updaterServerAdapter) {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for internal updater server\r\n");
-        return -1;
-    }
+    // m_updaterServerAdapter = this->CommsAdapter->OpenNetworkLoopbackAdapter(getName(), Adapter::CommsAdapter::TcpClientAdapterType, 0, 0, Adapter::CommsAdapter::MaxUDPPacketSize);
+    // if (!m_updaterServerAdapter) {
+    //     Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for internal updater server\r\n");
+    //     return -1;
+    // }
 
     m_updaterServerAdapter->setParent(this->getName());
+    m_updaterServerAdapter->registerCallbacks(
+        &Updater::OnWebAppDoorBell,
+        &Updater::OnUpdateServerDoorBell
+    );
+    // m_updaterServerAdapter->start();
     return ret;
 }
 
@@ -170,9 +175,16 @@ void Updater::OnFileWrite(std::vector<char>& data) {
     (void) updateFile.write(data);
 }
 
-void Updater::OnUpdateServerDoorBell(std::vector<char>& data) {
+int Updater::OnUpdateServerDoorBell(const std::vector<char>& data) {
     Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Update server received doorbell signal of size: %zu\r\n", data.size());
     
+    return 0;
+}
+
+int Updater::OnWebAppDoorBell(const std::vector<char>& data) {
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Web app received doorbell signal of size: %zu\r\n", data.size());
+    
+    return 0;
 }
 
 void Updater::mainProc() { }

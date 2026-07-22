@@ -645,6 +645,66 @@ int NetworkComms::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx,
 }
 
 
+int NetworkComms::configureProxyIface(NetworkAdapter& netAdapter, int adapterIdx, bool internal) {
+    std::unique_ptr<NetUtils::NetworkPort<Network::TcpClient>> proxyPort = 
+        std::make_unique<NetUtils::NetworkPort<Network::TcpClient>>(io_context, 0, netAdapter.dPort, netAdapter.bufferSize, true);
+
+    auto sock = proxyPort->preferred();
+    if (!sock) {
+        return -1;
+    }
+
+    Network::TcpClient* socketPtr = sock;
+    m_OpenedSockets[adapterIdx].socket     = socketPtr;
+    m_OpenedSockets[adapterIdx].sPort      = netAdapter.sPort;
+    m_OpenedSockets[adapterIdx].dPort      = netAdapter.dPort;
+    m_OpenedSockets[adapterIdx].moduleName = netAdapter.parent;
+    m_OpenedSockets[adapterIdx].netAdapter = &netAdapter;
+
+    if (!m_OpenedSockets[adapterIdx].socket) {
+        return -1;
+    }
+    if (m_AdapterMap.find(netAdapter.adapter) == m_AdapterMap.end()) {
+        m_AdapterMap[netAdapter.adapter] = socketPtr;
+    }
+
+    netAdapter.sPort = socketPtr->getSrcPort();
+    netAdapter.dPort = socketPtr->getDstPort();
+
+    netAdapter.socketDesc = adapterIdx;
+    m_RegisteredPorts.insert_or_assign(netAdapter.socketDesc, std::move(proxyPort));
+
+    auto registeredPortIt = m_RegisteredPorts.find(netAdapter.socketDesc);
+    if (registeredPortIt == m_RegisteredPorts.end() || !registeredPortIt->second) {
+        return -1;
+    }
+
+    auto& registeredPort = static_cast<NetUtils::NetworkPort<Network::TcpClient>&>(*registeredPortIt->second);
+    NetworkProxy* proxy = reinterpret_cast<NetworkProxy*>(&netAdapter);
+
+    proxy->sendCallback = [this, &registeredPort, &netAdapter](const uint8_t* data, size_t length) -> int {
+        if (!netAdapter.connected) return -1;
+
+        Network::TcpClient* tcpSocketLoopback = registeredPort.lo();
+        if (tcpSocketLoopback) {
+            return tcpSocketLoopback->transmit(data, length) ? 0 : -1;
+        }
+        return -1;
+    };
+
+    proxy->receiveCallback = [this, &registeredPort, &netAdapter](const std::vector<char>& buffer) -> int {
+        if (!netAdapter.connected) return -1;
+
+        Network::TcpClient* tcpSocketLoopback = registeredPort.lo();
+        if (tcpSocketLoopback) {
+            return tcpSocketLoopback->receive(const_cast<std::vector<char>&>(buffer));
+        }
+        return -1;
+    };
+    return 0;
+}
+
+
 /**
  * @brief Configure the receive callback for the network adapter
  * @param asyncTx Flag indicating whether the receive operation should be asynchronous

@@ -97,9 +97,12 @@ protected:
 
     // Opens TCP network adapters
     int configureTcpServer(NetworkAdapter& netAdapter, int adapterIdx, bool internal=true);
-    
+
     // Opens TCP client network adapters
     int configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx, bool internal=true);
+
+    // Configures a proxy network interface
+    int configureProxyIface(NetworkAdapter& netAdapter, int adapterIdx, bool internal=true);
 
     /**
      * @brief Handler for processing replies from the module. This function is called by the reply processing thread 

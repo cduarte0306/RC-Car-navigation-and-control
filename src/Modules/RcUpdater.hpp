@@ -108,7 +108,14 @@ protected:
      * 
      * @param data Vector containing the doorbell signal data
      */
-    void OnUpdateServerDoorBell(std::vector<char>& data);
+    int OnUpdateServerDoorBell(const std::vector<char>& data);
+
+    /**
+     * @brief Callback function that is called when the web application receives a doorbell signal
+     * 
+     * @param data Vector containing the doorbell signal data
+     */
+    int OnWebAppDoorBell(const std::vector<char>& data);
 
     static constexpr char* IMAGE_LOCATION = (char*)"/data/rc_updater/";
 
@@ -134,7 +141,7 @@ protected:
      * @brief Network adapter for handling internal updater server
      * 
      */
-    std::unique_ptr<NetworkAdapter> m_updaterServerAdapter{nullptr};
+    std::unique_ptr<NetworkProxy> m_updaterServerAdapter{nullptr};
 
     /**
      * @brief Last chunk ID received during the firmware update process

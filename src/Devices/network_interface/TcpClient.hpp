@@ -22,18 +22,21 @@ public:
 
     void onConnectionEstablished(std::function<void(void)> callback);
 
-    void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_) override {(void) dataReceivedCallback_;}
+    void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_) override;
 
     int close() override;
 private:
     std::atomic<bool> connected_{false};
+    std::function<void(std::vector<char>&)> dataReceivedCallback;
     std::function<void(void)> connectionEstablishedCallback_;
     boost::asio::steady_timer reconnectTimer_;
     boost::asio::ip::tcp::socket tcpSocket_;
     
-    boost::asio::ip::tcp::endpoint serverEndpoint_; 
+    boost::asio::ip::tcp::endpoint serverEndpoint_;
+    bool asyncReceive{false};
 
     int Open(void);
+    void startReceive_(void);
     int HandleDisconnectEvent(void);
     int TimerHandler(const boost::system::error_code& ec);
 
