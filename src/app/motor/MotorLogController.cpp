@@ -14,21 +14,26 @@
 
 namespace Motor
 {
-MotorLogController::MotorLogController(char* tty) : tty(tty) {
+MotorLogController::MotorLogController(char* tty) : tty(tty)
+{
     fd = openInterface();
 
     m_LogThread = std::thread(&MotorLogController::mainThreadFunc, this);
 }
 
-MotorLogController::~MotorLogController() {
-    if (fd != -1) {
+MotorLogController::~MotorLogController()
+{
+    if (fd != -1)
+    {
         close(fd);
     }
 }
 
-int MotorLogController::openInterface() {
+int MotorLogController::openInterface()
+{
     fd = open(this->tty, O_RDWR | O_NOCTTY | O_NDELAY);
-    if (fd == -1) {
+    if (fd == -1)
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to open %s\r\n", this->tty);
         return -1;
     }
@@ -55,7 +60,8 @@ int MotorLogController::openInterface() {
     return fd;
 }
 
-void MotorLogController::mainThreadFunc() {
+void MotorLogController::mainThreadFunc()
+{
 
     std::regex pattern(R"(\[ *(\d+) *\] <([^>]+)> (.+))");
     const std::filesystem::path logPath(logFilePath);
@@ -63,9 +69,11 @@ void MotorLogController::mainThreadFunc() {
     char buffer[1024];
     std::string logLine;
 
-    while(m_threadCanRun) {
+    while(m_threadCanRun)
+    {
         ssize_t bytesRead = read(fd, buffer, sizeof(buffer) - 1);
-        if (bytesRead < 0) {
+        if (bytesRead < 0)
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to read from %s\r\n", this->tty);
             continue;
         }
@@ -76,26 +84,33 @@ void MotorLogController::mainThreadFunc() {
 
         // Process complete lines only
         size_t pos;
-        while ((pos = logLine.find('\n')) != std::string::npos) {
+        while ((pos = logLine.find('\n')) != std::string::npos)
+        {
             std::string line = logLine.substr(0, pos);
             logLine.erase(0, pos + 1);
 
             std::smatch matches;
-            if (std::regex_search(line, matches, pattern)) {
+            if (std::regex_search(line, matches, pattern))
+            {
                 Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "[PSoC] %s\r\n", matches[0].str().c_str());
                 matches[0].str() += "\r\n";
 
                 // Write to the log file
-                if (!std::filesystem::exists(logPath)) {
+                if (!std::filesystem::exists(logPath))
+                {
                     std::ofstream file(logPath);
-                    if (file.is_open()) {
+                    if (file.is_open())
+                    {
                         file << line;
                         file << "\n";
                         file.close();
                     }
-                } else {
+                }
+                else
+                {
                     std::ofstream file(logPath, std::ios::app);
-                    if (file.is_open()) {
+                    if (file.is_open())
+                    {
                         file << line;
                         file << "\n";
                         file.close();

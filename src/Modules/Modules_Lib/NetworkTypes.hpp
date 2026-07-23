@@ -68,7 +68,8 @@ public:
     std::function<int(const std::vector<char>&)> receiveCallback = nullptr;
 
     NetworkTcp(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048)
-        : NetworkAdapter(adapter_, sPort_, dPort_, bufferSize_) {
+        : NetworkAdapter(adapter_, sPort_, dPort_, bufferSize_)
+        {
         adapterType = TcpClientAdapterType;
     }
 
@@ -95,7 +96,8 @@ public:
     std::function<int(const std::vector<char>&)> OnReceiveUpdater = nullptr;
 
     NetworkProxy(int port, size_t bufferSize_=2048) 
-        : NetworkTcp("lo", 0, port, bufferSize_) {
+        : NetworkTcp("lo", 0, port, bufferSize_)
+        {
             routeCallbacks.reserve(WebAppRouteAddr);
             routeCallbacks[WebAppRouteAddr ] = webAppCallback;
             routeCallbacks[UpdaterRouteAddr] = updaterCallback;
@@ -119,14 +121,26 @@ public:
 
     /**
      * @brief Register callbacks for web app and updater
-     * 
+     *
+     * @param instance Object the callbacks are invoked on
      * @param webAppCallback Callback for web app messages
      * @param updaterCallback Callback for updater messages
      * @return int Status code
      */
     template <typename T>
-    int registerCallbacks(int (T::*webAppCallback)(const std::vector<char>&),
-                          int (T::*updaterCallback)(const std::vector<char>&));
+    int registerCallbacks(T* instance, int (T::*webAppCallback)(const std::vector<char>&),
+                          int (T::*updaterCallback)(const std::vector<char>&))
+    {
+        this->webAppCallback = [instance, webAppCallback](const std::vector<char>& data)
+        {
+            return (instance->*webAppCallback)(data);
+        };
+        this->updaterCallback = [instance, updaterCallback](const std::vector<char>& data)
+        {
+            return (instance->*updaterCallback)(data);
+        };
+        return 0;
+    }
 
     /**
      * @brief Route a message based on its header information

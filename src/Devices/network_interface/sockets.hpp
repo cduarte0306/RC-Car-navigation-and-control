@@ -29,34 +29,41 @@ namespace Network {
 class Sockets {
 public:
 
-    Sockets(boost::asio::io_context& io_context, unsigned short port) : socket_(io_context) {
+    Sockets(boost::asio::io_context& io_context, unsigned short port) : socket_(io_context)
+    {
 
     }
 
     explicit Sockets(boost::asio::io_context& io_context)
         : Sockets(io_context, 0) {}
 
-    virtual ~Sockets() {
+    virtual ~Sockets()
+    {
 
     }
 
-    virtual bool transmit(const uint8_t* pBuf, size_t length, std::string& ip) {
+    virtual bool transmit(const uint8_t* pBuf, size_t length, std::string& ip)
+    {
         return true;
     }
 
-    virtual bool transmit(const uint8_t* pBuf, size_t length) {
+    virtual bool transmit(const uint8_t* pBuf, size_t length)
+    {
         return true;
     }
 
-    virtual bool transmit(const std::vector<uint8_t>& data) {
+    virtual bool transmit(const std::vector<uint8_t>& data)
+    {
         return true;
     }
 
-    virtual bool receive(uint8_t* pBuf, size_t length ) {
+    virtual bool receive(uint8_t* pBuf, size_t length )
+    {
         return true;
     }
 
-    virtual int close() {
+    virtual int close()
+    {
         return 0;
     }
 
@@ -70,15 +77,19 @@ public:
      * 
      * @return std::string 
      */
-    std::string getHostIP() const {
+    std::string getHostIP() const
+    {
         return m_HostIP;
     }
 
-    void setRemoteEndpoint(const std::string& hostIP, int port) {
-        if (!hostIP.empty()) {
+    void setRemoteEndpoint(const std::string& hostIP, int port)
+    {
+        if (!hostIP.empty())
+        {
             m_HostIP = hostIP;
         }
-        if (port > 0) {
+        if (port > 0)
+        {
             m_Port = port;
             dport_ = port;
         }
@@ -89,32 +100,39 @@ public:
      * 
      * @return int 
      */
-    int getPort() const {
+    int getPort() const
+    {
         return m_Port;
     }
     
 
-    static std::optional<std::string> findInterface(const char* name) {
-        if (!name) {
+    static std::optional<std::string> findInterface(const char* name)
+    {
+        if (!name)
+        {
             return std::nullopt;
         }
 
         struct ifaddrs* ifaddr = nullptr;
-        if (getifaddrs(&ifaddr) == -1) {
+        if (getifaddrs(&ifaddr) == -1)
+        {
             perror("getifaddrs");
             return std::nullopt;
         }
 
         std::string ipAddress;
-        for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next)
+        {
             if (ifa->ifa_addr == nullptr) continue;
 
             if (ifa->ifa_addr->sa_family == AF_INET &&
-                std::string(ifa->ifa_name) == name) {
+                std::string(ifa->ifa_name) == name)
+                {
                 char host[NI_MAXHOST];
                 int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
                                     host, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
-                if (s == 0) {
+                if (s == 0)
+                {
                     ipAddress = host;
                     break;
                 }
@@ -122,7 +140,8 @@ public:
         }
         freeifaddrs(ifaddr);
 
-        if (ipAddress.empty()) {
+        if (ipAddress.empty())
+        {
             return std::nullopt;
         }
 
@@ -139,12 +158,14 @@ public:
 
     size_t GetRxBytes() const { return m_RxBytes; };
 
-    void resetCounters() {
+    void resetCounters()
+    {
         m_TxBytes = 0;
         m_RxBytes = 0;
     }
 
-    virtual bool openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize=1024, bool broadcast=false) {
+    virtual bool openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize=1024, bool broadcast=false)
+    {
         return true;
     }
 
@@ -153,21 +174,24 @@ public:
      * 
      * @return std::string 
      */
-    static std::string getNetMask(std::string& iface) {
+    static std::string getNetMask(std::string& iface)
+    {
         ifaddrs* ifaddr = nullptr;
         if (getifaddrs(&ifaddr) != 0)
             return std::string("");
 
         std::string result("");
 
-        for (auto* ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
+        for (auto* ifa = ifaddr; ifa; ifa = ifa->ifa_next)
+        {
             if (!ifa->ifa_addr || !ifa->ifa_netmask)
                 continue;
 
             if (iface != ifa->ifa_name)
                 continue;
 
-            if (ifa->ifa_addr->sa_family == AF_INET) {
+            if (ifa->ifa_addr->sa_family == AF_INET)
+            {
                 auto* nm = reinterpret_cast<sockaddr_in*>(ifa->ifa_netmask);
                 result = inet_ntoa(nm->sin_addr);  // dotted-decimal
                 break;

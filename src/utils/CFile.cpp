@@ -4,37 +4,46 @@
 #include <openssl/sha.h>
 
 
-CFile::CFile(const char* filePath, const char* mode) {
+CFile::CFile(const char* filePath, const char* mode)
+{
     m_File = fopen(filePath, mode);
 }
 
-CFile::~CFile() {
-    if (m_File) {
+CFile::~CFile()
+{
+    if (m_File)
+    {
         fclose(m_File);
     }
 }
 
-int CFile::open(const char* filePath, const char* mode) {
-    if (m_File) {
+int CFile::open(const char* filePath, const char* mode)
+{
+    if (m_File)
+    {
         fclose(m_File);
         m_File = nullptr;
         m_Size = 0;
         internalFilePath.clear();
     }
     std::filesystem::path path(filePath);
-    if (!std::filesystem::exists(filePath)) {
+    if (!std::filesystem::exists(filePath))
+    {
         std::filesystem::create_directories(path.parent_path());
     }
 
     m_File = fopen(filePath, mode);
-    if (m_File) {
+    if (m_File)
+    {
         internalFilePath = filePath;
     }
     return m_File ? 0 : -1;
 }
 
-void CFile::close() {
-    if (m_File) {
+void CFile::close()
+{
+    if (m_File)
+    {
         fclose(m_File);
         m_File = nullptr;
         m_Size = 0;
@@ -43,21 +52,26 @@ void CFile::close() {
     m_Offset = 0;  // Reset the offset
 }
 
-std::vector<char> CFile::read(size_t length) {
+std::vector<char> CFile::read(size_t length)
+{
     std::vector<char> buffer;
-    if (!m_File) {
+    if (!m_File)
+    {
         return buffer; // Return empty buffer if file is not open
     }
 
     // Guard if the caller wants to read the entire file and there is not enough memory to hold it
-    if (length == 0) {
+    if (length == 0)
+    {
         struct sysinfo si;
-        if (sysinfo(&si) == 0) {
+        if (sysinfo(&si) == 0)
+        {
             // Multiply by mem_unit to get actual bytes (unit might be 1, 1024, etc.)
             unsigned long total_ram = si.totalram * si.mem_unit;
             unsigned long free_ram = si.freeram * si.mem_unit;
             
-            if (free_ram < m_Size) {
+            if (free_ram < m_Size)
+            {
                 return buffer; // Not enough memory to read the entire file, return empty buffer
             }
         }
@@ -65,7 +79,8 @@ std::vector<char> CFile::read(size_t length) {
         fseek(m_File, 0, SEEK_END);
         long fileSize = ftell(m_File);
         fseek(m_File, 0, SEEK_SET);
-        if (fileSize < 0) {
+        if (fileSize < 0)
+        {
             return buffer; // Return empty buffer on error
         }
 
@@ -78,7 +93,8 @@ std::vector<char> CFile::read(size_t length) {
     m_Size = ftell(m_File);
     fseek(m_File, 0, SEEK_SET);
 
-    if (length == 0 || length > m_Size) {
+    if (length == 0 || length > m_Size)
+    {
         length = m_Size; // Read entire file if length is 0 or exceeds file size
     }
 
@@ -87,8 +103,10 @@ std::vector<char> CFile::read(size_t length) {
     return buffer;
 }
 
-int CFile::GetSha256Hash(std::vector<char>& hashOutput) {
-    if (!m_File) {
+int CFile::GetSha256Hash(std::vector<char>& hashOutput)
+{
+    if (!m_File)
+    {
         return -1; // File not open
     }
 
@@ -97,7 +115,8 @@ int CFile::GetSha256Hash(std::vector<char>& hashOutput) {
     long fileSize = ftell(m_File);
     fseek(m_File, 0, SEEK_SET);
 
-    if (fileSize < 0) {
+    if (fileSize < 0)
+    {
         return -1; // Error getting file size
     }
 
@@ -110,8 +129,10 @@ int CFile::GetSha256Hash(std::vector<char>& hashOutput) {
     return 0; // Success
 }
 
-size_t CFile::write(const uint8_t* data, size_t length) {
-    if (!m_File) {
+size_t CFile::write(const uint8_t* data, size_t length)
+{
+    if (!m_File)
+    {
         return 0; // File not open
     }
 
@@ -122,13 +143,16 @@ size_t CFile::write(const uint8_t* data, size_t length) {
     return bytesWritten;
 }
 
-int CFile::remove() {
-    if (!m_File || internalFilePath.empty()) {
+int CFile::remove()
+{
+    if (!m_File || internalFilePath.empty())
+    {
         return -1; // File not open
     }
     std::string filePath = internalFilePath;
     close();
-    if (filePath.empty()) {
+    if (filePath.empty())
+    {
         return -1; // No file path available
     }
     return std::remove(filePath.c_str());

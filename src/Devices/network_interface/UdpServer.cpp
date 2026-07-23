@@ -17,8 +17,10 @@ using namespace Network;
 
 
 UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, unsigned short sPort, unsigned short dPort, size_t bufferSize, bool broadcast):
-    Sockets(io_context, sPort), m_Broadcast(broadcast) {
-    if (!UdpServer::openSocket(adapter, sPort, dPort, bufferSize, broadcast)) {
+    Sockets(io_context, sPort), m_Broadcast(broadcast)
+    {
+    if (!UdpServer::openSocket(adapter, sPort, dPort, bufferSize, broadcast))
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
             "UdpServer: failed to open socket on adapter '%s' port %d\r\n",
             adapter.c_str(), sPort);
@@ -26,38 +28,45 @@ UdpServer::UdpServer(boost::asio::io_context& io_context, std::string adapter, u
 }
 
 
-UdpServer::UdpServer(boost::asio::io_context& io_context) : Sockets(io_context) {
+UdpServer::UdpServer(boost::asio::io_context& io_context) : Sockets(io_context)
+{
     
 }
 
 
-bool UdpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize, bool broadcast) {
+bool UdpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize, bool broadcast)
+{
     sport_ = sPort;
     dport_ = dPort;
     Logger* logger = Logger::getLoggerInst();
 
     m_RecvBuffer.resize(bufferSize);
 
-    auto getAdapter = [&logger](std::string& adapterName) -> std::string {
+    auto getAdapter = [&logger](std::string& adapterName) -> std::string
+    {
         std::string ipAddress;
 
         // Look for enP8p1s0 interface to bind to
         struct ifaddrs* ifaddr;
-        if (getifaddrs(&ifaddr) == -1) {
+        if (getifaddrs(&ifaddr) == -1)
+        {
             perror("getifaddrs");
             logger->log(Logger::LOG_LVL_ERROR, "Failed to get network interfaces\r\n");
             throw std::runtime_error("");
         }
 
-        for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next)
+        {
             if (ifa->ifa_addr == nullptr) continue;
 
             if (ifa->ifa_addr->sa_family == AF_INET &&
-                !(std::strcmp(ifa->ifa_name, adapterName.c_str()))) {
+                !(std::strcmp(ifa->ifa_name, adapterName.c_str())))
+                {
                 char host[NI_MAXHOST];
                 int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
                                     host, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
-                if (s == 0) {
+                if (s == 0)
+                {
                     ipAddress = host;
                     break;
                 }
@@ -68,7 +77,8 @@ bool UdpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_
     };
 
     std::string ipAddress = getAdapter(adapterName);
-    if (ipAddress.empty()) {
+    if (ipAddress.empty())
+    {
         logger->log(Logger::LOG_LVL_ERROR,
             "UdpServer: adapter '%s' not found — check interface name (available: run 'ip link show')\r\n",
             adapterName.c_str());
@@ -87,7 +97,8 @@ bool UdpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_
     dport_ = dPort;
 
     // Fill host field with broadcast version
-    if (m_Broadcast) {
+    if (m_Broadcast)
+    {
         std::string netMask = Sockets::getNetMask(adapterName);
         std::vector<char> ipOctets;
         std::vector<char> maskOctets;
@@ -97,19 +108,24 @@ bool UdpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_
         std::istringstream ipStream(ipAddress);
         std::istringstream maskStream(netMask);
         std::string segment;
-        while (std::getline(ipStream, segment, '.')) {
+        while (std::getline(ipStream, segment, '.'))
+        {
             ipOctets.push_back(static_cast<char>(std::stoi(segment)));
         }
-        while (std::getline(maskStream, segment, '.')) {
+        while (std::getline(maskStream, segment, '.'))
+        {
             maskOctets.push_back(static_cast<char>(std::stoi(segment)));
         }
 
-        if (ipOctets.size() == 4 && maskOctets.size() == 4) {
+        if (ipOctets.size() == 4 && maskOctets.size() == 4)
+        {
             std::string broadcastIp;
-            for (size_t i = 0; i < 4; ++i) {
+            for (size_t i = 0; i < 4; ++i)
+            {
                 char broadcastOctet = ipOctets[i] | (~maskOctets[i]);
                 broadcastIp += std::to_string(static_cast<unsigned char>(broadcastOctet));
-                if (i < 3) {
+                if (i < 3)
+                {
                     broadcastIp += ".";
                 }
             }
@@ -122,10 +138,12 @@ bool UdpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_
 }
 
 
-bool UdpServer::setBroadcast(bool broadcast) {
+bool UdpServer::setBroadcast(bool broadcast)
+{
     boost::system::error_code ec;
     socket_.set_option(boost::asio::socket_base::broadcast(broadcast), ec);
-    if (ec) {
+    if (ec)
+    {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to set broadcast mode: %s\r\n", ec.message().c_str());
         return false;
@@ -142,7 +160,8 @@ bool UdpServer::setBroadcast(bool broadcast) {
  * 
  * @param dataReceivedCallback_ Callback function to handle received data
  */
-void UdpServer::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_) {
+void UdpServer::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_)
+{
     dataReceivedCallback = dataReceivedCallback_;
     this->startReceive_();
 }
@@ -152,19 +171,24 @@ void UdpServer::startReceive(std::function<void(std::vector<char>&)> dataReceive
  * @brief Start asynchronous receive operation
  * 
  */
-void UdpServer::startReceive_(void) {
+void UdpServer::startReceive_(void)
+{
     socket_.async_receive_from(
         boost::asio::buffer(m_RecvBuffer), remoteEndpoint,
-        [this](boost::system::error_code ec, std::size_t bytes_recvd) {
-            if (!ec && bytes_recvd > 0) {
+        [this](boost::system::error_code ec, std::size_t bytes_recvd)
+        {
+            if (!ec && bytes_recvd > 0)
+            {
                 // Call the data received callback
-                if (dataReceivedCallback) {
+                if (dataReceivedCallback)
+                {
                     Logger* logger = Logger::getLoggerInst();
                     std::vector<char> dataReceived(m_RecvBuffer.begin(), m_RecvBuffer.begin() + bytes_recvd);
                     m_HostIP = remoteEndpoint.address().to_string();
                     m_Port = remoteEndpoint.port();
                     dport_ = remoteEndpoint.port();
-                    if (!m_HostFound) {
+                    if (!m_HostFound)
+                    {
                         logger->log(Logger::LOG_LVL_INFO, "Host found: %s:%d\n", m_HostIP.c_str(), dport_);
                         m_HostFound = true;
                     }
@@ -180,7 +204,8 @@ void UdpServer::startReceive_(void) {
 }
 
 
-UdpServer::~UdpServer() {
+UdpServer::~UdpServer()
+{
     // Close the socket
     socket_.close();
 }
@@ -194,8 +219,10 @@ UdpServer::~UdpServer() {
  * @return true Transmission successful
  * @return false Transmission failed
  */
-bool UdpServer::transmit(const uint8_t* pBuf, size_t length, std::string& ip) {
-    if (pBuf == nullptr || length == 0 || ip.length() == 0 || dport_ == 0) {
+bool UdpServer::transmit(const uint8_t* pBuf, size_t length, std::string& ip)
+{
+    if (pBuf == nullptr || length == 0 || ip.length() == 0 || dport_ == 0)
+    {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Invalid parameters for UDP transmit: pBuf=%p, length=%zu, ip=%s, dport=%d\r\n", pBuf, length, ip.c_str(), dport_);
         return false;
@@ -208,7 +235,8 @@ bool UdpServer::transmit(const uint8_t* pBuf, size_t length, std::string& ip) {
 
     Logger* logger = Logger::getLoggerInst();
     ssize_t bytes_sent = socket_.send_to(boost::asio::buffer(pBuf, length), remoteEndpoint);
-    if (bytes_sent < 0) {
+    if (bytes_sent < 0)
+    {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "UDP send error: %s, message length: %lu\r\n", strerror(errno), length);
         return false;

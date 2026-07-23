@@ -38,34 +38,41 @@ namespace Msg {
 
     template<typename T, typename Enable = void>
     struct PayloadSerializer {
-        static std::vector<char> serialize(const T&) {
+        static std::vector<char> serialize(const T&)
+        {
             static_assert(dependent_false<T>::value, "PayloadSerializer: unsupported type. Provide a specialization.");
             return {};
         }
 
-        static bool deserialize(const char*, size_t, T&) {
+        static bool deserialize(const char*, size_t, T&)
+        {
             static_assert(dependent_false<T>::value, "PayloadSerializer: unsupported type. Provide a specialization.");
             return false;
         }
 
-        static bool deserialize(const std::vector<char>& payload, T& out) {
+        static bool deserialize(const std::vector<char>& payload, T& out)
+        {
             return deserialize(payload.data(), payload.size(), out);
         }
     };
 
     template<>
     struct PayloadSerializer<std::vector<char>, void> {
-        static std::vector<char> serialize(const std::vector<char>& value) {
+        static std::vector<char> serialize(const std::vector<char>& value)
+        {
             return value;
         }
 
-        static bool deserialize(const char* data, size_t size, std::vector<char>& out) {
-            if (size == 0) {
+        static bool deserialize(const char* data, size_t size, std::vector<char>& out)
+        {
+            if (size == 0)
+            {
                 out.clear();
                 return true;
             }
 
-            if (!data) {
+            if (!data)
+            {
                 return false;
             }
 
@@ -73,7 +80,8 @@ namespace Msg {
             return true;
         }
 
-        static bool deserialize(const std::vector<char>& payload, std::vector<char>& out) {
+        static bool deserialize(const std::vector<char>& payload, std::vector<char>& out)
+        {
             out = payload;
             return true;
         }
@@ -81,17 +89,21 @@ namespace Msg {
 
     template<>
     struct PayloadSerializer<std::string, void> {
-        static std::vector<char> serialize(const std::string& value) {
+        static std::vector<char> serialize(const std::string& value)
+        {
             return std::vector<char>(value.begin(), value.end());
         }
 
-        static bool deserialize(const char* data, size_t size, std::string& out) {
-            if (size == 0) {
+        static bool deserialize(const char* data, size_t size, std::string& out)
+        {
+            if (size == 0)
+            {
                 out.clear();
                 return true;
             }
 
-            if (!data) {
+            if (!data)
+            {
                 return false;
             }
 
@@ -99,7 +111,8 @@ namespace Msg {
             return true;
         }
 
-        static bool deserialize(const std::vector<char>& payload, std::string& out) {
+        static bool deserialize(const std::vector<char>& payload, std::string& out)
+        {
             out.assign(payload.begin(), payload.end());
             return true;
         }
@@ -107,14 +120,17 @@ namespace Msg {
 
     template<typename T>
     struct PayloadSerializer<T, std::enable_if_t<std::is_trivially_copyable<T>::value>> {
-        static std::vector<char> serialize(const T& value) {
+        static std::vector<char> serialize(const T& value)
+        {
             std::vector<char> bytes(sizeof(T));
             std::memcpy(bytes.data(), &value, sizeof(T));
             return bytes;
         }
 
-        static bool deserialize(const char* data, size_t size, T& out) {
-            if (size != sizeof(T) || !data) {
+        static bool deserialize(const char* data, size_t size, T& out)
+        {
+            if (size != sizeof(T) || !data)
+            {
                 return false;
             }
 
@@ -122,28 +138,34 @@ namespace Msg {
             return true;
         }
 
-        static bool deserialize(const std::vector<char>& payload, T& out) {
+        static bool deserialize(const std::vector<char>& payload, T& out)
+        {
             return deserialize(payload.data(), payload.size(), out);
         }
     };
 
     template<typename U>
     struct PayloadSerializer<std::vector<U>, std::enable_if_t<std::is_trivially_copyable<U>::value && !std::is_same<U, char>::value>> {
-        static std::vector<char> serialize(const std::vector<U>& value) {
+        static std::vector<char> serialize(const std::vector<U>& value)
+        {
             std::vector<char> bytes(value.size() * sizeof(U));
-            if (!value.empty()) {
+            if (!value.empty())
+            {
                 std::memcpy(bytes.data(), value.data(), bytes.size());
             }
             return bytes;
         }
 
-        static bool deserialize(const char* data, size_t size, std::vector<U>& out) {
-            if (size == 0) {
+        static bool deserialize(const char* data, size_t size, std::vector<U>& out)
+        {
+            if (size == 0)
+            {
                 out.clear();
                 return true;
             }
 
-            if (!data || (size % sizeof(U)) != 0) {
+            if (!data || (size % sizeof(U)) != 0)
+            {
                 return false;
             }
 
@@ -153,7 +175,8 @@ namespace Msg {
             return true;
         }
 
-        static bool deserialize(const std::vector<char>& payload, std::vector<U>& out) {
+        static bool deserialize(const std::vector<char>& payload, std::vector<U>& out)
+        {
             return deserialize(payload.data(), payload.size(), out);
         }
     };
@@ -161,17 +184,20 @@ namespace Msg {
     class PayloadCodec {
     public:
         template<typename T>
-        static std::vector<char> serialize(const T& value) {
+        static std::vector<char> serialize(const T& value)
+        {
             return PayloadSerializer<std::decay_t<T>>::serialize(value);
         }
 
         template<typename T>
-        static bool deserialize(const std::vector<char>& payload, T& out) {
+        static bool deserialize(const std::vector<char>& payload, T& out)
+        {
             return PayloadSerializer<std::decay_t<T>>::deserialize(payload, out);
         }
 
         template<typename T>
-        static bool deserialize(const char* data, size_t size, T& out) {
+        static bool deserialize(const char* data, size_t size, T& out)
+        {
             return PayloadSerializer<std::decay_t<T>>::deserialize(data, size, out);
         }
     };
@@ -203,8 +229,10 @@ namespace Msg {
          * 
          * @return size_t Payload size in bytes
          */
-        size_t GetPayloadSize() const {
-            if constexpr (has_size_method<storage_type>::value) {
+        size_t GetPayloadSize() const
+        {
+            if constexpr (has_size_method<storage_type>::value)
+            {
                 return static_cast<size_t>(data.size());
             }
             return sizeof(storage_type);
@@ -222,7 +250,8 @@ namespace Msg {
          * 
          * @return MessageAck<T>& Reference to the acknowledgment object for this message
          */
-        MessageAck<T>& GetAck() {
+        MessageAck<T>& GetAck()
+        {
             return m_MessageAck;
         }
         
@@ -252,35 +281,40 @@ namespace Msg {
          * 
          * @return val_type_t 
          */
-        val_type_t getFlag() const {
+        val_type_t getFlag() const
+        {
             return wrtData;
         }
 
         /**
          * @brief Get module data field associated with this capsule.
          */
-        val_type_t getDataField() const {
+        val_type_t getDataField() const
+        {
             return wrtData;
         }
 
         /**
          * @brief Set module data field associated with this capsule.
          */
-        void setDataField(val_type_t value) {
+        void setDataField(val_type_t value)
+        {
             wrtData = value;
         }
 
         /**
          * @brief Get module-specific command identifier.
          */
-        uint8_t getModCmd() const {
+        uint8_t getModCmd() const
+        {
             return mModCmd;
         }
 
         /**
          * @brief Set module-specific command identifier.
          */
-        void setModCmd(uint8_t cmd) {
+        void setModCmd(uint8_t cmd)
+        {
             mModCmd = cmd;
         }
 
@@ -312,7 +346,8 @@ namespace Msg {
          * @return true If a reply has already been sent for this message
          * @return false If no reply has been sent yet for this message
          */
-        bool isReplyPresent() const {
+        bool isReplyPresent() const
+        {
             return m_ReplyPresent;
         }
 
@@ -321,7 +356,8 @@ namespace Msg {
          * 
          * @return uint8_t 
          */
-        uint8_t getCommand() const {
+        uint8_t getCommand() const
+        {
             return command;
         }
 
@@ -330,7 +366,8 @@ namespace Msg {
          * 
          * @param cmd 
          */
-        void SetAckRequested(bool ackRequested) {
+        void SetAckRequested(bool ackRequested)
+        {
             m_AckRequested = ackRequested;
         }
 
@@ -340,7 +377,8 @@ namespace Msg {
          * @return true If acknowledgment was requested for this message
          * @return false If no acknowledgment was requested for this message
          */
-        bool isAckRequested() const {
+        bool isAckRequested() const
+        {
             return m_AckRequested;
         }
 
@@ -429,7 +467,8 @@ namespace Msg {
          * @param replyData Reply data to be sent back to the adapter
          * @return int Error code indicating success or failure of setting the reply data
          */
-        int SetReplyPayload(const T& replyData) {
+        int SetReplyPayload(const T& replyData)
+        {
             mReplyData = replyData;
             return 0; // Success
         }
@@ -451,7 +490,8 @@ namespace Msg {
          * 
          * @return T& Reference to the reply data stored in this acknowledgment
          */
-        T& GetReplyData() {
+        T& GetReplyData()
+        {
             return mReplyData;
         }
 
@@ -461,7 +501,8 @@ namespace Msg {
          * @return true If the acknowledgment indicates success
          * @return false If the acknowledgment indicates failure
          */
-        bool GetStatus(void) const {
+        bool GetStatus(void) const
+        {
             return mStatus;
         }
 
@@ -481,7 +522,8 @@ namespace Msg {
             uint32_t payloadSize;
         } __attribute__((__packed__));
 
-        static std::vector<uint8_t> serialize(const MessageAck<std::vector<char>>& ack) {
+        static std::vector<uint8_t> serialize(const MessageAck<std::vector<char>>& ack)
+        {
             WireHeader header{};
             header.seqID = ack.mSeqID;
             header.commandID = ack.mCommandID;
@@ -490,15 +532,18 @@ namespace Msg {
 
             std::vector<uint8_t> frame(sizeof(WireHeader) + ack.mReplyData.size());
             std::memcpy(frame.data(), &header, sizeof(WireHeader));
-            if (!ack.mReplyData.empty()) {
+            if (!ack.mReplyData.empty())
+            {
                 std::memcpy(frame.data() + sizeof(WireHeader), ack.mReplyData.data(), ack.mReplyData.size());
             }
             return frame;
         }
 
         template<typename SocketT>
-        static bool send(SocketT& socket, const std::vector<uint8_t>& frame, const std::string& destIP) {
-            if (frame.empty() || destIP.empty()) {
+        static bool send(SocketT& socket, const std::vector<uint8_t>& frame, const std::string& destIP)
+        {
+            if (frame.empty() || destIP.empty())
+            {
                 return false;
             }
 

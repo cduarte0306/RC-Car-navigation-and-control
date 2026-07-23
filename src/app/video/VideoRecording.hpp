@@ -61,14 +61,16 @@ public:
     /**
      * @brief Set the target frame rate for playback.
      */
-    void setFrameRate(FrameRate framerate) {
+    void setFrameRate(FrameRate framerate)
+    {
         frameRate_ = framerate;
     }
 
     /**
      * @brief Reset playback to the beginning.
      */
-    void resetPlayback() {
+    void resetPlayback()
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         m_currentFrame = 0;
     }
@@ -103,7 +105,8 @@ public:
     /**
      * @brief Get the video storage path
      */
-    const char* getStoragePath() const {
+    const char* getStoragePath() const
+    {
         return VideoStoragePath;
     }
 
@@ -127,12 +130,14 @@ public:
     int deleteVideo(const std::string& filename);
     
 private:
-    typedef struct __attribute__((__packed__)) {
+    typedef struct __attribute__((__packed__))
+    {
         uint8_t segId;
         uint32_t segLength;
         char* payload;
     } segmentData_t;
-    typedef struct __attribute__((__packed__)) {
+    typedef struct __attribute__((__packed__))
+    {
         struct __attribute__((__packed__)) {
             uint32_t length;
             uint8_t numSegments;

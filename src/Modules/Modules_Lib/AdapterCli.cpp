@@ -3,25 +3,31 @@
 namespace Adapter {
 
 
-CLIAdapter::CLIAdapter(std::string parentName_) : AdapterBase(ModuleDefs::AdapterId::CliAdapterID, parentName_) {
+CLIAdapter::CLIAdapter(std::string parentName_) : AdapterBase(ModuleDefs::AdapterId::CliAdapterID, parentName_)
+{
 }
 
-int CLIAdapter::bind_(AdapterBase* Adapter) {
+int CLIAdapter::bind_(AdapterBase* Adapter)
+{
 	(void)Adapter;
 	return 0;
 }
 
-void CLIAdapter::bindInterface(CLIAdapter* adapter) {
-	if (!adapter) {
+void CLIAdapter::bindInterface(CLIAdapter* adapter)
+{
+	if (!adapter)
+	{
 		return;
 	}
 
-	this->readStats = [adapter]() -> std::string {
+	this->readStats = [adapter]() -> std::string
+	{
 		return adapter->readModuleStats_();
 	};
 }
 
-std::string CLIAdapter::readModuleStats_(void) {
+std::string CLIAdapter::readModuleStats_(void)
+{
 	return "";
 }
 

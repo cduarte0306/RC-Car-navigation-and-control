@@ -38,7 +38,8 @@ public:
     // Variadic template constructor that accepts any arguments 
     // that the std::thread constructor would accept.
     template<typename F, typename... Args>
-    explicit RcThread(F&& f, Args&&... args) {
+    explicit RcThread(F&& f, Args&&... args)
+    {
         internal_thread = std::thread(std::forward<F>(f), std::forward<Args>(args)...);
     }
 
@@ -118,14 +119,17 @@ public:
 
     // Bind a module and transfer ownership. Module U must derive from Modules::Base.
     template<typename U>
-    int moduleBind(std::unique_ptr<U> module) {
+    int moduleBind(std::unique_ptr<U> module)
+    {
         static_assert(std::is_base_of<Adapter::AdapterBase, U>::value, "moduleBind: U must derive from Adapter::AdapterBase");
-        if (!module) {
+        if (!module)
+        {
             return -1;
         }
         const std::string moduleName = module->getParentName();
         std::lock_guard<std::mutex> lock(mutex);
-        if (m_boundAdapters.find(moduleName) != m_boundAdapters.end()) {
+        if (m_boundAdapters.find(moduleName) != m_boundAdapters.end())
+        {
             return -1;
         }
 
@@ -134,35 +138,44 @@ public:
         // Track bound adapter by parent module device type.
         Adapter::AdapterBase* adapterPtr = m_boundAdapters[moduleName].get();
         const int parentId = adapterPtr->GetParentID();
-        if (parentId >= 0) {
+        if (parentId >= 0)
+        {
             m_BoundAdaptersMap[static_cast<ModuleDefs::DeviceType>(parentId)] = adapterPtr;
         }
-        if constexpr (std::is_same<U, Adapter::MotorAdapter>::value) {
-            if (!motorAdapter) {
+        if constexpr (std::is_same<U, Adapter::MotorAdapter>::value)
+        {
+            if (!motorAdapter)
+            {
                 return -1;
             }
             motorAdapter->bind(adapterPtr);
         } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
-            if (!CameraAdapter) {
+            if (!CameraAdapter)
+            {
                 return -1;
             }
             CameraAdapter->bind(adapterPtr);
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
-            if (!CommsAdapter) {
+            if (!CommsAdapter)
+            {
                 return -1;
             }
             CommsAdapter->bind(adapterPtr);
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
-            if (!TlmAdapter) {
+            if (!TlmAdapter)
+            {
                 return -1;
             }
             TlmAdapter->bind(adapterPtr);
         } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
-            if (!UpdateAdapter) {
+            if (!UpdateAdapter)
+            {
                 return -1;
             }
             UpdateAdapter->bind(adapterPtr);
-        } else {
+        }
+        else
+        {
             return -1;
         }
 
@@ -170,9 +183,11 @@ public:
     }
 
     template<typename U>
-    void createAdapter() {
+    void createAdapter()
+    {
         static_assert(std::is_base_of<Adapter::AdapterBase, U>::value, "createAdapter: U must derive from AdapterBase");
-        if constexpr (std::is_same<U, Adapter::MotorAdapter>::value) {
+        if constexpr (std::is_same<U, Adapter::MotorAdapter>::value)
+        {
             motorAdapter = std::make_unique<Adapter::MotorAdapter>(m_name);
         } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
             CameraAdapter = std::make_unique<Adapter::CameraAdapter>(m_name);
@@ -182,7 +197,9 @@ public:
             TlmAdapter = std::make_unique<Adapter::TlmAdapter>(m_name);
         } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
             UpdateAdapter = std::make_unique<Adapter::UpdateAdapter>(m_name);
-        } else {
+        }
+        else
+        {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
             static_assert(!std::is_same<U, U>::value, "createAdapter: unsupported adapter type");
         }
@@ -190,9 +207,11 @@ public:
 
     // Return the adapter instance of the requested type U (transfer ownership)
     template<typename U>
-    std::unique_ptr<U> getAdapter() {
+    std::unique_ptr<U> getAdapter()
+    {
         static_assert(std::is_base_of<Adapter::AdapterBase, U>::value, "getAdapter: U must derive from AdapterBase");
-        if constexpr (std::is_same<U, Adapter::MotorAdapter>::value) {
+        if constexpr (std::is_same<U, Adapter::MotorAdapter>::value)
+        {
             return std::move(motorAdapter);
         } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
             return std::move(CameraAdapter);
@@ -202,7 +221,9 @@ public:
             return std::move(TlmAdapter);
         } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
             return std::move(UpdateAdapter);
-        } else {
+        }
+        else
+        {
             throw(std::runtime_error("createAdapter: unsupported adapter type"));
             return nullptr;
         }
@@ -219,48 +240,60 @@ public:
 
     // moduleBind overload to accept non-owning adapter pointers (in-adapters).
     template<typename U>
-    int moduleBind(Adapter::AdapterBase* adapter) {
+    int moduleBind(Adapter::AdapterBase* adapter)
+    {
         static_assert(std::is_base_of<Adapter::AdapterBase, U>::value, "getAdapter: U must derive from AdapterBase");
-        if (!adapter) {
+        if (!adapter)
+        {
             return -1;
         }
         const std::string moduleName = adapter->getParentName();
         std::lock_guard<std::mutex> lock(mutex);
-        if (m_boundAdaptersNonOwning.find(moduleName) != m_boundAdaptersNonOwning.end()) {
+        if (m_boundAdaptersNonOwning.find(moduleName) != m_boundAdaptersNonOwning.end())
+        {
             return -1;
         }
         m_boundAdaptersNonOwning[moduleName] = adapter;
         const int parentId = adapter->GetParentID();
-        if (parentId >= 0) {
+        if (parentId >= 0)
+        {
             m_BoundAdaptersMap[static_cast<ModuleDefs::DeviceType>(parentId)] = adapter;
         }
 
-        if constexpr (std::is_same<U, Adapter::MotorAdapter>::value) {
-            if (!motorAdapter) {
+        if constexpr (std::is_same<U, Adapter::MotorAdapter>::value)
+        {
+            if (!motorAdapter)
+            {
                 return -1;
             }
             motorAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
-            if (!CameraAdapter) {
+            if (!CameraAdapter)
+            {
                 return -1;
             }
             CameraAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
-            if (!CommsAdapter) {
+            if (!CommsAdapter)
+            {
                 return -1;
             }
             CommsAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
-            if (!TlmAdapter) {
+            if (!TlmAdapter)
+            {
                 return -1;
             }
             TlmAdapter->bind(adapter);
         } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
-            if (!UpdateAdapter) {
+            if (!UpdateAdapter)
+            {
                 return -1;
             }
             UpdateAdapter->bind(adapter);
-        } else {
+        }
+        else
+        {
             return -1;
         }
 
@@ -287,20 +320,24 @@ public:
     int moduleRegisterCommand(const int commandID, std::function<int(val_type_t, std::vector<char>&)> handler);
 
     template<typename T>
-    int moduleRegisterCommand(const int commandID, void (T::*handler)(val_type_t, const std::vector<char>&)) {
+    int moduleRegisterCommand(const int commandID, void (T::*handler)(val_type_t, const std::vector<char>&))
+    {
         static_assert(std::is_base_of<Base, T>::value, "moduleRegisterCommand: T must derive from Base");
         T* instance = static_cast<T*>(this);
-        m_CommandHandlers[commandID] = [instance, handler](val_type_t val, std::vector<char>& payload) {
+        m_CommandHandlers[commandID] = [instance, handler](val_type_t val, std::vector<char>& payload)
+        {
             (instance->*handler)(val, payload);
         };
         return 0;
     }
 
     template<typename T>
-    int moduleRegisterCommand(const int commandID, void (T::*handler)(std::vector<char>&)) {
+    int moduleRegisterCommand(const int commandID, void (T::*handler)(std::vector<char>&))
+    {
         static_assert(std::is_base_of<Base, T>::value, "moduleRegisterCommand: T must derive from Base");
         T* instance = static_cast<T*>(this);
-        m_CommandHandlers[commandID] = [instance, handler](val_type_t val, std::vector<char>& payload) {
+        m_CommandHandlers[commandID] = [instance, handler](val_type_t val, std::vector<char>& payload)
+        {
             (void)val;
             (instance->*handler)(payload);
         };
@@ -308,12 +345,15 @@ public:
     }
 
     template<typename T>
-    int moduleRegisterCommand(const int commandID, int (T::*handler)(val_type_t, const std::vector<char>&)) {
+    int moduleRegisterCommand(const int commandID, int (T::*handler)(val_type_t, const std::vector<char>&))
+    {
         static_assert(std::is_base_of<Base, T>::value, "moduleRegisterCommand: T must derive from Base");
         T* instance = static_cast<T*>(this);
-        m_CommandHandlers[commandID] = [instance, handler](val_type_t val, std::vector<char>& payload) {
+        m_CommandHandlers[commandID] = [instance, handler](val_type_t val, std::vector<char>& payload)
+        {
             const int status = (instance->*handler)(val, payload);
-            if (status < 0) {
+            if (status < 0)
+            {
                 instance->DoAck(false, {});
             }
         };
@@ -321,13 +361,16 @@ public:
     }
 
     template<typename T>
-    int moduleRegisterCommand(const int commandID, int (T::*handler)(std::vector<char>&)) {
+    int moduleRegisterCommand(const int commandID, int (T::*handler)(std::vector<char>&))
+    {
         static_assert(std::is_base_of<Base, T>::value, "moduleRegisterCommand: T must derive from Base");
         T* instance = static_cast<T*>(this);
-        m_CommandHandlers[commandID] = [instance, handler](val_type_t val, std::vector<char>& payload) {
+        m_CommandHandlers[commandID] = [instance, handler](val_type_t val, std::vector<char>& payload)
+        {
             (void)val;
             const int status = (instance->*handler)(payload);
-            if (status < 0) {
+            if (status < 0)
+            {
                 instance->DoAck(false, {});
             }
         };
@@ -416,12 +459,14 @@ protected:
     int DoAck(bool status, const std::vector<char>& replyData);
 
     template<typename T>
-    int DoAck(bool status, const T& replyData) {
+    int DoAck(bool status, const T& replyData)
+    {
         return DoAck(status, Msg::PayloadCodec::serialize(replyData));
     }
 
     template<typename T>
-    static bool DecodePayload(const std::vector<char>& payload, T& out) {
+    static bool DecodePayload(const std::vector<char>& payload, T& out)
+    {
         return Msg::PayloadCodec::deserialize(payload, out);
     }
 

@@ -58,7 +58,8 @@ public:
      * 
      * @return uint64_t Timestamp difference in nanoseconds
      */
-    uint64_t getTimestampDiffNs() const {
+    uint64_t getTimestampDiffNs() const
+    {
         return m_TimestampDiffNs_;
     }
 

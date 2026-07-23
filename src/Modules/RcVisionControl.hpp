@@ -34,12 +34,14 @@ public:
     virtual int init(void) override;
 
     /** @brief Stop the module execution. */
-    virtual int stop(void) override {
+    virtual int stop(void) override
+    {
         return 0;
     }
 
     /** @brief Return this module as a camera adapter input. */
-    Adapter::AdapterBase* getInputAdapter() override {
+    Adapter::AdapterBase* getInputAdapter() override
+    {
         return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CameraAdapter*>(this));
     }
 

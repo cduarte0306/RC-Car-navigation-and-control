@@ -28,8 +28,10 @@
 
 Logger* logInstance = nullptr;
 
-Logger* Logger::getLoggerInst(void) {
-    if (!logInstance) {
+Logger* Logger::getLoggerInst(void)
+{
+    if (!logInstance)
+    {
         logInstance = new Logger();
         
         // Open the log file
@@ -40,8 +42,10 @@ Logger* Logger::getLoggerInst(void) {
 }
 
 
-void Logger::log(int logLvl, const char* format, ...) {
-    if (logLvl > LOG_LEVEL) {
+void Logger::log(int logLvl, const char* format, ...)
+{
+    if (logLvl > LOG_LEVEL)
+    {
         return;
     }
     char buffer[1024];
@@ -56,7 +60,8 @@ void Logger::log(int logLvl, const char* format, ...) {
     int level;
     const char* prepend = nullptr;
 
-    switch (logLvl) {
+    switch (logLvl)
+    {
         case Logger::LOG_LVL_INFO:
             level = LOG_INFO;
             prepend = INFO_PREPEND;

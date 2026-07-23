@@ -26,7 +26,8 @@ public:
      * @param mode File open mode (e.g., "r", "w", "rb", "wb")
      * @return int 0 on success, -1 on failure
      */
-    int open(std::string filePath, std::string mode) {
+    int open(std::string filePath, std::string mode)
+    {
         return open(filePath.c_str(), mode.c_str());
     }
 
@@ -41,7 +42,8 @@ public:
      * @param buffer Buffer containing the data to write
      * @return size_t Number of bytes actually written
      */
-    size_t write(const std::vector<char>& buffer) {
+    size_t write(const std::vector<char>& buffer)
+    {
         return write(reinterpret_cast<const uint8_t*>(buffer.data()), buffer.size());
     }
 
@@ -58,7 +60,8 @@ public:
      * 
      * @return size_t Size of the file
      */
-    size_t size() const {
+    size_t size() const
+    {
         return m_Size;
     }
 
@@ -67,7 +70,8 @@ public:
      * 
      * @return true if the file is open, false otherwise
      */
-    bool isOpen() const {
+    bool isOpen() const
+    {
         return m_File != nullptr;
     }
 

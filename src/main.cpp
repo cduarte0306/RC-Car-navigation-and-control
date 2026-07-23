@@ -23,7 +23,8 @@
 #include "utils/Utils.hpp"
 
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[])
+{
     int ret;
 
     Utils::ConfigCores();
@@ -33,7 +34,8 @@ int main(int argc, char* argv[]) {
     logger->log(Logger::LOG_LVL_INFO, "RC Car navigation and control V%u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
 
     ret = TensorRTEngine::createEngineFile("/home/models/lanenet/lanenet.onnx", "/data/model-engines/lanenet.engine");
-    if (ret != 0) {
+    if (ret != 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create engine file for lanenet.onnx\r\n");
         return -1;
     }

@@ -7,19 +7,25 @@ namespace Modules {
     std::vector<std::thread> Base::workerThreads;
     boost::asio::io_context Base::io_context;
 
-    RcThread::~RcThread() {
-        if (internal_thread.joinable()) {
+    RcThread::~RcThread()
+    {
+        if (internal_thread.joinable())
+        {
             internal_thread.join();
         }
     }
 
     RcThread::RcThread(RcThread&& other) noexcept
-        : internal_thread(std::move(other.internal_thread)) {
+        : internal_thread(std::move(other.internal_thread))
+    {
     }
 
-    RcThread& RcThread::operator=(RcThread&& other) noexcept {
-        if (this != &other) {
-            if (internal_thread.joinable()) {
+    RcThread& RcThread::operator=(RcThread&& other) noexcept
+    {
+        if (this != &other)
+        {
+            if (internal_thread.joinable())
+            {
                 internal_thread.join();
             }
             internal_thread = std::move(other.internal_thread);
@@ -27,22 +33,28 @@ namespace Modules {
         return *this;
     }
 
-    void RcThread::detach(void) {
+    void RcThread::detach(void)
+    {
         internal_thread.detach();
     }
 
-    std::thread::native_handle_type RcThread::native_handle() {
+    std::thread::native_handle_type RcThread::native_handle()
+    {
         return internal_thread.native_handle();
     }
 
-    bool RcThread::joinable() const {
+    bool RcThread::joinable() const
+    {
         return internal_thread.joinable();
     }
 
-    void Base::joinThreads() {
+    void Base::joinThreads()
+    {
         Base::io_context.run();
-        for (auto& worker : workerThreads) {
-            if (worker.joinable()) {
+        for (auto& worker : workerThreads)
+        {
+            if (worker.joinable())
+            {
                 worker.join();
             }
         }
@@ -51,13 +63,18 @@ namespace Modules {
     }
 
     Base::Base(ModuleDefs::DeviceType moduleID_, const std::string& name, Adapter::AdapterBase* inputAdpt) :
-     m_name(name), moduleID(moduleID_), m_MailBoxOut(100), m_MailBoxIn(100), m_InputAdapter(inputAdpt) {
+     m_name(name), moduleID(moduleID_), m_MailBoxOut(100), m_MailBoxIn(100), m_InputAdapter(inputAdpt)
+     {
         auto regMap = RegisterMap::getInstance();
-        if (regMap) {
-            if (auto moduleMap = regMap->get<std::unordered_map<std::string, int>>(RegisterMap::RegisterKeys::ModuleMap)) {
+        if (regMap)
+        {
+            if (auto moduleMap = regMap->get<std::unordered_map<std::string, int>>(RegisterMap::RegisterKeys::ModuleMap))
+            {
                 (*moduleMap)[name] = static_cast<int>(moduleID_);
                 regMap->set(RegisterMap::RegisterKeys::ModuleMap, *moduleMap);
-            } else {
+            }
+            else
+            {
                 std::unordered_map<std::string, int> newModuleMap;
                 newModuleMap[name] = static_cast<int>(moduleID_);
                 regMap->set(RegisterMap::RegisterKeys::ModuleMap, newModuleMap);
@@ -65,21 +82,26 @@ namespace Modules {
         }
     }
 
-    Base::~Base() {
+    Base::~Base()
+    {
         this->m_Running.store(false);
 
         // stop();
-        if (thread.joinable()) {
+        if (thread.joinable())
+        {
             thread.join();
         }
-        for (auto& worker : workerThreads) {
-            if (worker.joinable()) {
+        for (auto& worker : workerThreads)
+        {
+            if (worker.joinable())
+            {
                 worker.join();
             }
         }
     }
 
-    int Base::trigger(void) {
+    int Base::trigger(void)
+    {
         this->thread = std::thread(&Base::mainProc, this);
         this->m_TimerThread = std::thread(&Base::timerThread, this);
 
@@ -89,73 +111,91 @@ namespace Modules {
         return 0;
     }
 
-    void Base::DefinePayloadLoc(size_t offset) {
+    void Base::DefinePayloadLoc(size_t offset)
+    {
         m_PayloadOffset = offset;
     }
 
-    const std::string& Base::getName(void) const {
+    const std::string& Base::getName(void) const
+    {
         return m_name;
     }
 
-    Adapter::AdapterBase* Base::getInputAdapter() {
+    Adapter::AdapterBase* Base::getInputAdapter()
+    {
         return m_InputAdapter;
     }
 
-    void Base::setInputAdapter(Adapter::AdapterBase* inputAdpt) {
+    void Base::setInputAdapter(Adapter::AdapterBase* inputAdpt)
+    {
         m_InputAdapter = inputAdpt;
-        if (!m_InputAdapter) {
+        if (!m_InputAdapter)
+        {
             return;
         }
 
         Adapter::AdapterBase* adapter = m_InputAdapter;
-        adapter->bindOnModuleMsgReceived([this, adapter](std::vector<char>& buffer) {
+        adapter->bindOnModuleMsgReceived([this, adapter](std::vector<char>& buffer)
+        {
             return this->OnModuleMsgReceived_(buffer, adapter->GetParentID());
         });
-        adapter->SetModDispatchCallback([this](Msg::MessageCapsule<std::vector<char>>& capsule) {
+        adapter->SetModDispatchCallback([this](Msg::MessageCapsule<std::vector<char>>& capsule)
+        {
             return this->OnModuleMsgReceived(capsule);
         });
-        adapter->SetReplyHandlerCallback([this](Msg::MessageAck<std::vector<char>>& ack) {
+        adapter->SetReplyHandlerCallback([this](Msg::MessageAck<std::vector<char>>& ack)
+        {
             return this->OnReply(ack);
         });
     }
 
-    int Base::attachAdapter(std::unique_ptr<Adapter::AdapterBase> adapter) {
-        if (!adapter) {
+    int Base::attachAdapter(std::unique_ptr<Adapter::AdapterBase> adapter)
+    {
+        if (!adapter)
+        {
             return -1;
         }
-        auto registerBoundAdapter = [this](Adapter::AdapterBase* adapterPtr) {
-            if (!adapterPtr) {
+        auto registerBoundAdapter = [this](Adapter::AdapterBase* adapterPtr)
+        {
+            if (!adapterPtr)
+            {
                 return;
             }
             const int parentId = adapterPtr->GetParentID();
-            if (parentId < 0) {
+            if (parentId < 0)
+            {
                 return;
             }
             std::lock_guard<std::mutex> lock(mutex);
             m_BoundAdaptersMap[static_cast<ModuleDefs::DeviceType>(parentId)] = adapterPtr;
         };
 
-        if (auto p = dynamic_cast<Adapter::MotorAdapter*>(adapter.get())) {
+        if (auto p = dynamic_cast<Adapter::MotorAdapter*>(adapter.get()))
+        {
             motorAdapter.reset(static_cast<Adapter::MotorAdapter*>(adapter.release()));
             registerBoundAdapter(motorAdapter.get());
             return 0;
         }
-        if (auto p = dynamic_cast<Adapter::CameraAdapter*>(adapter.get())) {
+        if (auto p = dynamic_cast<Adapter::CameraAdapter*>(adapter.get()))
+        {
             CameraAdapter.reset(static_cast<Adapter::CameraAdapter*>(adapter.release()));
             registerBoundAdapter(CameraAdapter.get());
             return 0;
         }
-        if (auto p = dynamic_cast<Adapter::CommsAdapter*>(adapter.get())) {
+        if (auto p = dynamic_cast<Adapter::CommsAdapter*>(adapter.get()))
+        {
             CommsAdapter.reset(static_cast<Adapter::CommsAdapter*>(adapter.release()));
             registerBoundAdapter(CommsAdapter.get());
             return 0;
         }
-        if (auto p = dynamic_cast<Adapter::TlmAdapter*>(adapter.get())) {
+        if (auto p = dynamic_cast<Adapter::TlmAdapter*>(adapter.get()))
+        {
             TlmAdapter.reset(static_cast<Adapter::TlmAdapter*>(adapter.release()));
             registerBoundAdapter(TlmAdapter.get());
             return 0;
         }
-        if (auto p = dynamic_cast<Adapter::UpdateAdapter*>(adapter.get())) {
+        if (auto p = dynamic_cast<Adapter::UpdateAdapter*>(adapter.get()))
+        {
             UpdateAdapter.reset(static_cast<Adapter::UpdateAdapter*>(adapter.release()));
             registerBoundAdapter(UpdateAdapter.get());
             return 0;
@@ -166,35 +206,43 @@ namespace Modules {
         return 0;
     }
 
-    void Base::OnTimer(void) {
+    void Base::OnTimer(void)
+    {
         m_TimerCanRun = false;
     }
 
-    void Base::SetTimerPeriod(int period) {
+    void Base::SetTimerPeriod(int period)
+    {
         m_SleepPeriod.store(period);
     }
 
-    void Base::timerThread(void) {
-        while (m_ThreadCanRun && m_TimerCanRun) {
+    void Base::timerThread(void)
+    {
+        while (m_ThreadCanRun && m_TimerCanRun)
+        {
             OnTimer();
             std::this_thread::sleep_for(std::chrono::milliseconds(m_SleepPeriod.load()));
         }
     }
 
-    int Base::dispatchToModule(std::vector<char>& msg) {
-        if (msg.size() < sizeof(BaseMsgHdr)) {
+    int Base::dispatchToModule(std::vector<char>& msg)
+    {
+        if (msg.size() < sizeof(BaseMsgHdr))
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message too small for header (size: %zu)\r\n", msg.size());
             return -1;
         }
 
         // Encode in the message capsule
         BaseMsgHdr* hdr = reinterpret_cast<BaseMsgHdr*>(msg.data());
-        if (hdr->command == static_cast<uint8_t>(ModuleDefs::DeviceType::NullModule)) {
+        if (hdr->command == static_cast<uint8_t>(ModuleDefs::DeviceType::NullModule))
+        {
             return 0; // Null mode messages are only for pinging. Drop immediately
         }
         uint16_t seqID = hdr->seqID;
 
-        if (msg.size() < sizeof(BaseMsgHdr) + sizeof(ModMsgHdr)) {
+        if (msg.size() < sizeof(BaseMsgHdr) + sizeof(ModMsgHdr))
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message too small for module header (size: %zu)\r\n", msg.size());
             return -1;
         }
@@ -219,13 +267,15 @@ namespace Modules {
         };
 
         auto it = CmdToAdapter.find(static_cast<ModuleDefs::DeviceType>(hdr->command));
-        if (it == CmdToAdapter.end() || it->second == nullptr) {
+        if (it == CmdToAdapter.end() || it->second == nullptr)
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message with invalid/unbound command ID: %d\r\n", hdr->command);
             return -1;
         }
 
         // This is a ping message. Reply immediately
-        if (it->first == ModuleDefs::DeviceType::NullModule) {
+        if (it->first == ModuleDefs::DeviceType::NullModule)
+        {
             return 0;
         }
 
@@ -252,25 +302,32 @@ namespace Modules {
         return ret;
     }
 
-    int Base::moduleRegisterCommand(const int commandID, std::function<void(val_type_t, std::vector<char>&)> handler) {
-        m_CommandHandlers[commandID] = [handler](val_type_t val, std::vector<char>& payload) {
+    int Base::moduleRegisterCommand(const int commandID, std::function<void(val_type_t, std::vector<char>&)> handler)
+    {
+        m_CommandHandlers[commandID] = [handler](val_type_t val, std::vector<char>& payload)
+        {
             handler(val, payload);
         };
         return 0; // Success
     }
 
-    int Base::moduleRegisterCommand(const int commandID, std::function<int(val_type_t, std::vector<char>&)> handler) {
-        m_CommandHandlers[commandID] = [this, handler](val_type_t val, std::vector<char>& payload) {
+    int Base::moduleRegisterCommand(const int commandID, std::function<int(val_type_t, std::vector<char>&)> handler)
+    {
+        m_CommandHandlers[commandID] = [this, handler](val_type_t val, std::vector<char>& payload)
+        {
             const int status = handler(val, payload);
-            if (status < 0) {
+            if (status < 0)
+            {
                 this->DoAck(false, {});
             }
         };
         return 0; // Success
     }
 
-    int Base::GetBaseMsgHdr(std::vector<char>& buffer, BaseMsgHdr& hdr) {
-        if (buffer.size() < sizeof(BaseMsgHdr)) {
+    int Base::GetBaseMsgHdr(std::vector<char>& buffer, BaseMsgHdr& hdr)
+    {
+        if (buffer.size() < sizeof(BaseMsgHdr))
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Buffer too small for BaseMsgHdr (size: %zu)\r\n", buffer.size());
             return -1; // Buffer too small
         }
@@ -278,12 +335,16 @@ namespace Modules {
         return 0; // Success    
     }
 
-    int Base::dispatchCommand(const int commandID, val_type_t val, std::vector<char>& payload) {
-        try {
+    int Base::dispatchCommand(const int commandID, val_type_t val, std::vector<char>& payload)
+    {
+        try
+        {
             auto handler = m_CommandHandlers[commandID];
             handler(val, payload);
             return 0;
-        } catch (const std::out_of_range& e) {
+        }
+        catch (const std::out_of_range& e)
+        {
             // Handle the case where the commandID is not found in the map
             return -1; // Command not found
         }
@@ -291,7 +352,8 @@ namespace Modules {
         return 0; // Success
     }
 
-    int Base::DoAck(bool status, const std::vector<char>& replyData) {
+    int Base::DoAck(bool status, const std::vector<char>& replyData)
+    {
         // For now, we simply log the acknowledgment data. In a real implementation, this could involve more complex processing.
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_DEBUG, "Submitting acknowledgment - Status: %s, Reply data size: %zu\r\n", 
@@ -302,7 +364,8 @@ namespace Modules {
         return 0; // Success
     }
 
-    int Base::OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& capsule) {
+    int Base::OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& capsule)
+    {
         auto& payload = capsule.getData();
         using PayloadType = std::remove_reference_t<decltype(capsule.getData())>;
         PayloadType extraPayload;
@@ -329,20 +392,23 @@ namespace Modules {
 
         auto it = m_CommandHandlers.find(commandId);
         // Compatibility fallback for legacy payloads that still embed ModMsgHdr in data.
-        if (it == m_CommandHandlers.end()) {
+        if (it == m_CommandHandlers.end())
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Unknown command received: %d\r\n", commandId);
             return -1;
         }
 
         // Catch null commands meant for pinging
-        if (it == m_CommandHandlers.end()) {
+        if (it == m_CommandHandlers.end())
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Received null/ping command. No action taken.\r\n");
             return 0;
         }
 
         m_AckCache.clear();
         it->second(commandData, extraPayload);
-        if (m_AckCache.size() && capsule.isAckRequested()) {
+        if (m_AckCache.size() && capsule.isAckRequested())
+        {
             Msg::MessageAck<std::vector<char>>& ack = m_AckCache.front();
             ack.mCommandID   = commandId;
             ack.mSeqID       = capsule.getSeqID();
@@ -355,7 +421,8 @@ namespace Modules {
         return 0;
     }
 
-    int Base::DoReply(Msg::MessageAck<std::vector<char>>& ack) {
+    int Base::DoReply(Msg::MessageAck<std::vector<char>>& ack)
+    {
         // In a real implementation, this would involve sending the acknowledgment back to the sender module thread. For now, we simply log the acknowledgment data.
         Logger* logger = Logger::getLoggerInst();
 
@@ -373,7 +440,8 @@ namespace Modules {
         };
 
         auto it = CmdToAdapter.find(static_cast<ModuleDefs::DeviceType>(ack.mReplyDestID));
-        if (it == CmdToAdapter.end() || it->second == nullptr) {
+        if (it == CmdToAdapter.end() || it->second == nullptr)
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message with invalid/unbound command ID: %d\r\n", ack.mReplyDestID);
             return -1;
         }
@@ -383,15 +451,18 @@ namespace Modules {
         return it->second->ConnectModuleReply(ack);
     }
 
-    int Base::OnModuleMsgReceived_(std::vector<char>& buffer, int srcId) {
+    int Base::OnModuleMsgReceived_(std::vector<char>& buffer, int srcId)
+    {
         // Extract the standard module message header. If payload size, then 
         // we define a payload
-        if (buffer.size() < sizeof(BaseMsgHdr)) {
+        if (buffer.size() < sizeof(BaseMsgHdr))
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message too small for header + payload (size: %zu)\r\n", buffer.size());
             return -1; // Buffer too small for header + payload
         }
 
-        if (buffer.size() < sizeof(BaseMsgHdr) + sizeof(ModMsgHdr)) {
+        if (buffer.size() < sizeof(BaseMsgHdr) + sizeof(ModMsgHdr))
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "Received message too small for module header + payload (size: %zu)\r\n", buffer.size());
             return -1;
         }
@@ -410,7 +481,8 @@ namespace Modules {
 
          // Extract the payload based on the payload length in the header
         ret = OnModuleMsgReceived(capsule);
-        if (capsule.isReplyPresent()) {
+        if (capsule.isReplyPresent())
+        {
             // Clear the buffer, then refill using the data from the reply buffer
             buffer.clear();
             std::vector<char> replyData = capsule.GetAckRaw();

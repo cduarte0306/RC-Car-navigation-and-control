@@ -24,7 +24,8 @@ public:
      * @brief Start a new calibration session, clearing any previously collected samples and results.
      * 
      */
-    void startCalibration() {
+    void startCalibration()
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Starting new calibration session\n");
         m_Calibrated = false;
     }
@@ -95,12 +96,14 @@ public:
      * @param state true to start calibration, false to stop calibration
      * 
      */
-    void SetCalibrationMode(bool state) {
+    void SetCalibrationMode(bool state)
+    {
       Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Setting calibration mode: %s\n", state ? "ON" : "OFF");
       m_Calibrated = !state;
     }
 
-    bool GetCalibMode() const {
+    bool GetCalibMode() const
+    {
       return m_Calibrated;
     }
 
@@ -199,7 +202,8 @@ private:
                                     0, 0, 1, 0,
                                     0, 0, 0, 1};
 
-        bool hasImageSize() const {
+        bool hasImageSize() const
+        {
             return imageWidth > 0 && imageHeight > 0;
         }
     };

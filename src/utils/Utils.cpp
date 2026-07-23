@@ -16,7 +16,8 @@ namespace Utils {
     {
         std::string oeVersion;
         std::ifstream versionFile("/etc/versions/oe-version.txt");
-        if (versionFile.is_open()) {
+        if (versionFile.is_open())
+        {
             std::string vers;
             versionFile >> vers;
             oeVersion = vers;
@@ -24,7 +25,8 @@ namespace Utils {
         return oeVersion;
     }
 
-    static void crash_handler(int sig, siginfo_t* info, void* /*ucontext*/) {
+    static void crash_handler(int sig, siginfo_t* info, void* /*ucontext*/)
+    {
         // async-signal-safe write
         const char* msg = "\n*** CRASH - Stack trace:\n";
         write(STDERR_FILENO, msg, strlen(msg));
@@ -41,7 +43,8 @@ namespace Utils {
         raise(sig);
     }
 
-    void install_crash_handler() {
+    void install_crash_handler()
+    {
         struct sigaction sa{};
         sa.sa_sigaction = crash_handler;
         sigemptyset(&sa.sa_mask);
@@ -54,7 +57,8 @@ namespace Utils {
         sigaction(SIGTRAP, &sa, nullptr);  // catch your specific signal
     }
 
-    int ConfigCores() {
+    int ConfigCores()
+    {
         struct rlimit rl{};
         if (getrlimit(RLIMIT_CORE, &rl) != 0)
             throw std::runtime_error("getrlimit failed");

@@ -2,19 +2,24 @@
 
 namespace Adapter {
 
-MotorAdapter::MotorAdapter(std::string parentName_) : AdapterBase(ModuleDefs::AdapterId::MotorAdapterID, parentName_) {
+MotorAdapter::MotorAdapter(std::string parentName_) : AdapterBase(ModuleDefs::AdapterId::MotorAdapterID, parentName_)
+{
 }
 
-int MotorAdapter::setMotorSpeed(int speed) {
-	if (!motorSpeedCommand) {
+int MotorAdapter::setMotorSpeed(int speed)
+{
+	if (!motorSpeedCommand)
+	{
 		return -1;
 	}
 
 	return motorSpeedCommand(speed);
 }
 
-int MotorAdapter::steer(int angle) {
-	if (!steerCommand) {
+int MotorAdapter::steer(int angle)
+{
+	if (!steerCommand)
+	{
 		return -1;
 	}
 
@@ -22,48 +27,61 @@ int MotorAdapter::steer(int angle) {
 	return 0;
 }
 
-int MotorAdapter::CommandMotorState(bool state) {
-	if (!disableMotorsCommand || !enableMotorsCommand) {
+int MotorAdapter::CommandMotorState(bool state)
+{
+	if (!disableMotorsCommand || !enableMotorsCommand)
+	{
 		return 0;
 	}
 
-	if (state) {
+	if (state)
+	{
 		enableMotorsCommand();
-	} else {
+	}
+	else
+	{
 		disableMotorsCommand();
 	}
 	return 0;
 }
 
-int MotorAdapter::bind_(AdapterBase* Adapter) {
+int MotorAdapter::bind_(AdapterBase* Adapter)
+{
 	bindInterface(static_cast<MotorAdapter*>(Adapter));
 	return 0;
 }
 
-void MotorAdapter::bindInterface(MotorAdapter* adapter) {
-	if (!adapter) {
+void MotorAdapter::bindInterface(MotorAdapter* adapter)
+{
+	if (!adapter)
+	{
 		return;
 	}
 
-	this->motorSpeedCommand = [adapter](int speed) {
+	this->motorSpeedCommand = [adapter](int speed)
+	{
 		return adapter->setMotorSpeed_(speed);
 	};
 
-	this->steerCommand = [adapter](int angle) {
+	this->steerCommand = [adapter](int angle)
+	{
 		return adapter->steer_(angle);
 	};
 
-	this->moduleWriteCmd = [adapter](char* pbuf, size_t len) {
+	this->moduleWriteCmd = [adapter](char* pbuf, size_t len)
+	{
 		return adapter->moduleCommand_(pbuf, len);
 	};
 }
 
-int MotorAdapter::setMotorSpeed_(int direction) {
+int MotorAdapter::setMotorSpeed_(int direction)
+{
 	(void)direction;
 	return 0;
 }
 
-int MotorAdapter::steer_(int counts) {
+int MotorAdapter::steer_(int counts)
+{
 	(void)counts;
 	return 0;
 }

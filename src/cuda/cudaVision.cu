@@ -24,11 +24,13 @@ __global__ void pointCloudToColorKernel(const float* __restrict__ pointCloud,
                                         float* __restrict__ dstMat,
                                         const size_t dstStep,
                                         const int rows,
-                                        const int cols) {
+                                        const int cols)
+{
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (row >= rows || col >= cols) {
+    if (row >= rows || col >= cols)
+    {
         return;
     }
 
@@ -78,11 +80,13 @@ __global__ void speckleRejectionKernel(const float* __restrict__ pointCloud,
                                        const int cols,
                                        const float depthThreshold,
                                        const int   minAgreeing,
-                                       const float colorThreshold) {
+                                       const float colorThreshold)
+{
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (row >= rows || col >= cols) {
+    if (row >= rows || col >= cols)
+    {
         return;
     }
 
@@ -104,7 +108,8 @@ __global__ void speckleRejectionKernel(const float* __restrict__ pointCloud,
     
 
     // If center pixel is already invalid, keep it zeroed
-    if (centerZ <= 0.0f) {
+    if (centerZ <= 0.0f)
+    {
         dst[0] = 0.0f; dst[1] = 0.0f; dst[2] = 0.0f;
         dst[3] = 0.0f; dst[4] = 0.0f; dst[5] = 0.0f;
         return;
@@ -117,14 +122,16 @@ __global__ void speckleRejectionKernel(const float* __restrict__ pointCloud,
     int colorCount  = 0;
     int depthAgreeing = 0;
 
-    for (int dy = -halfN; dy <= halfN; ++dy) {
+    for (int dy = -halfN; dy <= halfN; ++dy)
+    {
         int r = row + dy;
         if (r < 0 || r >= rows) continue;
 
         const float* nRow = reinterpret_cast<const float*>(
                                 reinterpret_cast<const unsigned char*>(pointCloud) + r * pcStep);
 
-        for (int dx = -halfN; dx <= halfN; ++dx) {
+        for (int dx = -halfN; dx <= halfN; ++dx)
+        {
             if (dx == 0 && dy == 0) continue; // skip self
             int c = col + dx;
             if (c < 0 || c >= cols) continue;
@@ -134,7 +141,8 @@ __global__ void speckleRejectionKernel(const float* __restrict__ pointCloud,
             if (nZ <= 0.0f) continue; // skip invalid
 
             // Depth consensus
-            if (fabsf(nZ - centerZ) <= depthThreshold) {
+            if (fabsf(nZ - centerZ) <= depthThreshold)
+            {
                 depthAgreeing++;
             }
 
@@ -144,14 +152,16 @@ __global__ void speckleRejectionKernel(const float* __restrict__ pointCloud,
             float dB = nb[5] - cB;
             float colorDist = sqrtf(dR * dR + dG * dG + dB * dB);
 
-            if (colorDist <= colorThreshold) {
+            if (colorDist <= colorThreshold)
+            {
                 sumX += nb[0]; sumY += nb[1]; sumZ += nb[2];
                 colorCount++;
             }
         }
     }
 
-    if (colorCount > 0) {
+    if (colorCount > 0)
+    {
         // Snap XYZ to the average of colour-similar neighbours (same surface)
         // Keep the pixel's own colour unchanged
         float inv = 1.0f / colorCount;
@@ -161,11 +171,15 @@ __global__ void speckleRejectionKernel(const float* __restrict__ pointCloud,
         dst[3] = cR;
         dst[4] = cG;
         dst[5] = cB;
-    } else if (depthAgreeing >= minAgreeing) {
+    }
+    else if (depthAgreeing >= minAgreeing)
+    {
         // No colour matches but depth is consistent — keep as-is
         dst[0] = center[0]; dst[1] = center[1]; dst[2] = center[2];
         dst[3] = cR;        dst[4] = cG;        dst[5] = cB;
-    } else {
+    }
+    else
+    {
         // True speckle: no colour match AND depth is an outlier — remove
         dst[0] = 0.0f; dst[1] = 0.0f; dst[2] = 0.0f;
         dst[3] = 0.0f; dst[4] = 0.0f; dst[5] = 0.0f;
@@ -173,8 +187,10 @@ __global__ void speckleRejectionKernel(const float* __restrict__ pointCloud,
 }
 
 
-int cuda::pointCloudToColor(cv::Mat& pointCloud, cv::Mat& colorFrame, cv::Mat& colorPointCloud) {
-    if (pointCloud.type() != CV_32FC3 || colorFrame.type() != CV_8UC3 || colorPointCloud.type() != CV_32FC(6)) {
+int cuda::pointCloudToColor(cv::Mat& pointCloud, cv::Mat& colorFrame, cv::Mat& colorPointCloud)
+{
+    if (pointCloud.type() != CV_32FC3 || colorFrame.type() != CV_8UC3 || colorPointCloud.type() != CV_32FC(6))
+    {
         return -1; // Unsupported types
     }
 
@@ -213,12 +229,15 @@ int cuda::pointCloudToColor(cv::Mat& pointCloud, cv::Mat& colorFrame, cv::Mat& c
 
 int cuda::smoothPointCloud(cv::Mat& pointCloud, cv::Mat& smoothedPointCloud,
                            float depthThreshold, int minAgreeing,
-                           float colorThreshold) {
-    if (pointCloud.type() != CV_32FC(6) || smoothedPointCloud.type() != CV_32FC(6)) {
+                           float colorThreshold)
+{
+    if (pointCloud.type() != CV_32FC(6) || smoothedPointCloud.type() != CV_32FC(6))
+    {
         return -1; // Unsupported types
     }
 
-    if (minAgreeing == 0) {
+    if (minAgreeing == 0)
+    {
         smoothedPointCloud = pointCloud;
         return 0;
     }

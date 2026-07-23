@@ -9,7 +9,8 @@ namespace Device {
         DeviceBase(/* args */) {}
         ~DeviceBase() {}
 
-        DeviceBase* getDev() {
+        DeviceBase* getDev()
+        {
             return this;
         }
     };

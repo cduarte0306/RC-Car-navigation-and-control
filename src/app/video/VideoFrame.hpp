@@ -26,14 +26,17 @@ public:
 
     VideoFrame& operator=(const VideoFrame& other) noexcept = default;
 
-    std::vector<uint8_t>& operator [](int id) noexcept {
+    std::vector<uint8_t>& operator [](int id) noexcept
+    {
         return m_FrameSegMap[id];
     }
 
-    const std::vector<uint8_t>& operator [](int id) const noexcept {
+    const std::vector<uint8_t>& operator [](int id) const noexcept
+    {
         static const std::vector<uint8_t> kEmpty;
         auto it = m_FrameSegMap.find(id);
-        if (it == m_FrameSegMap.end()) {
+        if (it == m_FrameSegMap.end())
+        {
             return kEmpty;
         }
         return it->second;
@@ -80,11 +83,13 @@ public:
     /**
      * @brief Get the segment map.
      */
-    std::map<int, std::vector<uint8_t>>& getSegmentMap() noexcept {
+    std::map<int, std::vector<uint8_t>>& getSegmentMap() noexcept
+    {
         return m_FrameSegMap;
     }
 
-    const std::map<int, std::vector<uint8_t>>& getSegmentMap() const noexcept {
+    const std::map<int, std::vector<uint8_t>>& getSegmentMap() const noexcept
+    {
         return m_FrameSegMap;
     }
 

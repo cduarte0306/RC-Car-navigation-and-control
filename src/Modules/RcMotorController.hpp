@@ -17,19 +17,22 @@ public:
     MotorController(ModuleDefs::DeviceType moduleID_, std::string name);
     ~MotorController();
 
-    virtual int stopCmd(void) override {
+    virtual int stopCmd(void) override
+    {
         return stop();
     }
 
     virtual int stop(void) override;
 
 
-    Adapter::AdapterBase* getInputAdapter() override {
+    Adapter::AdapterBase* getInputAdapter() override
+    {
         return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::MotorAdapter*>(this));
     }
 
 
-    Device::DeviceBase* getDevice() {
+    Device::DeviceBase* getDevice()
+    {
         return this->peripheralDriver.get();
     }
 

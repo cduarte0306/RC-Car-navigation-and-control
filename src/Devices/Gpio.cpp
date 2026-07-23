@@ -22,17 +22,20 @@ const std::unordered_map<int, Gpio::HeaderGpio> Gpio::jetson_orin_nano_gpio_map_
     {37, {37, "PY.02",   0, 124 }},   // GPIO26
 };
 
-Gpio::Gpio(int lineOffset, int chipIndex) : Device::DeviceBase(), m_lineOffset(static_cast<unsigned int>(lineOffset)) {
+Gpio::Gpio(int lineOffset, int chipIndex) : Device::DeviceBase(), m_lineOffset(static_cast<unsigned int>(lineOffset))
+{
     char chip_name[20];
     snprintf(chip_name, sizeof(chip_name), "/dev/gpiochip%d", chipIndex);
 
     m_chip = gpiod_chip_open(chip_name);
-    if (!m_chip) {
+    if (!m_chip)
+    {
         return;
     }
 
     gpiod_line_settings* settings = gpiod_line_settings_new();
-    if (!settings) {
+    if (!settings)
+    {
         gpiod_chip_close(m_chip);
         m_chip = nullptr;
         return;
@@ -42,14 +45,16 @@ Gpio::Gpio(int lineOffset, int chipIndex) : Device::DeviceBase(), m_lineOffset(s
     gpiod_line_settings_set_output_value(settings, GPIOD_LINE_VALUE_INACTIVE);
 
     gpiod_line_config* config = gpiod_line_config_new();
-    if (!config) {
+    if (!config)
+    {
         gpiod_line_settings_free(settings);
         gpiod_chip_close(m_chip);
         m_chip = nullptr;
         return;
     }
 
-    if (gpiod_line_config_add_line_settings(config, &m_lineOffset, 1, settings) < 0) {
+    if (gpiod_line_config_add_line_settings(config, &m_lineOffset, 1, settings) < 0)
+    {
         gpiod_line_config_free(config);
         gpiod_line_settings_free(settings);
         gpiod_chip_close(m_chip);
@@ -58,7 +63,8 @@ Gpio::Gpio(int lineOffset, int chipIndex) : Device::DeviceBase(), m_lineOffset(s
     }
 
     gpiod_request_config* reqConfig = gpiod_request_config_new();
-    if (!reqConfig) {
+    if (!reqConfig)
+    {
         gpiod_line_config_free(config);
         gpiod_line_settings_free(settings);
         gpiod_chip_close(m_chip);
@@ -73,7 +79,8 @@ Gpio::Gpio(int lineOffset, int chipIndex) : Device::DeviceBase(), m_lineOffset(s
     gpiod_line_config_free(config);
     gpiod_line_settings_free(settings);
 
-    if (!m_request) {
+    if (!m_request)
+    {
         gpiod_chip_close(m_chip);
         m_chip = nullptr;
         return;
@@ -83,22 +90,27 @@ Gpio::Gpio(int lineOffset, int chipIndex) : Device::DeviceBase(), m_lineOffset(s
 }
 
 
-Gpio::~Gpio() {
-    if (m_request) {
+Gpio::~Gpio()
+{
+    if (m_request)
+    {
         gpiod_line_request_release(m_request);
         m_request = nullptr;
     }
 
-    if (m_chip) {
+    if (m_chip)
+    {
         gpiod_chip_close(m_chip);
         m_chip = nullptr;
     }
 }
 
 
-Gpio* Gpio::create(int pinNumber) {
+Gpio* Gpio::create(int pinNumber)
+{
     auto it = jetson_orin_nano_gpio_map_lookup.find(pinNumber);
-    if (it == jetson_orin_nano_gpio_map_lookup.end()) {
+    if (it == jetson_orin_nano_gpio_map_lookup.end())
+    {
         return nullptr; // Invalid pin number
     }
     const HeaderGpio& gpioInfo = it->second;
@@ -106,8 +118,10 @@ Gpio* Gpio::create(int pinNumber) {
 }
 
 
-int Gpio::gpioWrite(int value) {
-    if (!m_request) {
+int Gpio::gpioWrite(int value)
+{
+    if (!m_request)
+    {
         return -1; // Line request not initialized
     }
 

@@ -21,17 +21,20 @@ public:
 
     virtual int init(void) override;
 
-    virtual int stop(void) override {
+    virtual int stop(void) override
+    {
         // Implementation to stop the motor controller
         return 0;
     }
 
-    Adapter::AdapterBase* getInputAdapter() override {
+    Adapter::AdapterBase* getInputAdapter() override
+    {
         return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::CommsAdapter*>(this));
     }
 
     // Override moduleCommand to handle incoming commands
-    virtual int moduleCommand(char* pbuf, size_t len) override {
+    virtual int moduleCommand(char* pbuf, size_t len) override
+    {
         return 0;
     }
 

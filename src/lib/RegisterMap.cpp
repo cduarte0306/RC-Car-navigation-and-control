@@ -9,11 +9,14 @@ static RegisterMap* g_registerMap = nullptr;
  * 
  * @return RegisterMap* Pointer to the singleton RegisterMap instance
  */
-RegisterMap* RegisterMap::getInstance() {
-    if (!g_registerMap) {
+RegisterMap* RegisterMap::getInstance()
+{
+    if (!g_registerMap)
+    {
         static std::mutex instanceMutex;
         std::lock_guard<std::mutex> lock(instanceMutex);
-        if (!g_registerMap) {
+        if (!g_registerMap)
+        {
             g_registerMap = new RegisterMap();
         }
     }

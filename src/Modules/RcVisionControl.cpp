@@ -54,7 +54,8 @@ static const char* laneNetOnnxPath   = "/home/models/lanenet/lanenet.onnx";
 static const char* laneNetEnginePath = "/data/model-engines/lanenet.engine";
 
 namespace {
-static bool isValidSgmDisparities(int value) {
+static bool isValidSgmDisparities(int value)
+{
     return value == 64 || value == 128 || value == 256;
 }
 
@@ -62,11 +63,13 @@ static constexpr int kHardMaxDisparity = 64;
 static constexpr int kHardWindowSize = 10;
 static constexpr int kPayloadMaxDisparity = 255;
 
-static int clampInt(int value, int lo, int hi) {
+static int clampInt(int value, int lo, int hi)
+{
     return std::max(lo, std::min(value, hi));
 }
 
-static void logVisionCommandEntry(const char* functionName, size_t payloadLen) {
+static void logVisionCommandEntry(const char* functionName, size_t payloadLen)
+{
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "[%s] Vision command received (payload=%zu)\n", functionName, payloadLen);
 }
@@ -86,17 +89,22 @@ void VisionControls::sanitizeVpiStereoSettings(VisionControls::CameraSettings &s
 
     s.uniquenessRatio = clampInt(s.uniquenessRatio, 0, 30);
 
-    if (s.maxDisparity != 0 && s.maxDisparity != kPayloadMaxDisparity) {
+    if (s.maxDisparity != 0 && s.maxDisparity != kPayloadMaxDisparity)
+    {
         s.maxDisparity = 0;
     }
     s.confidenceThreshold = clampInt(s.confidenceThreshold, 0, 65535);
     s.vpiQuality = clampInt(s.vpiQuality, 1, 8);
-    if (!(s.p2Alpha == 0 || s.p2Alpha == 1 || s.p2Alpha == 2 || s.p2Alpha == 4 || s.p2Alpha == 8)) {
+    if (!(s.p2Alpha == 0 || s.p2Alpha == 1 || s.p2Alpha == 2 || s.p2Alpha == 4 || s.p2Alpha == 8))
+    {
         s.p2Alpha = 0;
     }
-    if (s.uniqueness < 0.0f) {
+    if (s.uniqueness < 0.0f)
+    {
         s.uniqueness = -1.0f;
-    } else if (s.uniqueness > 1.0f) {
+    }
+    else if (s.uniqueness > 1.0f)
+    {
         s.uniqueness = 1.0f;
     }
     s.numPasses = clampInt(s.numPasses, 1, 3);
@@ -107,7 +115,8 @@ VisionControls::~VisionControls()
 }
 
 VisionControls::VisionControls(ModuleDefs::DeviceType moduleID, std::string name) :
-    Base(moduleID, name), Adapter::CameraAdapter(name) {
+    Base(moduleID, name), Adapter::CameraAdapter(name)
+    {
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Vision object initialized\r\n");
 
@@ -124,7 +133,8 @@ VisionControls::VisionControls(ModuleDefs::DeviceType moduleID, std::string name
  * 
  * @return int Error code
  */
-int VisionControls::init(void) {
+int VisionControls::init(void)
+{
     using namespace cv::dnn;
 
     Logger* logger = Logger::getLoggerInst();
@@ -135,7 +145,8 @@ int VisionControls::init(void) {
     m_TxAdapter->setParent(this->getName());
     m_SimVideoAdapter->setParent(this->getName());
 
-    if (!m_TxAdapter || !m_SimVideoAdapter) {
+    if (!m_TxAdapter || !m_SimVideoAdapter)
+    {
         logger->log(Logger::LOG_LVL_WARN, "Failed to create vision network adapters\r\n");
         throw std::runtime_error("Failed to create vision network adapters");
     }
@@ -152,33 +163,45 @@ int VisionControls::init(void) {
 
 #ifdef HAVE_OPENCV_CUDAARITHM
     int cudaDevices = cv::cuda::getCudaEnabledDeviceCount();
-    if (cudaDevices > 0) {
+    if (cudaDevices > 0)
+    {
         logger->log(Logger::LOG_LVL_INFO, "OpenCV CUDA available; devices: %d\n", cudaDevices);
         cv::cuda::printShortCudaDeviceInfo(0);
         useCuda = true;
-    } else {
+    }
+    else
+    {
         logger->log(Logger::LOG_LVL_WARN, "OpenCV CUDA runtime present but no enabled GPU detected\n");
     }
 #else
     logger->log(Logger::LOG_LVL_WARN, "OpenCV built without CUDA support\n");
 #endif
     // Check if the file exists
-    if (std::filesystem::exists(MODEL_PATH)) {
+    if (std::filesystem::exists(MODEL_PATH))
+    {
         m_DnnNetDepth = cv::dnn::readNet(MODEL_PATH);
-        if (m_DnnNetDepth.empty()) {
+        if (m_DnnNetDepth.empty())
+        {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to load DNN model at %s\n", MODEL_PATH);
-        } else {
-            if (useCuda) {
+        }
+        else
+        {
+            if (useCuda)
+            {
                 m_DnnNetDepth.setPreferableBackend(DNN_BACKEND_CUDA);
                 m_DnnNetDepth.setPreferableTarget(DNN_TARGET_CUDA);
                 logger->log(Logger::LOG_LVL_INFO, "DNN model loaded with CUDA backend\n");
-            } else {
+            }
+            else
+            {
                 m_DnnNetDepth.setPreferableBackend(DNN_BACKEND_OPENCV);
                 m_DnnNetDepth.setPreferableTarget(DNN_TARGET_CPU);
                 logger->log(Logger::LOG_LVL_INFO, "DNN model loaded with CPU backend\n");
             }
         }
-    } else {
+    }
+    else
+    {
         logger->log(Logger::LOG_LVL_WARN, "DNN model file not found at %s\n", MODEL_PATH);
         m_DnnNetDepth.setPreferableBackend(DNN_BACKEND_OPENCV);
         m_DnnNetDepth.setPreferableTarget(DNN_TARGET_CPU);
@@ -192,7 +215,8 @@ int VisionControls::init(void) {
 
     // Register telemetry port
     int ret = this->TlmAdapter->registerTelemetrySource(this->getName());
-    if (ret < 0) {
+    if (ret < 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to register vision control as telemetry source\r\n");
         return -1;
     }
@@ -236,7 +260,8 @@ int VisionControls::init(void) {
 
     VisionControls::sanitizeVpiStereoSettings(m_CamSettings);
 
-    if (m_VideoStereo->init(CAM_WIDTH, CAM_HEIGHT, CAM_WIDTH, CAM_HEIGHT) != 0) {
+    if (m_VideoStereo->init(CAM_WIDTH, CAM_HEIGHT, CAM_WIDTH, CAM_HEIGHT) != 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize VideoStereo module\r\n");
         throw std::runtime_error("Failed to initialize VideoStereo module");
     }
@@ -251,17 +276,20 @@ int VisionControls::init(void) {
 }
 
 
-int VisionControls::saveStreamingProfile(VisionControls::CameraSettings& settings) {
+int VisionControls::saveStreamingProfile(VisionControls::CameraSettings& settings)
+{
     const std::filesystem::path profilePath(StorageLocation);
     const std::filesystem::path parentDir = profilePath.has_parent_path() ? profilePath.parent_path() : std::filesystem::path{};
 
     // If a previous version accidentally created a directory at the file path, move it aside.
-    if (std::filesystem::exists(profilePath) && std::filesystem::is_directory(profilePath)) {
+    if (std::filesystem::exists(profilePath) && std::filesystem::is_directory(profilePath))
+    {
         std::error_code ec;
         std::filesystem::path bak = profilePath;
         bak += ".bakdir";
         std::filesystem::rename(profilePath, bak, ec);
-        if (ec) {
+        if (ec)
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
                                          "Streaming profile path is a directory and could not be moved: %s\n",
                                          StorageLocation);
@@ -269,10 +297,12 @@ int VisionControls::saveStreamingProfile(VisionControls::CameraSettings& setting
         }
     }
 
-    if (!parentDir.empty() && !std::filesystem::exists(parentDir)) {
+    if (!parentDir.empty() && !std::filesystem::exists(parentDir))
+    {
         std::error_code ec;
         std::filesystem::create_directories(parentDir, ec);
-        if (ec) {
+        if (ec)
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
                                          "Failed to create streaming profile directory: %s\n",
                                          parentDir.string().c_str());
@@ -311,7 +341,8 @@ int VisionControls::saveStreamingProfile(VisionControls::CameraSettings& setting
     profileSettings["colorThreshold"     ] = settings.colorThreshold;
 
     std::ofstream out(profilePath, std::ios::out | std::ios::trunc);
-    if (!out.is_open()) {
+    if (!out.is_open())
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
                                      "Failed to write streaming profile: %s\n",
                                      StorageLocation);
@@ -323,10 +354,12 @@ int VisionControls::saveStreamingProfile(VisionControls::CameraSettings& setting
 }
 
 
-int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& settings) {
+int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& settings)
+{
     const std::filesystem::path profilePath(StorageLocation);
 
-    if (!std::filesystem::exists(profilePath)) {
+    if (!std::filesystem::exists(profilePath))
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN,
                                      "Streaming profile does not exist: %s\n",
                                      StorageLocation);
@@ -334,7 +367,8 @@ int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& setting
     }
 
     // If a previous version accidentally created a directory at the file path, move it aside.
-    if (std::filesystem::is_directory(profilePath)) {
+    if (std::filesystem::is_directory(profilePath))
+    {
         std::error_code ec;
         std::filesystem::path bak = profilePath;
         bak += ".bakdir";
@@ -347,7 +381,8 @@ int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& setting
 
     // Read from the file
     std::ifstream profileFile(profilePath);
-    if (!profileFile.is_open()) {
+    if (!profileFile.is_open())
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
                                      "Failed to open streaming profile: %s\n",
                                      StorageLocation);
@@ -356,9 +391,12 @@ int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& setting
 
     nlohmann::json profileSettings;
 
-    try {
+    try
+    {
         profileFile >> profileSettings;
-    } catch (const std::exception& e) {
+    }
+    catch (const std::exception& e)
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
                                      "Failed to parse streaming profile container %s: %s\n",
                                      StorageLocation,
@@ -416,11 +454,13 @@ int VisionControls::loadStreamingProfile(VisionControls::CameraSettings& setting
  * @param pbuf Pointer to UDP receive buffer
  * @param length Length of data received
  */
-void VisionControls::onEthRecv(std::vector<char>& data) {
+void VisionControls::onEthRecv(std::vector<char>& data)
+{
     if (data.empty()) return;
     Logger* logger = Logger::getLoggerInst();
     const std::size_t packetSize = data.size();
-    if (packetSize < sizeof(Metadata)) {
+    if (packetSize < sizeof(Metadata))
+    {
         logger->log(Logger::LOG_LVL_WARN, "Frame fragment too small (%zu, need %zu)\n", packetSize, sizeof(Metadata));
         m_StreamInFrame.reset();
         return;
@@ -439,13 +479,15 @@ void VisionControls::onEthRecv(std::vector<char>& data) {
     Vision::VideoStreamer::VideoPacket packet;
 
     int ret = Vision::VideoStreamer::decodePacket(pbuf, packetSize, packet);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         logger->log(Logger::LOG_LVL_WARN, "Frame %llu decode packet error %d\n", static_cast<unsigned long long>(seqId), ret);
         m_StreamInFrame.reset();
         return;
     }
 
-    if (!packet.getVideoName().empty()) {
+    if (!packet.getVideoName().empty())
+    {
         m_LastIncomingVideoName = packet.getVideoName();
     }
 
@@ -457,25 +499,29 @@ void VisionControls::onEthRecv(std::vector<char>& data) {
     segmentData  = packet.getPayload();    
 
     // Basic header sanity
-    if (numSegments == 0) {
+    if (numSegments == 0)
+    {
         logger->log(Logger::LOG_LVL_WARN, "Frame %llu has zero segments\n", static_cast<unsigned long long>(seqId));
         m_StreamInFrame.reset();
         return;
     }
 
-    if (segmentID >= numSegments) {
+    if (segmentID >= numSegments)
+    {
         logger->log(Logger::LOG_LVL_WARN, "Frame %llu invalid segment id %u / %u\n", static_cast<unsigned long long>(seqId), segmentID, numSegments);
         m_StreamInFrame.reset();
         return;
     }
 
-    if (payloadLen == 0 || payloadLen > MaxPayloadSize) {
+    if (payloadLen == 0 || payloadLen > MaxPayloadSize)
+    {
         logger->log(Logger::LOG_LVL_WARN, "Frame %llu invalid payload length %u (max %lld)\n", static_cast<unsigned long long>(seqId), payloadLen, static_cast<long long>(MaxPayloadSize));
         m_StreamInFrame.reset();
         return;
     }
 
-    if (m_StreamInFrame.numSegments() > 0 && (m_StreamInFrame.frameID() != seqId)) {
+    if (m_StreamInFrame.numSegments() > 0 && (m_StreamInFrame.frameID() != seqId))
+    {
         // Clear the map
         m_StreamInFrame.reset();
     }
@@ -483,7 +529,8 @@ void VisionControls::onEthRecv(std::vector<char>& data) {
     m_StreamInFrame.setFrameID(seqId);
 
     // Drop duplicates to avoid over-assembly
-    if (m_StreamInFrame.getSegmentMap().count(segmentID) > 0) {
+    if (m_StreamInFrame.getSegmentMap().count(segmentID) > 0)
+    {
         logger->log(Logger::LOG_LVL_WARN,
                     "Frame %llu duplicate segment %u/%u\n",
                     static_cast<unsigned long long>(seqId),
@@ -498,10 +545,12 @@ void VisionControls::onEthRecv(std::vector<char>& data) {
     frameID = seqId;
 
     // Once we have all segments, assemble the frame via VideoFrame helper
-    if (m_StreamInFrame.numSegments() == numSegments) {
+    if (m_StreamInFrame.numSegments() == numSegments)
+    {
         const std::vector<uint8_t> assembled = m_StreamInFrame.bytes();
 
-        if (assembled.size() != totalLength) {
+        if (assembled.size() != totalLength)
+        {
             logger->log(Logger::LOG_LVL_WARN,
                         "Frame %llu size mismatch (expected %u, got %zu)\n",
                         static_cast<unsigned long long>(m_StreamInFrame.frameID()),
@@ -511,10 +560,12 @@ void VisionControls::onEthRecv(std::vector<char>& data) {
             return;  // drop corrupt frame
         }
 
-        if (!assembled.empty()) {
+        if (!assembled.empty())
+        {
             cv::Mat cvFrame;
             decodeJPEG(cvFrame, m_StreamInFrame);
-            if (cvFrame.empty()) {
+            if (cvFrame.empty())
+            {
                 logger->log(Logger::LOG_LVL_WARN,
                             "Frame %llu failed to decode JPEG\n",
                             static_cast<unsigned long long>(m_StreamInFrame.frameID()));
@@ -525,7 +576,9 @@ void VisionControls::onEthRecv(std::vector<char>& data) {
         }
         
         m_StreamInFrame.reset();
-    } else if (m_StreamInFrame.numSegments() > numSegments) {
+    }
+    else if (m_StreamInFrame.numSegments() > numSegments)
+    {
         // Should not happen due to earlier duplicate check
         logger->log(Logger::LOG_LVL_WARN,
                     "Frame %llu has excess segments (%zu / %u)\n",
@@ -538,20 +591,24 @@ void VisionControls::onEthRecv(std::vector<char>& data) {
 }
 
 
-void VisionControls::decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameEntry) {
+void VisionControls::decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameEntry)
+{
     const auto& frameMap = frameEntry.getSegmentMap();
     const uint8_t numSegments = static_cast<uint8_t>(frameEntry.numSegments());
 
-    if (frameMap.empty()) {
+    if (frameMap.empty())
+    {
         frame.release();
         return;
     }
 
     // Validate all segments exist
     uint32_t totalSize = 0;
-    for (uint8_t segID = 0; segID < numSegments; ++segID) {
+    for (uint8_t segID = 0; segID < numSegments; ++segID)
+    {
         auto it = frameMap.find(segID);
-        if (it == frameMap.end()) {
+        if (it == frameMap.end())
+        {
             frame.release();
             return;
         }
@@ -562,23 +619,28 @@ void VisionControls::decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameE
     std::vector<uint8_t> jpegFrame;
     jpegFrame.reserve(totalSize);
 
-    for (uint8_t segID = 0; segID < numSegments; ++segID) {
+    for (uint8_t segID = 0; segID < numSegments; ++segID)
+    {
         const auto& seg = frameMap.at(segID);
         jpegFrame.insert(jpegFrame.end(), seg.begin(), seg.end());
     }
 
     #if RCVC_HAVE_CUDAIMGCODECS
     cv::cuda::GpuMat gpu = cv::cuda::imdecode(jpegFrame, cv::IMREAD_COLOR);
-    if (!gpu.empty()) {
+    if (!gpu.empty())
+    {
         gpu.download(frame);
-    } else {
+    }
+    else
+    {
         frame.release();
     }
     #else
     frame = cv::imdecode(jpegFrame, cv::IMREAD_COLOR);
     #endif
 
-    if (frame.empty()) {
+    if (frame.empty())
+    {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_WARN, "Failed to decode JPEG (bytes=%zu, segments=%u)\n", jpegFrame.size(), numSegments);
     }
@@ -590,7 +652,8 @@ void VisionControls::decodeJPEG(cv::Mat& frame, const Vision::VideoFrame& frameE
  * 
  * @param stereoFrame Input/output stereo frame pair
  */
-void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q) {
+void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudMat, std::pair<cv::Mat, cv::Mat>& stereoFramePair, cv::Matx44d& Q)
+{
     cv::Mat& frameL = stereoFramePair.first;
     cv::Mat& frameR = stereoFramePair.second;
 
@@ -638,13 +701,16 @@ void VisionControls::processStereo(cv::Mat& disparityFrame, cv::Mat& pointCloudM
  * 
  * @param frame Left camera frame reference
  */
-void VisionControls::processLaneDetection(cv::Mat& frame, cv::Mat& dst) {
+void VisionControls::processLaneDetection(cv::Mat& frame, cv::Mat& dst)
+{
     m_LaneNet->infer(frame, dst);
 }
 
 
-int VisionControls::moduleCliCmd_(std::vector<std::string>& buffer) {
-    if (buffer.empty() || buffer[0].empty()) {
+int VisionControls::moduleCliCmd_(std::vector<std::string>& buffer)
+{
+    if (buffer.empty() || buffer[0].empty())
+    {
         return -1;
     }
 
@@ -652,7 +718,8 @@ int VisionControls::moduleCliCmd_(std::vector<std::string>& buffer) {
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "VisionControls received CLI command: %s\n", cmd.c_str());
     
-    if (cmd == "save-snapshot") {
+    if (cmd == "save-snapshot")
+    {
         m_SaveFrames = true;
         logger->log(Logger::LOG_LVL_INFO, "Saving next incoming frames as snapshot\n");
     }
@@ -668,12 +735,14 @@ int VisionControls::moduleCliCmd_(std::vector<std::string>& buffer) {
  * @param len Length of command buffer
  * @return int Error code
  */
-int VisionControls::moduleCommand_(std::vector<char>& buffer) {
+int VisionControls::moduleCommand_(std::vector<char>& buffer)
+{
     (void)buffer;
     return 0;
 }
 
-void VisionControls::cmdStartStreamHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdStartStreamHandler(val_type_t val, const std::vector<char>& payload)
+{
     // return;
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
@@ -682,7 +751,8 @@ void VisionControls::cmdStartStreamHandler(val_type_t val, const std::vector<cha
     return;
 }
 
-void VisionControls::cmdStopStreamHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdStopStreamHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
@@ -690,21 +760,28 @@ void VisionControls::cmdStopStreamHandler(val_type_t val, const std::vector<char
     return;
 }
 
-void VisionControls::cmdSelCameraStreamHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSelCameraStreamHandler(val_type_t val, const std::vector<char>& payload)
+{
     Logger* logger = Logger::getLoggerInst();
     logVisionCommandEntry(__FUNCTION__, payload.size());
     m_CamSettings.streamSelection.store(val.u8);
 
-    if (val.u8 == VisionControls::StreamCameraSource) {
+    if (val.u8 == VisionControls::StreamCameraSource)
+    {
         m_VideoRecorder.resetPlayback();
         logger->log(Logger::LOG_LVL_INFO, "Selecting normal camera mode\n");
-        if (!payload.empty()) {
-            try {
+        if (!payload.empty())
+        {
+            try
+            {
                 nlohmann::json jsonParams = nlohmann::json::parse(std::string(payload.begin(), payload.end()));
-                if (jsonParams.contains("calibration-mode")) {
+                if (jsonParams.contains("calibration-mode"))
+                {
                     m_CamSettings.calibrationMode = jsonParams["calibration-mode"].get<bool>();
                 }
-            } catch (nlohmann::json::parse_error& e) {
+            }
+            catch (nlohmann::json::parse_error& e)
+            {
                 logger->log(Logger::LOG_LVL_ERROR, "Failed to parse camera stream selection JSON: %s\n", e.what());
                 Base::DoAck(false, {});
                 return;
@@ -713,7 +790,8 @@ void VisionControls::cmdSelCameraStreamHandler(val_type_t val, const std::vector
         return;
     }
 
-    if (val.u8 == VisionControls::StreamSimSource) {
+    if (val.u8 == VisionControls::StreamSimSource)
+    {
         logger->log(Logger::LOG_LVL_INFO, "Selecting training mode\n");
         return;
     }
@@ -723,12 +801,14 @@ void VisionControls::cmdSelCameraStreamHandler(val_type_t val, const std::vector
     return;
 }
 
-void VisionControls::cmdSetFpsHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetFpsHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     Logger* logger = Logger::getLoggerInst();
     int ret = m_VideoStreamer->setStreamFrameRate(static_cast<Vision::VideoStreamer::FrameRate>(val.u8));
-    if (ret < 0) {
+    if (ret < 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to set FPS throttle to %u fps\n", val.u8);
         Base::DoAck(false, {});
         return;
@@ -738,11 +818,13 @@ void VisionControls::cmdSetFpsHandler(val_type_t val, const std::vector<char>& p
     return;
 }
 
-void VisionControls::cmdSetQualityHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetQualityHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     int ret = m_VideoStreamer->setJpegQuality(val.i32);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         Base::DoAck(false, {});
         return;
     }
@@ -751,7 +833,8 @@ void VisionControls::cmdSetQualityHandler(val_type_t val, const std::vector<char
     return;
 }
 
-void VisionControls::cmdSetMinDisparitiesHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetMinDisparitiesHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::lock_guard<std::mutex> guard(m_StereoMutex);
@@ -761,7 +844,8 @@ void VisionControls::cmdSetMinDisparitiesHandler(val_type_t val, const std::vect
     return;
 }
 
-void VisionControls::cmdSetMaxDisparitiesHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetMaxDisparitiesHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::lock_guard<std::mutex> guard(m_StereoMutex);
@@ -771,7 +855,8 @@ void VisionControls::cmdSetMaxDisparitiesHandler(val_type_t val, const std::vect
     return;
 }
 
-void VisionControls::cmdSetConfidenceThresholdHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetConfidenceThresholdHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::lock_guard<std::mutex> guard(m_StereoMutex);
@@ -780,7 +865,8 @@ void VisionControls::cmdSetConfidenceThresholdHandler(val_type_t val, const std:
     return;
 }
 
-void VisionControls::cmdSetUniquenessRatioHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetUniquenessRatioHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::lock_guard<std::mutex> guard(m_StereoMutex);
@@ -790,36 +876,42 @@ void VisionControls::cmdSetUniquenessRatioHandler(val_type_t val, const std::vec
     return;
 }
 
-void VisionControls::cmdSetP1Handler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetP1Handler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::lock_guard<std::mutex> guard(m_StereoMutex);
     m_CamSettings.p1 = clampInt(val.i32, 1, 255);
-    if (m_CamSettings.p2 < m_CamSettings.p1) {
+    if (m_CamSettings.p2 < m_CamSettings.p1)
+    {
         m_CamSettings.p2 = m_CamSettings.p1;
     }
     VisionControls::saveStreamingProfile(m_CamSettings);
     return;
 }
 
-void VisionControls::cmdSetP2Handler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetP2Handler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::lock_guard<std::mutex> guard(m_StereoMutex);
     m_CamSettings.p2 = clampInt(val.i32, 1, 255);
-    if (m_CamSettings.p2 < m_CamSettings.p1) {
+    if (m_CamSettings.p2 < m_CamSettings.p1)
+    {
         m_CamSettings.p2 = m_CamSettings.p1;
     }
     VisionControls::saveStreamingProfile(m_CamSettings);
     return;
 }
 
-void VisionControls::cmdSetZMaxHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetZMaxHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::lock_guard<std::mutex> guard(m_StereoMutex);
     float setting = val.f32;
-    if (setting < m_CamSettings.zMin) {
+    if (setting < m_CamSettings.zMin)
+    {
         setting = m_CamSettings.zMax;
     }
     m_CamSettings.zMax = setting;
@@ -827,12 +919,14 @@ void VisionControls::cmdSetZMaxHandler(val_type_t val, const std::vector<char>& 
     return;
 }
 
-void VisionControls::cmdSetZMinHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetZMinHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::lock_guard<std::mutex> guard(m_StereoMutex);
     float setting = val.f32;
-    if (setting > m_CamSettings.zMax) {
+    if (setting > m_CamSettings.zMax)
+    {
         setting = m_CamSettings.zMax;
     }
     m_CamSettings.zMin = setting;
@@ -840,7 +934,8 @@ void VisionControls::cmdSetZMinHandler(val_type_t val, const std::vector<char>& 
     return;
 }
 
-void VisionControls::cmdSetDepthThresholdHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetDepthThresholdHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::lock_guard<std::mutex> guard(m_StereoMutex);
@@ -849,7 +944,8 @@ void VisionControls::cmdSetDepthThresholdHandler(val_type_t val, const std::vect
     return;
 }
 
-void VisionControls::cmdSetMinAgreeingPixelsHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetMinAgreeingPixelsHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::lock_guard<std::mutex> guard(m_StereoMutex);
@@ -858,7 +954,8 @@ void VisionControls::cmdSetMinAgreeingPixelsHandler(val_type_t val, const std::v
     return;
 }
 
-void VisionControls::cmdSetColorThresholdHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSetColorThresholdHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::lock_guard<std::mutex> guard(m_StereoMutex);
@@ -867,7 +964,8 @@ void VisionControls::cmdSetColorThresholdHandler(val_type_t val, const std::vect
     return;
 }
 
-void VisionControls::cmdRdParamsHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdRdParamsHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void)val;
     (void)payload;
     logVisionCommandEntry(__FUNCTION__, payload.size());
@@ -897,7 +995,8 @@ void VisionControls::cmdRdParamsHandler(val_type_t val, const std::vector<char>&
     return;
 }
 
-void VisionControls::cmdClrVideoRecHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdClrVideoRecHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
@@ -907,27 +1006,32 @@ void VisionControls::cmdClrVideoRecHandler(val_type_t val, const std::vector<cha
     return;
 }
 
-void VisionControls::cmdSaveVideoHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdSaveVideoHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::string nameToSave = m_CamSettings.videoName;
-    if (nameToSave == "recording.MOV" && !m_LastIncomingVideoName.empty()) {
+    if (nameToSave == "recording.MOV" && !m_LastIncomingVideoName.empty())
+    {
         nameToSave = m_LastIncomingVideoName;
     }
-    if (m_VideoRecorder.saveToFile(nameToSave) < 0) {
+    if (m_VideoRecorder.saveToFile(nameToSave) < 0)
+    {
         Base::DoAck(false, {});
     }
     return;
 }
 
-void VisionControls::cmdLoadStoredVideosHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdLoadStoredVideosHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     std::vector<std::string> videoFiles = m_VideoRecorder.listRecordedFiles();
     std::stringstream ss;
-    for (const auto& file : videoFiles) {
+    for (const auto& file : videoFiles)
+    {
         ss << file << ";";
     }
 
@@ -941,35 +1045,42 @@ void VisionControls::cmdLoadStoredVideosHandler(val_type_t val, const std::vecto
     return;
 }
 
-void VisionControls::cmdLoadSelectedVideoHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdLoadSelectedVideoHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
-    if (payload.empty()) {
+    if (payload.empty())
+    {
         Base::DoAck(false, {});
         return;
     }
     std::string name(payload.begin(), payload.end());
-    if (m_VideoRecorder.loadFile(name) < 0) {
+    if (m_VideoRecorder.loadFile(name) < 0)
+    {
         Base::DoAck(false, {});
     }
     return;
 }
 
-void VisionControls::cmdDeleteVideoHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdDeleteVideoHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
-    if (payload.empty()) {
+    if (payload.empty())
+    {
         Base::DoAck(false, {});
         return;
     }
     std::string name(payload.begin(), payload.end());
-    if (m_VideoRecorder.deleteVideo(name) < 0) {
+    if (m_VideoRecorder.deleteVideo(name) < 0)
+    {
         Base::DoAck(false, {});
     }
     return;
 }
 
-void VisionControls::cmdCalibrationSetStateHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdCalibrationSetStateHandler(val_type_t val, const std::vector<char>& payload)
+{
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
     m_CamSettings.calibrationMode = val.u8;
@@ -977,15 +1088,18 @@ void VisionControls::cmdCalibrationSetStateHandler(val_type_t val, const std::ve
     return;
 }
 
-void VisionControls::cmdCalibrationWrtParamsHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdCalibrationWrtParamsHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
-    if (payload.empty()) {
+    if (payload.empty())
+    {
         Base::DoAck(false, {});
         return;
     }
     int ret = m_VideoCalib.configureFromJson(std::string(payload.begin(), payload.end()));
-    if (ret < 0) {
+    if (ret < 0)
+    {
         Base::DoAck(false, {});
         return;
     }
@@ -993,7 +1107,8 @@ void VisionControls::cmdCalibrationWrtParamsHandler(val_type_t val, const std::v
     return;
 }
 
-void VisionControls::cmdCalibrationResetHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdCalibrationResetHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
@@ -1001,18 +1116,21 @@ void VisionControls::cmdCalibrationResetHandler(val_type_t val, const std::vecto
     return;
 }
 
-void VisionControls::cmdCalibrationSaveHandler(val_type_t val, const std::vector<char>& payload) {
+void VisionControls::cmdCalibrationSaveHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void)val;
     logVisionCommandEntry(__FUNCTION__, payload.size());
     (void)payload;
-    if (m_VideoCalib.storeCalibrationProfile() < 0) {
+    if (m_VideoCalib.storeCalibrationProfile() < 0)
+    {
         Base::DoAck(false, {});
     }
     return;
 }
 
 
-std::string VisionControls::readStats() {
+std::string VisionControls::readStats()
+{
     std::stringstream ss;
 
     ss << "Camera stats: " << "\r\n" << m_VideoCalib.getCurrentCalibrationStats().dump(4) << "\r\n"
@@ -1022,12 +1140,14 @@ std::string VisionControls::readStats() {
 }
 
 
-int VisionControls::startStreaming_() {
+int VisionControls::startStreaming_()
+{
     m_VideoStreamer->start();
     return 0;
 }
 
-int VisionControls::stopStreaming_() {
+int VisionControls::stopStreaming_()
+{
     m_VideoStreamer->stop();
     return 0;
 }
@@ -1037,8 +1157,10 @@ int VisionControls::stopStreaming_() {
  * @brief Thread timer handler
  * 
  */
-void VisionControls::OnTimer(void) {
-    if (m_CamSettings.calibrationMode.load()) {
+void VisionControls::OnTimer(void)
+{
+    if (m_CamSettings.calibrationMode.load())
+    {
         nlohmann::json calibStats = m_VideoCalib.getCurrentCalibrationStats();
         std::string statsStr = calibStats.dump();
         this->TlmAdapter->publishTelemetry(
@@ -1056,15 +1178,18 @@ void VisionControls::OnTimer(void) {
  * @param frameL Left camera frame
  * @param frameR Right camera frame
  */
-void VisionControls::storeFrame(const cv::Mat& frameL, const cv::Mat& frameR) {
-    if (!m_SaveFrames) {
+void VisionControls::storeFrame(const cv::Mat& frameL, const cv::Mat& frameR)
+{
+    if (!m_SaveFrames)
+    {
         return;
     }
 
     m_SaveFrames = false;
 
     static constexpr char* snapshotDir = "/data/snapshots";
-    if (!std::filesystem::exists(snapshotDir)) {
+    if (!std::filesystem::exists(snapshotDir))
+    {
         std::filesystem::create_directories(snapshotDir);
     }
 
@@ -1079,7 +1204,8 @@ void VisionControls::storeFrame(const cv::Mat& frameL, const cv::Mat& frameR) {
 }
 
 
-void VisionControls::mainProc() {
+void VisionControls::mainProc()
+{
     Logger* logger = Logger::getLoggerInst();
 
     // Devices::StereoCam cam(0, 1);
@@ -1101,8 +1227,10 @@ void VisionControls::mainProc() {
     
     cv::Mat frameOut;
 
-    auto scaleRectMat = [this, _resizeWidth, _resizeHeight](cv::Mat& frame, cv::Mat& resizedFrame, cv::Matx44d& Q) -> void {
-        if (frame.empty()) {
+    auto scaleRectMat = [this, _resizeWidth, _resizeHeight](cv::Mat& frame, cv::Mat& resizedFrame, cv::Matx44d& Q) -> void
+    {
+        if (frame.empty())
+        {
             resizedFrame.release();
             return;
         }
@@ -1111,7 +1239,8 @@ void VisionControls::mainProc() {
         const int dstH = _resizeHeight;
         const int srcW = frame.cols;
         const int srcH = frame.rows;
-        if (dstW <= 0 || dstH <= 0 || srcW <= 0 || srcH <= 0) {
+        if (dstW <= 0 || dstH <= 0 || srcW <= 0 || srcH <= 0)
+        {
             resizedFrame = frame;
             return;
         }
@@ -1125,12 +1254,15 @@ void VisionControls::mainProc() {
         cv::resize(frame, resizedFrame, cv::Size(dstW, dstH), 0.0, 0.0, interp);
 
         // Disparity values scale with x-resolution when the map is resized.
-        if ((frame.type() == CV_16U || frame.type() == CV_16S) && resizedFrame.type() == frame.type()) {
+        if ((frame.type() == CV_16U || frame.type() == CV_16S) && resizedFrame.type() == frame.type())
+        {
             cv::Mat scaled;
             resizedFrame.convertTo(scaled, CV_32F);
             scaled *= static_cast<float>(sx);
             scaled.convertTo(resizedFrame, resizedFrame.type());
-        } else if (frame.type() == CV_32FC1) {
+        }
+        else if (frame.type() == CV_32FC1)
+        {
             resizedFrame *= static_cast<float>(sx);
         }
 
@@ -1156,27 +1288,34 @@ void VisionControls::mainProc() {
     // frameStereo = m_VideoStereo->createDstFrame();
     cv::Mat pointCloud;  // reprojectImageTo3D allocates this as CV_32FC3 each call
 
-    while (m_Running.load()) {
-        switch(m_CamSettings.streamSelection.load()) {
+    while (m_Running.load())
+    {
+        switch(m_CamSettings.streamSelection.load())
+        {
             case VisionControls::StreamCameraSource:
                 ret = m_Cam->read(frameL, frameR, xGyro, yGyro, zGyro, xAccel, yAccel, zAccel);
-                if (ret != 0) {
+                if (ret != 0)
+                {
                     continue;
                 }
 
                 storeFrame(frameL, frameR);
 
                 stereoFramePair = std::make_pair(frameL, frameR);
-                if (m_CamSettings.calibrationMode.load()) {
+                if (m_CamSettings.calibrationMode.load())
+                {
                     m_VideoCalib.DoCalibration(frameL, frameR);
 
-                    if (!frameL.empty() && !frameR.empty()) {
+                    if (!frameL.empty() && !frameR.empty())
+                    {
                         cv::hconcat(frameL, frameR, frameOut);
                         // Change to grayscale
                         auto Q = m_VideoCalib.reprojectionQ();
                         m_VideoStreamer->pushFrame(frameOut, Q);
                     }
-                } else {
+                }
+                else
+                {
                     // Extract the disparity frame
                     std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
 
@@ -1185,9 +1324,12 @@ void VisionControls::mainProc() {
                     auto processingTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
                     // Select the frame base on the ethernet link status
 
-                    if (m_TxAdapter->IsEthPresent()) {
+                    if (m_TxAdapter->IsEthPresent())
+                    {
                         frameOut = pointCloud;
-                    } else {                        
+                    }
+                    else
+                    {
                         // Resize disparity before transmission and scale Q accordingly.
                         scaleRectMat(frameStereo, resizedFrame, Q);
                         frameOut = resizedFrame;  // Reference the frame out to the resized frame
@@ -1201,7 +1343,8 @@ void VisionControls::mainProc() {
             case VisionControls::StreamSimSource: {
                 // We draw a frame from the recording object
                 cv::Mat simFrame = m_VideoRecorder.getNextFrame();
-                if (simFrame.empty()) {
+                if (simFrame.empty())
+                {
                     // No frames available, wait a bit
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     continue;

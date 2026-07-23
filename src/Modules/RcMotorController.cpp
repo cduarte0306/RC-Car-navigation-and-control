@@ -11,26 +11,32 @@
 
 
 namespace Modules {
-MotorController::MotorController(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::MotorAdapter(name) {
+MotorController::MotorController(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::MotorAdapter(name)
+{
     Logger* logger = Logger::getLoggerInst();
 
     setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::MotorAdapter*>(this)));
 
-    try {
+    try
+    {
         this->peripheralDriver = std::make_unique<Device::PeripheralCtrl>();
 
         this->m_PwmFwd = std::make_unique<Device::Pwm>("/dev/pwm0", 1000);
         int ret = this->m_PwmFwd->writeEnable(true);
-        if (ret < 0) {
+        if (ret < 0)
+        {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to enable Motor control PWM\r\n");
         }
 
         this->m_PwmSteer = std::make_unique<Device::Pwm>("/dev/pwm2", 50);
         ret = this->m_PwmSteer->writeEnable(true);
-        if (ret < 0) {
+        if (ret < 0)
+        {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to enable Servo control PWM\r\n");
         }
-    } catch (const std::exception& e) {
+    }
+    catch (const std::exception& e)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize PeripheralCtrl and motor control: %s\r\n", e.what());
     }
 
@@ -38,7 +44,8 @@ MotorController::MotorController(ModuleDefs::DeviceType moduleID_, std::string n
     m_GpioEnable = Device::Gpio::create(31); // Physical header pin 33, GPIO1_31
 }
 
-MotorController::~MotorController() {
+MotorController::~MotorController()
+{
     this->m_PwmFwd.reset();
     this->m_PwmSteer.reset();
     this->peripheralDriver.reset();
@@ -50,13 +57,15 @@ MotorController::~MotorController() {
  * 
  * @return int Error code
  */
-int MotorController::init(void) {
+int MotorController::init(void)
+{
     // Open a network adapter for telemetry
     Logger* logger = Logger::getLoggerInst();
 
     // Register as telemetry source
     int ret = this->TlmAdapter->registerTelemetrySource(this->getName());
-    if (ret < 0) {
+    if (ret < 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to register motor controller as telemetry source\r\n");
         return -1;
     }
@@ -72,7 +81,8 @@ int MotorController::init(void) {
 }
 
 
-int MotorController::stop(void) {
+int MotorController::stop(void)
+{
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Stopping motor operations...\r\n");
     peripheralDriver->setDriveMode(false);   // Set to manual
@@ -87,19 +97,25 @@ int MotorController::stop(void) {
  * @param speed Speed in PWM duty cycle
  * @return int 
  */
-int MotorController::setMotorSpeed_(int speed) {
-    if (!m_isControllerConnected) {
+int MotorController::setMotorSpeed_(int speed)
+{
+    if (!m_isControllerConnected)
+    {
         return -1;
     }
 
-    if (speed < 5 && speed > -5) {
+    if (speed < 5 && speed > -5)
+    {
         speed = 0; // Deadzone
     }
 
-    if (speed < 0) {
+    if (speed < 0)
+    {
         m_GpioEnable->gpioWrite(0); // Set direction GPIO high for reverse
         speed = -speed;
-    } else {
+    }
+    else
+    {
         m_GpioEnable->gpioWrite(1); // Set direction GPIO low for forward
     }
 
@@ -110,7 +126,8 @@ int MotorController::setMotorSpeed_(int speed) {
     Logger* logger = Logger::getLoggerInst();
     // int ret =0;
     int ret = this->m_PwmFwd->writeDutyCycle(speed);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to set PWM duty cycle: %d\r\n", speed);
     }
     return ret;
@@ -138,7 +155,8 @@ int MotorController::steer_(int counts)
     uint32_t duty_int = static_cast<uint32_t>(duty_percent);
 
     int ret = this->m_PwmSteer->writeDutyCycle(duty_int);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR,
             "Failed to set PWM duty cycle\r\n");
         return -1;
@@ -147,27 +165,34 @@ int MotorController::steer_(int counts)
     return 0;
 }
 
-void MotorController::cmdHandlerSetSpeed(val_type_t val, const std::vector<char>& payload) {
+void MotorController::cmdHandlerSetSpeed(val_type_t val, const std::vector<char>& payload)
+{
     (void)payload;
-    if (setMotorSpeed_(val.i32) < 0) {
+    if (setMotorSpeed_(val.i32) < 0)
+    {
         Base::DoAck(false, {});
     }
     return;
 }
 
-void MotorController::cmdHandlerSteer(val_type_t val, const std::vector<char>& payload) {
+void MotorController::cmdHandlerSteer(val_type_t val, const std::vector<char>& payload)
+{
     (void)payload;
-    if (steer_(val.i32) < 0) {
+    if (steer_(val.i32) < 0)
+    {
         Base::DoAck(false, {});
     }
     return;
 }
 
-void MotorController::cmdHandlerDisable(val_type_t val, const std::vector<char>& payload) {
+void MotorController::cmdHandlerDisable(val_type_t val, const std::vector<char>& payload)
+{
     (void)payload;
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Disable command received: %d\r\n", val.u8);
-    if (val.u8) {
-        if (stop() < 0) {
+    if (val.u8)
+    {
+        if (stop() < 0)
+        {
             Base::DoAck(false, {});
         }
     }
@@ -179,7 +204,8 @@ void MotorController::cmdHandlerDisable(val_type_t val, const std::vector<char>&
  * @brief Polls telemetry data
  * 
  */
-void MotorController::pollTlmData(void) {
+void MotorController::pollTlmData(void)
+{
     {
         std::lock_guard<std::mutex> lock(mtrControllerMutex);
         this->peripheralDriver->readData(psocData);
@@ -188,7 +214,8 @@ void MotorController::pollTlmData(void) {
 
     nlohmann::json telemetryJson;
 
-    if (m_isControllerConnected) {
+    if (m_isControllerConnected)
+    {
         telemetryJson["status"]        = true;
         telemetryJson["version_major"] = psocData.version_major.u8;
         telemetryJson["version_minor"] = psocData.version_minor.u8;
@@ -219,23 +246,29 @@ void MotorController::pollTlmData(void) {
 }
 
 
-void MotorController::mainProc() {
+void MotorController::mainProc()
+{
     Logger* logger = Logger::getLoggerInst();
     m_isControllerConnected = false;
     Motor::MotorLogController logController; // Start the motor log controller to capture low-level logs from the motor controller
 
     // Main processing loop for the motor controller
-    while (m_Running.load()) {
-        if (!m_isControllerConnected) {
+    while (m_Running.load())
+    {
+        if (!m_isControllerConnected)
+        {
             this->peripheralDriver->doDetectDevice();
             int ret = this->peripheralDriver->doDetectDevice();
-            if (ret == 0) {
+            if (ret == 0)
+            {
                 uint8_t major, minor, build;
                 this->peripheralDriver->getVers(major, minor, build);
                 logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
                 m_isControllerConnected = true;
             }
-        } else {
+        }
+        else
+        {
             pollTlmData();
         }
 

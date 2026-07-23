@@ -104,7 +104,8 @@ namespace Adapter {
          * 
          * @return ModuleDefs::AdapterId The adapter's device type identifier
          */
-        const ModuleDefs::AdapterId getDeviceType() const {
+        const ModuleDefs::AdapterId getDeviceType() const
+        {
             return adapterId;
         }
 
@@ -124,7 +125,8 @@ namespace Adapter {
          * 
          * @return int Parent module ID, or -1 if not found
          */
-        int GetParentID() const {
+        int GetParentID() const
+        {
             return m_ModuleID;
         }
 
@@ -189,8 +191,10 @@ namespace Adapter {
          * @param capsule The message capsule containing the command and data to be submitted to the module
          * @return int Error code indicating success or failure of the submission process
          */
-        int SubmitMailBox(Msg::MessageCapsule<std::vector<char>>& capsule) {
-            if (m_InputMailBox.isFull()) {
+        int SubmitMailBox(Msg::MessageCapsule<std::vector<char>>& capsule)
+        {
+            if (m_InputMailBox.isFull())
+            {
                 return -1;
             }
 
@@ -204,8 +208,10 @@ namespace Adapter {
          * @param ack The acknowledgment object containing the acknowledgment data to be sent back to the sender module thread
          * @return int Error code indicating success or failure of the submission process
          */
-        int SubmitReplyMailBox(Msg::MessageAck<std::vector<char>>& ack) {
-            if (m_ReplyMailBox.isFull()) {
+        int SubmitReplyMailBox(Msg::MessageAck<std::vector<char>>& ack)
+        {
+            if (m_ReplyMailBox.isFull())
+            {
                 return -1;
             }
 
@@ -331,13 +337,15 @@ namespace Adapter {
         enum {
             Udp       = 1,
             TcpServer = 2,
-            TcpClient = 3
+            TcpClient = 3,
+            TcpProxy  = 4
         };
 
         enum {
             UdpAdapterType       = 1,
             TcpServerAdapterType = 2,
-            TcpClientAdapterType = 3
+            TcpClientAdapterType = 3,
+            TcpProxyAdapterType  = 4
         };
 
         CommsAdapter(std::string parentName_="");
@@ -404,6 +412,19 @@ namespace Adapter {
         virtual std::unique_ptr<NetworkAdapter> OpenNetworkLoopbackAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, size_t bufferSize=2048, bool broadcast=false);
 
         /**
+         * @brief Create a network proxy
+         * 
+         * @param callerName Name of the caller module
+         * @param sPort Source port
+         * @param dPort Destination port
+         * @param proxyIdentifier Proxy identifier or name
+         * @param bufferSize Size of the buffer
+         * @param broadcast Whether to enable broadcast
+         * @return std::unique_ptr<NetworkProxy> 
+         */
+        virtual std::unique_ptr<NetworkAdapter> OpenProxy(const std::string& callerName, int sPort, int dPort, std::string proxyIdentifier, size_t bufferSize=2048, bool broadcast=false);
+
+        /**
          * @brief Read stats from module
          * 
          * @return std::string 
@@ -419,13 +440,15 @@ namespace Adapter {
         virtual bool GetEthConnectionState() const;
     protected:
         // callable to request data transmit; now includes caller identity
-        std::function<int(const uint8_t*, size_t)                                                > transmitDataCommand   = nullptr;
-        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, int, size_t, bool, bool)> openAdapterCommand         = nullptr;
-        std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)> dataReceivedCommand = nullptr;
-        std::function<int(NetworkAdapter& adapter, std::function<void(std::string&)>)> clientConnectedCommand = nullptr;
+        std::function<int(const uint8_t*, size_t)>                                                             transmitDataCommand    = nullptr;
+        std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, int, size_t, bool, bool)>  openAdapterCommand     = nullptr;
+        std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)>             dataReceivedCommand    = nullptr;
+        std::function<int(NetworkAdapter& adapter, std::function<void(std::string&)>)>                         clientConnectedCommand = nullptr;
+        std::function<std::unique_ptr<NetworkProxy>(const std::string&, int, int, std::string, size_t, bool)>  openProxyCommand       = nullptr;
         
         std::function<std::string(NetworkAdapter& adapter)> hostIPQueryCommand = nullptr;
         std::atomic<bool> ethConnectionState{false};
+        bool mIsProxy{false};
         int adapterCounter = -1;
 
         std::list<std::string> m_RegisteredCallers;  // List of modules that have opened an adapter here

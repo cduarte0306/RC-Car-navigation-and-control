@@ -21,7 +21,8 @@ public:
     };
 
     struct RegisterKeyHash {
-        std::size_t operator()(const RegisterKeys& key) const noexcept {
+        std::size_t operator()(const RegisterKeys& key) const noexcept
+        {
             return static_cast<std::size_t>(key);
         }
     };
@@ -33,8 +34,10 @@ public:
 
 
     // Store or overwrite a value
-    void set(RegisterKeys key, Value value) {
-        if (key == RegisterKeys::MaxKeys) {
+    void set(RegisterKeys key, Value value)
+    {
+        if (key == RegisterKeys::MaxKeys)
+        {
             return;
         }
 
@@ -45,24 +48,29 @@ public:
 
     // Retrieve a typed value; returns std::nullopt if missing or wrong type
     template <typename T>
-    std::optional<T> get(RegisterKeys key) {
-        if (key == RegisterKeys::MaxKeys) {
+    std::optional<T> get(RegisterKeys key)
+    {
+        if (key == RegisterKeys::MaxKeys)
+        {
             return std::nullopt;
         }
 
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = map_.find(key);
-        if (it == map_.end()) {
+        if (it == map_.end())
+        {
             return std::nullopt;
         }
-        if (auto val = std::get_if<T>(&it->second)) {
+        if (auto val = std::get_if<T>(&it->second))
+        {
             return *val;
         }
         return std::nullopt;
     }
     
     // Remove a key if present
-    void erase(RegisterKeys key) {
+    void erase(RegisterKeys key)
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         map_.erase(key);
     }

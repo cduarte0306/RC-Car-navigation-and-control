@@ -16,7 +16,8 @@ public:
     ~RcCarTelemetry() {}
 
     int init(void) override;
-    int stop(void) override {
+    int stop(void) override
+    {
         return 0;
     }
 

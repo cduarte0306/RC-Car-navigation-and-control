@@ -11,7 +11,8 @@ static const char* tempFilePath = "/data/firmware/";
 static CFile updateFile;
 
 namespace Modules {
-Updater::Updater(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::UpdateAdapter(name), m_Buffer(10) {
+Updater::Updater(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::UpdateAdapter(name), m_Buffer(10)
+{
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Updater object initialized\r\n");
 
@@ -19,8 +20,10 @@ Updater::Updater(ModuleDefs::DeviceType moduleID_, std::string name) : Base(modu
 }
 
 
-Updater::~Updater() {
-    if (updateFile.isOpen()) {
+Updater::~Updater()
+{
+    if (updateFile.isOpen())
+    {
         updateFile.close();
     }
 }
@@ -30,7 +33,8 @@ Updater::~Updater() {
  * 
  * @return int Error code
  */
-int Updater::init(void) {
+int Updater::init(void)
+{
     int ret = 0;
 
     ret = Base::moduleRegisterCommand(PrepareForUpdate,   &Updater::initUpdateHandler        );
@@ -50,6 +54,7 @@ int Updater::init(void) {
 
     m_updaterServerAdapter->setParent(this->getName());
     m_updaterServerAdapter->registerCallbacks(
+        this,
         &Updater::OnWebAppDoorBell,
         &Updater::OnUpdateServerDoorBell
     );
@@ -57,10 +62,12 @@ int Updater::init(void) {
     return ret;
 }
 
-void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload) {
+void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void)val;
     // Perform necessary steps to prepare the system for an update, such as stopping motors and closing connections
-    if (payload.size() == 0) {
+    if (payload.size() == 0)
+    {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "PrepareForUpdate command received with empty payload\r\n");
         Base::DoAck(false, {});
@@ -68,7 +75,8 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
     }
 
     // If open, close before starting a new update
-    if (updateFile.isOpen()) {
+    if (updateFile.isOpen())
+    {
         // Do file cleanup
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_INFO, "Closing previously opened update file\r\n");
@@ -82,7 +90,8 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
     std::filesystem::path path(std::string(tempFilePath) + fileName);
     fileName = std::string(tempFilePath) + path.filename().string();
     updateFile.open(fileName, "wb");
-    if (!updateFile.isOpen()) {
+    if (!updateFile.isOpen())
+    {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to open update file\r\n");
         Base::DoAck(false, {});
@@ -90,26 +99,31 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
     }
 
     // Command motor shut off
-    if (motorAdapter && motorAdapter->stopCmd() < 0) {
+    if (motorAdapter && motorAdapter->stopCmd() < 0)
+    {
         Base::DoAck(false, {});
         return;
     }
 
-    if (m_fwFileAdapter != nullptr) {
+    if (m_fwFileAdapter != nullptr)
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Closing existing network adapter for firmware file transfers\r\n");
         m_fwFileAdapter->closeSocket();
         m_fwFileAdapter.reset();
     }
 
     // Open network adapter for firmware file transfers
-    if (!m_fwFileAdapter) {
+    if (!m_fwFileAdapter)
+    {
         m_fwFileAdapter = this->CommsAdapter->OpenNetworkAdapter(getName(), Adapter::CommsAdapter::TcpServerAdapterType, 0, 0, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
-        if (!m_fwFileAdapter) {
+        if (!m_fwFileAdapter)
+        {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for firmware file transfers\r\n");
             Base::DoAck(false, {});
             return;
         }
-        m_fwFileAdapter->onConnected = [this]() {
+        m_fwFileAdapter->onConnected = [this]()
+        {
             // Simulate the enter key press to show the invitation prompt
             Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Firmware file transfer network adapter connected\r\n");
         };
@@ -124,13 +138,15 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
     Base::DoAck(true, m_fwFileAdapter->getPreferredSrcPort());
 }
 
-void Updater::uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload) {
+void Updater::uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void) val;
     Base::DoAck(true, {});
     return;
 }
 
-void Updater::verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload) {
+void Updater::verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void) val;
     (void) payload;
     std::vector<char> fileHash;
@@ -144,7 +160,8 @@ void Updater::verifyFirmwareHandler(val_type_t val, const std::vector<char>& pay
     return;
 }
 
-void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& payload) {
+void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& payload)
+{
     (void) val;
     (void) payload;
 
@@ -160,7 +177,8 @@ void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& pa
     return;
 }
 
-void Updater::OnFileWrite(std::vector<char>& data) {
+void Updater::OnFileWrite(std::vector<char>& data)
+{
     Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Firmware data chunk written of size: %zu\r\n", data.size());
     typedef struct {
         uint64_t chunkID;
@@ -175,13 +193,15 @@ void Updater::OnFileWrite(std::vector<char>& data) {
     (void) updateFile.write(data);
 }
 
-int Updater::OnUpdateServerDoorBell(const std::vector<char>& data) {
+int Updater::OnUpdateServerDoorBell(const std::vector<char>& data)
+{
     Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Update server received doorbell signal of size: %zu\r\n", data.size());
     
     return 0;
 }
 
-int Updater::OnWebAppDoorBell(const std::vector<char>& data) {
+int Updater::OnWebAppDoorBell(const std::vector<char>& data)
+{
     Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Web app received doorbell signal of size: %zu\r\n", data.size());
     
     return 0;

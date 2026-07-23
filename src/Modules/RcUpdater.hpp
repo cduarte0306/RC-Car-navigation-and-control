@@ -14,11 +14,13 @@ public:
      * 
      * @return Adapter::AdapterBase* Pointer to the input adapter
      */
-    Adapter::AdapterBase* getInputAdapter() override {
+    Adapter::AdapterBase* getInputAdapter() override
+    {
         return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::UpdateAdapter*>(this));
     }
 
-    virtual int stopCmd(void) override {
+    virtual int stopCmd(void) override
+    {
         return stop();
     }
 
@@ -27,7 +29,8 @@ public:
      * 
      * @return int Error code
      */
-    virtual int stop(void) override {
+    virtual int stop(void) override
+    {
         // Implementation to stop the updater
         return 0;
     }
