@@ -57,23 +57,40 @@ int CommsAdapter::openAdapter(int port, std::string& adapter)
 	return 0;
 }
 
-std::unique_ptr<NetworkAdapter> CommsAdapter::OpenNetworkAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, std::string adapter, size_t bufferSize, bool broadcast)
+template<typename T, int BufferSize>
+std::unique_ptr<T> CommsAdapter::OpenNetworkAdapter(const std::string& callerName, int sPort, int dPort, bool internal, bool broadcast)
 {
-	mIsProxy = false;
-	return openAdapterCommand(callerName, type, sPort, dPort, bufferSize, broadcast, false);
-}
+	static_assert(std::is_base_of<NetworkAdapter, T>::value, "createAdapter: T must derive from NetworkAdapter");
 
-std::unique_ptr<NetworkAdapter> CommsAdapter::OpenNetworkLoopbackAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, size_t bufferSize, bool broadcast)
-{
-	mIsProxy = false;
-	return openAdapterCommand(callerName, type, sPort, dPort, bufferSize, broadcast, true);
-}
+	int adapterType = -1;
+	if constexpr (std::is_same<T, NetworkUdp>::value)
+	{
+		adapterType = CommsAdapter::UdpAdapterType;
+	}
+	else if constexpr (std::is_same<T, NetworkTcpServer>::value)
+	{
+		adapterType = CommsAdapter::TcpServerAdapterType;
+	}
+	else if constexpr (std::is_same<T, NetworkTcpClient>::value)
+	{
+		adapterType = CommsAdapter::TcpClientAdapterType;
+	}
+	else if constexpr (std::is_same<T, NetworkProxy>::value)
+	{
+		adapterType = CommsAdapter::TcpProxyAdapterType;
+	}
+	else
+	{
+		static_assert(!std::is_same<T, T>::value, "Unsupported type for OpenNetworkAdapter");
+	}
 
-std::unique_ptr<NetworkAdapter> CommsAdapter::OpenProxy(const std::string& callerName, int sPort, int dPort, std::string proxyIdentifier, size_t bufferSize, bool broadcast)
-{
-	mIsProxy = true;
-	(void) sPort;
-	return openAdapterCommand(callerName, CommsAdapter::TcpClientAdapterType, 0, dPort, bufferSize, broadcast, true);
+	auto baseAdapter = openAdapterCommand(callerName, adapterType, sPort, dPort, BufferSize, broadcast, internal);
+	if (!baseAdapter)
+	{
+		return nullptr;
+	}
+
+	return std::unique_ptr<T>(static_cast<T*>(baseAdapter.release()));
 }
 
 bool CommsAdapter::GetEthConnectionState() const
@@ -165,7 +182,33 @@ std::unique_ptr<NetworkAdapter> CommsAdapter::openAdapter_(const std::string& pa
 		m_CallerAdapterMap[parent] = boundAdapter;
 	}
 
-	std::unique_ptr<NetworkAdapter> netAdapter = std::make_unique<NetworkAdapter>(adapterDesc, sPort, dPort, bufferSize);
+	std::unique_ptr<NetworkAdapter> netAdapter;
+	switch (type)
+	{
+		case CommsAdapter::UdpAdapterType:
+			netAdapter = std::make_unique<NetworkUdp>(adapterDesc, sPort, dPort, bufferSize);
+			break;
+		case CommsAdapter::TcpServerAdapterType:
+			netAdapter = std::make_unique<NetworkTcpServer>(adapterDesc, sPort, dPort, bufferSize);
+			break;
+		case CommsAdapter::TcpClientAdapterType:
+			netAdapter = std::make_unique<NetworkTcpClient>(adapterDesc, sPort, dPort, bufferSize);
+			break;
+		case CommsAdapter::TcpProxyAdapterType:
+		{
+			const int proxyPort = (dPort > 0) ? dPort : sPort;
+			netAdapter = std::make_unique<NetworkProxy>(proxyPort, bufferSize);
+			break;
+		}
+		default:
+			return nullptr;
+	}
+
+	if (!netAdapter)
+	{
+		return nullptr;
+	}
+
 	adapterCounter++;
 	netAdapter->id = adapterCounter;
 	netAdapter->setParent(parent);
@@ -190,5 +233,11 @@ int CommsAdapter::configureAdapter(NetworkAdapter& netAdapter, int adapterIdx, i
 	(void)internal;
 	return 0;
 }
+
+template std::unique_ptr<NetworkUdp> CommsAdapter::OpenNetworkAdapter<NetworkUdp, 2048>(const std::string& callerName, int sPort, int dPort, bool internal, bool broadcast);
+template std::unique_ptr<NetworkUdp> CommsAdapter::OpenNetworkAdapter<NetworkUdp, CommsAdapter::MaxUDPPacketSize>(const std::string& callerName, int sPort, int dPort, bool internal, bool broadcast);
+template std::unique_ptr<NetworkTcpServer> CommsAdapter::OpenNetworkAdapter<NetworkTcpServer, 2048>(const std::string& callerName, int sPort, int dPort, bool internal, bool broadcast);
+template std::unique_ptr<NetworkTcpServer> CommsAdapter::OpenNetworkAdapter<NetworkTcpServer, CommsAdapter::MaxUDPPacketSize>(const std::string& callerName, int sPort, int dPort, bool internal, bool broadcast);
+template std::unique_ptr<NetworkProxy> CommsAdapter::OpenNetworkAdapter<NetworkProxy, 2048>(const std::string& callerName, int sPort, int dPort, bool internal, bool broadcast);
 
 } // namespace Adapter

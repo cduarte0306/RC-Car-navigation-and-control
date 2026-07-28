@@ -357,7 +357,7 @@ bool NetworkPort<Network::TcpClient>::hasLo() const
     return static_cast<bool>(m_Lo);
 }
 
-int NetworkPort<Network::TcpClient>::open(std::string& host, unsigned dstPort)
+int NetworkPort<Network::TcpClient>::open(std::string& host, unsigned int dstPort)
 {
     if (lo_)
     {

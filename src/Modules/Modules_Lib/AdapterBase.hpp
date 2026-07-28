@@ -388,7 +388,6 @@ namespace Adapter {
          * @brief Create a remote network adapter
          * 
          * @param callerName Name of the caller module
-         * @param type Adapter type (UDP/TCP)
          * @param sPort Source port
          * @param dPort Destination port
          * @param adapter Adapter identifier or name
@@ -396,33 +395,8 @@ namespace Adapter {
          * @param broadcast Whether to enable broadcast
          * @return std::unique_ptr<NetworkAdapter> 
          */
-        virtual std::unique_ptr<NetworkAdapter> OpenNetworkAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, std::string adapter, size_t bufferSize=2048, bool broadcast=false);
-
-        /**
-         * @brief Create a loopback network adapter
-         * 
-         * @param callerName Name of the caller module
-         * @param sPort Source port
-         * @param dPort Destination port
-         * @param adapter Adapter identifier or name
-         * @param bufferSize Size of the buffer
-         * @param broadcast Whether to enable broadcast
-         * @return std::unique_ptr<NetworkAdapter> 
-         */
-        virtual std::unique_ptr<NetworkAdapter> OpenNetworkLoopbackAdapter(const std::string& callerName, uint8_t type, int sPort, int dPort, size_t bufferSize=2048, bool broadcast=false);
-
-        /**
-         * @brief Create a network proxy
-         * 
-         * @param callerName Name of the caller module
-         * @param sPort Source port
-         * @param dPort Destination port
-         * @param proxyIdentifier Proxy identifier or name
-         * @param bufferSize Size of the buffer
-         * @param broadcast Whether to enable broadcast
-         * @return std::unique_ptr<NetworkProxy> 
-         */
-        virtual std::unique_ptr<NetworkAdapter> OpenProxy(const std::string& callerName, int sPort, int dPort, std::string proxyIdentifier, size_t bufferSize=2048, bool broadcast=false);
+        template<typename T, int BufferSize=2048>
+        std::unique_ptr<T> OpenNetworkAdapter(const std::string& callerName, int sPort, int dPort, bool internal=false, bool broadcast=false);
 
         /**
          * @brief Read stats from module

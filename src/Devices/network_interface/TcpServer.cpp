@@ -109,7 +109,7 @@ bool TcpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_
     sport_ = static_cast<int>(boundEndpoint.port());
     acceptor_.listen(boost::asio::socket_base::max_listen_connections, ec);
 
-    logger->log(Logger::LOG_LVL_INFO, "Opened TCP socket: %s:%d\r\n", ipAddress.c_str(), sport_);
+    logger->log(Logger::LOG_LVL_INFO, "Opened TCP server socket: %s:%d\r\n", ipAddress.c_str(), sport_);
     return true;
 }
 

@@ -277,15 +277,15 @@ void NetworkComms::OnEthHandShakeRecv(std::vector<char>& data)
  */
 int NetworkComms::configureAdapter(NetworkAdapter& netAdapter, int adapterIdx, int type, bool internal)
 {
-    if (type == static_cast<int>(Adapter::CommsAdapter::Udp))
+    if (type == static_cast<int>(Adapter::CommsAdapter::UdpAdapterType))
     {
         return this->configureUDPAdapter(netAdapter, adapterIdx, internal);
     } 
-    else if (type == static_cast<int>(Adapter::CommsAdapter::TcpServer))
+    else if (type == static_cast<int>(Adapter::CommsAdapter::TcpServerAdapterType))
     {
         return this->configureTcpServer(netAdapter, adapterIdx, internal);
     }
-    else if (type == static_cast<int>(Adapter::CommsAdapter::TcpClient))
+    else if (type == static_cast<int>(Adapter::CommsAdapter::TcpClientAdapterType))
     {
         return this->configureTcpClient(netAdapter, adapterIdx, internal);
     }
@@ -313,7 +313,6 @@ int NetworkComms::configureUDPAdapter(
     {
     std::unique_ptr<NetUtils::NetworkPort<Network::UdpServer>> udpPort;
     Network::UdpServer* selectedSocket = nullptr;
-
     try
     {
         udpPort = std::make_unique<NetUtils::NetworkPort<Network::UdpServer>>(
@@ -500,8 +499,8 @@ int NetworkComms::configureUDPAdapter(
         return 0;
     };
 
-    netAdapter.connected = true;
-
+    netAdapter.connected = true;;
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Configured UDP adapter: %s\r\n", netAdapter.adapter.c_str());
     return 0;
 }
 
@@ -516,7 +515,6 @@ int NetworkComms::configureTcpServer(NetworkAdapter& netAdapter, int adapterIdx,
 {
     std::unique_ptr<NetUtils::NetworkPort<Network::TcpServer>> tcpPort;
     Network::TcpServer* selectedSocket = nullptr;
-
     try
     {
         tcpPort = std::make_unique<NetUtils::NetworkPort<Network::TcpServer>>(
@@ -628,17 +626,17 @@ int NetworkComms::configureTcpServer(NetworkAdapter& netAdapter, int adapterIdx,
         return 0;
     };
 
-    netAdapter.connected = true;
+    netAdapter.connected = true;;
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Configured TCP server for adapter: %s\r\n", netAdapter.adapter.c_str());
     return 0;
 }
 
 
 int NetworkComms::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx, bool internal)
 {
-    NetworkTcp* adpt = reinterpret_cast<NetworkTcp*>(&netAdapter);
+    NetworkTcpClient* adpt = reinterpret_cast<NetworkTcpClient*>(&netAdapter);
     std::unique_ptr<NetUtils::NetworkPort<Network::TcpClient>> tcpPort;
     Network::TcpClient* selectedSocket = nullptr;
-
     try
     {
         tcpPort = std::make_unique<NetUtils::NetworkPort<Network::TcpClient>>(
@@ -661,6 +659,7 @@ int NetworkComms::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx,
         return -1;
     }
 
+    netAdapter.loopback = internal;
     netAdapter.sPort = selectedSocket->getSrcPort();
     netAdapter.dPort = selectedSocket->getDstPort();
 
@@ -710,7 +709,7 @@ int NetworkComms::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx,
 
         uint8_t* buf = const_cast<uint8_t*>(data);
 
-        if (netAdapter.adapter == "lo")
+        if (netAdapter.loopback)
         {
             Network::TcpClient* tcpSocket = registeredPort.preferred();
             if (!tcpSocket) return -1;
@@ -733,6 +732,7 @@ int NetworkComms::configureTcpClient(NetworkAdapter& netAdapter, int adapterIdx,
         return -1;
     };
 
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Configured TCP client for adapter: %s\r\n", adpt->adapter.c_str());
     return 0;
 }
 
@@ -742,11 +742,20 @@ int NetworkComms::configureProxyIface(NetworkAdapter& netAdapter, int adapterIdx
     std::unique_ptr<NetUtils::NetworkPort<Network::TcpClient>> proxyPort = 
         std::make_unique<NetUtils::NetworkPort<Network::TcpClient>>(io_context, 0, netAdapter.dPort, netAdapter.bufferSize, true);
 
+    const std::string host = "127.0.0.1";
+    if (proxyPort->open(const_cast<std::string&>(host), netAdapter.dPort) < 0)
+    {
+        return -1;
+    }
+
     auto sock = proxyPort->preferred();
     if (!sock)
     {
         return -1;
     }
+
+    NetworkProxy* proxy = reinterpret_cast<NetworkProxy*>(&netAdapter);
+    proxyPort->setReceiveCallback(std::bind(&NetworkProxy::routeMsg, proxy, std::placeholders::_1));
 
     Network::TcpClient* socketPtr = sock;
     m_OpenedSockets[adapterIdx].socket     = socketPtr;
@@ -777,7 +786,6 @@ int NetworkComms::configureProxyIface(NetworkAdapter& netAdapter, int adapterIdx
     }
 
     auto& registeredPort = static_cast<NetUtils::NetworkPort<Network::TcpClient>&>(*registeredPortIt->second);
-    NetworkProxy* proxy = reinterpret_cast<NetworkProxy*>(&netAdapter);
 
     proxy->sendCallback = [this, &registeredPort, &netAdapter](const uint8_t* data, size_t length) -> int
     {
@@ -791,17 +799,7 @@ int NetworkComms::configureProxyIface(NetworkAdapter& netAdapter, int adapterIdx
         return -1;
     };
 
-    proxy->receiveCallback = [this, &registeredPort, &netAdapter](const std::vector<char>& buffer) -> int
-    {
-        if (!netAdapter.connected) return -1;
-
-        Network::TcpClient* tcpSocketLoopback = registeredPort.lo();
-        if (tcpSocketLoopback)
-        {
-            return tcpSocketLoopback->receive(const_cast<std::vector<char>&>(buffer));
-        }
-        return -1;
-    };
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Configured proxy interface for adapter: %s\r\n", netAdapter.adapter.c_str());
     return 0;
 }
 

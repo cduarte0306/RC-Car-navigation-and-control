@@ -6,6 +6,8 @@
 #include "utils/CFile.hpp"
 #include "utils/logger.hpp"
 
+#include "Modules_Lib/ModulesDefs.hpp"
+
 
 static const char* tempFilePath = "/data/firmware/";
 static CFile updateFile;
@@ -41,19 +43,23 @@ int Updater::init(void)
     ret = Base::moduleRegisterCommand(UploadFirmwareData, &Updater::uploadFirmwareDataHandler);
     ret = Base::moduleRegisterCommand(VerifyFirmware,     &Updater::verifyFirmwareHandler    );
     ret = Base::moduleRegisterCommand(InstallFirmware,    &Updater::installFirmwareHandler   );
+    ret = Base::moduleRegisterCommand(QueryUpdateStatus,  &Updater::queryUpdateStatusHandler);
 
     // Define the module payload
     Base::DefinePayloadLoc(sizeof(UpdaterReqHeader));
 
     // Initialize the network adapter for the internal updater server if needed
-    // m_updaterServerAdapter = this->CommsAdapter->OpenNetworkLoopbackAdapter(getName(), Adapter::CommsAdapter::TcpClientAdapterType, 0, 0, Adapter::CommsAdapter::MaxUDPPacketSize);
-    // if (!m_updaterServerAdapter) {
-    //     Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for internal updater server\r\n");
-    //     return -1;
-    // }
+    m_updaterServerAdapter = this->CommsAdapter->OpenNetworkAdapter<NetworkProxy>
+    (getName(), ModuleDefs::MAIN_APP_PROXY_PORT, 0, true);
+    if (!m_updaterServerAdapter)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for internal updater server\r\n");
+        return -1;
+    }
 
     m_updaterServerAdapter->setParent(this->getName());
-    m_updaterServerAdapter->registerCallbacks(
+    m_updaterServerAdapter->registerCallbacks
+    (
         this,
         &Updater::OnWebAppDoorBell,
         &Updater::OnUpdateServerDoorBell
@@ -115,7 +121,8 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
     // Open network adapter for firmware file transfers
     if (!m_fwFileAdapter)
     {
-        m_fwFileAdapter = this->CommsAdapter->OpenNetworkAdapter(getName(), Adapter::CommsAdapter::TcpServerAdapterType, 0, 0, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+        m_fwFileAdapter = this->CommsAdapter->OpenNetworkAdapter<NetworkTcpServer, Adapter::CommsAdapter::MaxUDPPacketSize>
+            (getName(), 0, 0);
         if (!m_fwFileAdapter)
         {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for firmware file transfers\r\n");
@@ -166,7 +173,8 @@ void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& pa
     (void) payload;
 
     using json = nlohmann::json;
-    json j = {
+    json j =
+    {
         {"status", "installing"}
     };
     
@@ -174,6 +182,24 @@ void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& pa
     m_updaterServerAdapter->send(reinterpret_cast<const uint8_t*>(j.dump().c_str()), j.dump().size());
     // int ret = m_updaterServerAdapter->receive();
     Base::DoAck(true, {});
+    return;
+}
+
+void Updater::queryUpdateStatusHandler(val_type_t val, const std::vector<char>& payload)
+{
+    (void) val;
+    (void) payload;
+
+    if (!m_UpdateQueue.empty())
+    {
+        std::vector<int> updateStatus = m_UpdateQueue.front();
+        m_UpdateQueue.pop();
+        Base::DoAck(true, updateStatus);
+    }
+    else
+    {
+        Base::DoAck(false, {});
+    }
     return;
 }
 
@@ -195,15 +221,33 @@ void Updater::OnFileWrite(std::vector<char>& data)
 
 int Updater::OnUpdateServerDoorBell(const std::vector<char>& data)
 {
+    using json = nlohmann::json;
     Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Update server received doorbell signal of size: %zu\r\n", data.size());
-    
+
+    // Decode as json
+    json j;
+    try
+    {
+        j = json::parse(data.begin(), data.end());
+        if (j.contains("status") && j["status"] == "doorbell")
+        {
+            if (j.contains("updateStatus"))
+            {
+                m_UpdateQueue.push(j["updateStatus"].get<std::vector<int>>());
+            }
+        }
+    }
+    catch (const json::parse_error& e)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to parse JSON: %s\r\n", e.what());
+        return -1;
+    }
     return 0;
 }
 
 int Updater::OnWebAppDoorBell(const std::vector<char>& data)
 {
     Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Web app received doorbell signal of size: %zu\r\n", data.size());
-    
     return 0;
 }
 

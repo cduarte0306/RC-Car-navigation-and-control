@@ -26,7 +26,8 @@ int RcCarTelemetry::init(void)
     // Initialize transmission adapter
     Logger* logger = Logger::getLoggerInst();
     constexpr int kTelemetryPort = static_cast<int>(ModuleDefs::NetworkPorts::TelemetryPort);
-    m_TxAdapter = this->CommsAdapter->OpenNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, kTelemetryPort, "wlP1p1s0");
+    m_TxAdapter = this->CommsAdapter->OpenNetworkAdapter<NetworkUdp>(getName(), 0, kTelemetryPort);
+
     if (!m_TxAdapter)
     {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create telemetry transmission adapter\r\n");

@@ -77,7 +77,16 @@ void NetworkAdapter::OnWlanLinkDetected(bool state)
 	wlanLinkDetected.store(state);
 }
 
-int NetworkTcp::receive(std::vector<char>& buffer)
+int NetworkTcpServer::receive(std::vector<char>& buffer)
+{
+	if (receiveCallback)
+	{
+		return receiveCallback(buffer);
+	}
+	return -1;
+}
+
+int NetworkTcpClient::receive(std::vector<char>& buffer)
 {
 	if (receiveCallback)
 	{
@@ -131,6 +140,9 @@ int NetworkProxy::routeMsg(const std::vector<char>& data)
 		return 0;
 	
 	const ProxyMsgHdr* hdr = reinterpret_cast<const ProxyMsgHdr*>(data.data());
+	if (hdr->destAddr < 0 || static_cast<size_t>(hdr->destAddr) >= routeCallbacks.size())
+		return -1;
+
 	auto callback = routeCallbacks[hdr->destAddr];
 	if (callback)
 	{

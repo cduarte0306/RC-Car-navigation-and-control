@@ -11,7 +11,7 @@ PORT=2345
 JETSON_IP="192.168.1.10"
 JETSON_USER="root"
 JETSON_TARGET_DIR="/tmp/"
-REMOTE_APP_PATH="${JETSON_TARGET_DIR}/rc-car-nav"
+REMOTE_APP_PATH="${JETSON_TARGET_DIR}/rc-car-nav/rc-car-nav"
 GDBSERVER_PATH="/usr/bin/gdbserver"    # explicit path
 
 MODE="$1"
@@ -28,7 +28,7 @@ elif [[ "$MODE" == "remote" ]]; then
 
     echo "[*] Building host app..."
     cd build
-    make -j16 && cd .. \
+    make -j20 && cd .. \
         || { echo "[!] Build failed"; exit 0; }
 
     echo "[*] Killing any previous gdbserver on Jetson..."
@@ -39,8 +39,12 @@ elif [[ "$MODE" == "remote" ]]; then
     rm -f "./gdbserver.log"
     rm -f "./gdbservr.log"
 
+    # Ensure rc-car-nav directory exists on the remote Jetson
+    RC_CAR_DIR="${JETSON_TARGET_DIR}/rc-car-nav"
+    ssh "${JETSON_USER}@${JETSON_IP}" "mkdir -p '${RC_CAR_DIR}'" || { echo "[!] Remote directory creation failed"; exit 1; }
+
     echo "[*] Uploading app to Jetson..."
-    scp "$APP" "${JETSON_USER}@${JETSON_IP}:${JETSON_TARGET_DIR}/" \
+    scp "$APP" "${JETSON_USER}@${JETSON_IP}:${REMOTE_APP_PATH}" \
         || { echo "[!] SCP failed"; exit 0; }
 
     echo "[*] Starting gdbserver on Jetson..."
@@ -72,13 +76,15 @@ elif [[ "$MODE" == "upload" ]]; then
         exit 0
     fi
     cd build
-    make -j16 && cd .. \
+    make -j20 && cd .. \
         || { echo "[!] Build failed"; exit 0; }
 
-    ssh "${JETSON_USER}@${JETSON_IP}" "killall -9 rc-car-updater || true"
+    # Ensure rc-car-nav directory exists on the remote Jetson
+    RC_CAR_DIR="${JETSON_TARGET_DIR}/rc-car-nav"
+    ssh "${JETSON_USER}@${JETSON_IP}" "mkdir -p '${RC_CAR_DIR}'" || { echo "[!] Remote directory creation failed"; exit 1; }
 
     echo "[*] Uploading app to Jetson..."
-    scp "$APP" "${JETSON_USER}@${JETSON_IP}:${JETSON_TARGET_DIR}/" \
+    scp "$APP" "${JETSON_USER}@${JETSON_IP}:${REMOTE_APP_PATH}" \
         || { echo "[!] SCP failed"; exit 0; }
 
     echo "[*] Upload complete: ${REMOTE_APP_PATH}"

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <queue>
 #include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
 
@@ -48,6 +49,7 @@ protected:
         UploadFirmwareData,     // Download firmware data command
         VerifyFirmware,         // Verify firmware command
         InstallFirmware,        // Install firmware command
+        QueryUpdateStatus,      // Query update status command
         UpdaterReboot           // Reboot command
     };
 
@@ -98,6 +100,14 @@ protected:
      * @return int Error code indicating success or failure of the installation step
      */
     void installFirmwareHandler(val_type_t val, const std::vector<char>& payload);
+
+    /**
+     * @brief Handle the query update status command, which involves responding with the current status of the firmware update process
+     * 
+     * @param payload Command payload containing any necessary information for querying the update status
+     * @return int Error code indicating success or failure of the query step
+     */
+    void queryUpdateStatusHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
      * @brief Callback function that is called when a chunk of firmware data is written to the update file
@@ -151,6 +161,12 @@ protected:
      * 
      */
     uint64_t m_LastChunkID = 0;
+
+    /**
+     * @brief Update status queue
+     * 
+     */
+    std::queue<std::vector<int>> m_UpdateQueue;
 };
 }
 

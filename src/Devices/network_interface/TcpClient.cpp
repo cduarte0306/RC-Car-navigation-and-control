@@ -26,6 +26,7 @@ TcpClient::~TcpClient()
 
 void TcpClient::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_)
 {
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Starting TCP receive on socket: %s:%d\r\n", tcpSocket_.local_endpoint().address().to_string().c_str(), tcpSocket_.local_endpoint().port());
     dataReceivedCallback = dataReceivedCallback_;
     asyncReceive = true;
     startReceive_();
@@ -47,7 +48,7 @@ void TcpClient::startReceive_(void)
                 else
                 {
                     Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "TCP receive error: %s. Attempting to reconnect\r\n", ec.message().c_str());
-                    Connect();
+                    HandleDisconnectEvent();
                 }
             });
     }
@@ -64,7 +65,7 @@ bool TcpClient::receive(std::vector<char>& buffer)
     if (ec)
     {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "TCP receive error: %s. Attempting to reconnect\r\n", ec.message().c_str());
-        Connect();
+        HandleDisconnectEvent();
     }
     return !ec && bytesRead == buffer.size();
 }
@@ -80,7 +81,7 @@ bool TcpClient::transmit(const uint8_t* pBuf, size_t length)
     if (ec)
     {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "TCP send error: %s. Attempting to reconnect\r\n", ec.message().c_str());
-        Connect();
+        HandleDisconnectEvent();
     }
     return !ec;
 }
@@ -117,19 +118,21 @@ int TcpClient::TimerHandler(const boost::system::error_code& ec)
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Timer error: %s\r\n", ec.message().c_str());
         return -1;
     }
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Timer triggered, attempting to reconnect\r\n");
     Connect();
     return 0;
 }
 
 int TcpClient::HandleDisconnectEvent(void)
 {
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Handling disconnect event\r\n");
     connected_ = false;
     boost::system::error_code ec;
     if (tcpSocket_.is_open())
     {
         tcpSocket_.close(ec);
     }
-    reconnectTimer_.expires_after(std::chrono::seconds(5));
+    reconnectTimer_.expires_after(std::chrono::seconds(3));
     reconnectTimer_.async_wait([this](const boost::system::error_code& ec)
     {
         TimerHandler(ec);
@@ -144,7 +147,7 @@ int TcpClient::Open(void)
     tcpSocket_.bind(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0));
     
     serverEndpoint_ = boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address(m_HostIP), dport_);
-    tcpSocket_.connect(serverEndpoint_);
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Opened TCP client socket: %s:%d\r\n", m_HostIP.c_str(), dport_);
     Connect();
     return 0;
 }
@@ -152,13 +155,32 @@ int TcpClient::Open(void)
 int TcpClient::Connect()
 {
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Attempting to connect to server -> %s:%d\r\n", m_HostIP.c_str(), dport_);
+
+    boost::system::error_code ec;
+    if (!tcpSocket_.is_open())
+    {
+        tcpSocket_.open(boost::asio::ip::tcp::v4(), ec);
+        if (ec)
+        {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to open TCP socket: %s\r\n", ec.message().c_str());
+            HandleDisconnectEvent();
+            return -1;
+        }
+        tcpSocket_.set_option(boost::asio::ip::tcp::socket::reuse_address(true), ec);
+        tcpSocket_.bind(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0), ec);
+    }
+
     tcpSocket_.async_connect(
         boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address(m_HostIP), dport_),
         [this](const boost::system::error_code& ec)
         {
             if (ec)
             {
-                Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to connect to server\r\n");
+                if (ec != boost::asio::error::operation_aborted)
+                {
+                    Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to connect to server: %s\r\n", ec.message().c_str());
+                    HandleDisconnectEvent();
+                }
             }
             else
             {

@@ -111,7 +111,7 @@ public:
     bool hasWlan() const;
     bool hasLo() const;
 
-    int open(std::string& host, unsigned dstPort);
+    int open(std::string& host, unsigned int dstPort);
     int read(std::vector<char>& buffer);
     virtual int open(int srcPort = 0, int dstPort = 0);
     virtual int close() override;

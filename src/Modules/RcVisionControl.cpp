@@ -139,8 +139,8 @@ int VisionControls::init(void)
 
     Logger* logger = Logger::getLoggerInst();
     // Initialize the network adapters
-    m_TxAdapter       = this->CommsAdapter->OpenNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, STREAM_PORT, "wlP1p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
-    m_SimVideoAdapter = this->CommsAdapter->OpenNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, STREAM_IN_PORT, 0, "enP8p1s0", Adapter::CommsAdapter::MaxUDPPacketSize);
+    m_TxAdapter       = this->CommsAdapter->OpenNetworkAdapter<NetworkUdp, Adapter::CommsAdapter::MaxUDPPacketSize>(getName(), 0, STREAM_PORT);
+    m_SimVideoAdapter = this->CommsAdapter->OpenNetworkAdapter<NetworkUdp, Adapter::CommsAdapter::MaxUDPPacketSize>(getName(), STREAM_IN_PORT, 0);
 
     m_TxAdapter->setParent(this->getName());
     m_SimVideoAdapter->setParent(this->getName());

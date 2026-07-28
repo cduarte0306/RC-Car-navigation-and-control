@@ -8,13 +8,15 @@
 
 // Mirrors Adapter::CommsAdapter's nested adapter-type enum (AdapterBase.hpp), duplicated here
 // because this header can't include AdapterBase.hpp without creating a circular include.
-enum NetworkAdapterType {
+enum NetworkAdapterType
+{
     UdpAdapterType       = 1,
     TcpServerAdapterType = 2,
     TcpClientAdapterType = 3
 };
 
-class NetworkAdapter {
+class NetworkAdapter
+{
 public:
 NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048);
     ~NetworkAdapter();
@@ -63,13 +65,46 @@ NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t buffe
     void OnWlanLinkDetected(bool state);
 };
 
-class NetworkTcp : public NetworkAdapter {
+class NetworkUdp : public NetworkAdapter
+{
 public:
     std::function<int(const std::vector<char>&)> receiveCallback = nullptr;
 
-    NetworkTcp(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048)
+    NetworkUdp(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048)
+        : NetworkAdapter(adapter_, sPort_, dPort_, bufferSize_)
+    {
+        adapterType = UdpAdapterType;
+    }
+};
+
+class NetworkTcpServer : public NetworkAdapter
+{
+public:
+    std::function<int(const std::vector<char>&)> receiveCallback = nullptr;
+
+    NetworkTcpServer(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048)
         : NetworkAdapter(adapter_, sPort_, dPort_, bufferSize_)
         {
+        adapterType = TcpServerAdapterType;
+    }
+
+    /**
+     * @brief Receive data from the TCP network adapter
+     * 
+     * @param buffer Buffer to store received data
+     * @return int Status code
+     */
+    int receive(std::vector<char>& buffer);
+};
+
+class NetworkTcpClient : public NetworkAdapter
+{
+public:
+    std::function<int(const std::vector<char>&)> receiveCallback = nullptr;
+
+    NetworkTcpClient(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048)
+        : NetworkAdapter(adapter_, sPort_, dPort_, bufferSize_)
+    {
         adapterType = TcpClientAdapterType;
     }
 
@@ -82,25 +117,26 @@ public:
     int receive(std::vector<char>& buffer);
 };
 
-class NetworkProxy : public NetworkTcp {
+class NetworkProxy : public NetworkAdapter
+{
 public:
-
-    enum {
+    enum
+    {
         UpdaterRouteAddr = 0x01, /*!< Updater application route address */
         WebAppRouteAddr  = 0x02, /*!< Web application route address */
         MainAppRouteAddr = 0x03  /*!< Main application route address */
     };
 
+    std::function<int(const std::vector<char>&)> receiveCallback = nullptr;
 
     std::function<int(const std::vector<char>&)> OnReceiveWebApp = nullptr;
     std::function<int(const std::vector<char>&)> OnReceiveUpdater = nullptr;
 
     NetworkProxy(int port, size_t bufferSize_=2048) 
-        : NetworkTcp("lo", 0, port, bufferSize_)
-        {
-            routeCallbacks.reserve(WebAppRouteAddr);
-            routeCallbacks[WebAppRouteAddr ] = webAppCallback;
-            routeCallbacks[UpdaterRouteAddr] = updaterCallback;
+        : NetworkAdapter("lo", 0, port, bufferSize_)
+    {
+            // Route IDs are sparse integer tags, so size by max tag and index safely.
+            routeCallbacks.resize(MainAppRouteAddr + 1);
     }
 
     /**
@@ -139,6 +175,13 @@ public:
         {
             return (instance->*updaterCallback)(data);
         };
+
+        if (routeCallbacks.size() <= static_cast<size_t>(MainAppRouteAddr))
+        {
+            routeCallbacks.resize(MainAppRouteAddr + 1);
+        }
+        routeCallbacks[WebAppRouteAddr ] = this->webAppCallback;
+        routeCallbacks[UpdaterRouteAddr] = this->updaterCallback;
         return 0;
     }
 
@@ -151,7 +194,8 @@ public:
     int routeMsg(const std::vector<char>& data);
 
 private:
-    struct ProxyMsgHdr {
+    struct ProxyMsgHdr
+    {
         int srcAddr;   /*!< Source address */
         int destAddr;  /*!< Destination address */
         int len;
