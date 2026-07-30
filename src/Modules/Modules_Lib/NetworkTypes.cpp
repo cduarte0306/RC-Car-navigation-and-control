@@ -68,6 +68,7 @@ void NetworkAdapter::setParent(const std::string& name)
 }
 
 void NetworkAdapter::OnEthLinkDetected(bool state)
+
 {
 	ethLinkDetected.store(state);
 }

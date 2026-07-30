@@ -277,7 +277,7 @@ T& CircularBuffer<T>::getHead(int timeout)
 		{
 			if (!m_BufferCv.wait_for(lock, std::chrono::milliseconds(timeout), [this] { return !isEmpty(); }))
 			{
-				// throw std::runtime_error("Timeout waiting for buffer item.");
+				throw std::runtime_error("Timeout waiting for buffer item.");
 			}
 		}
 	}

@@ -186,6 +186,24 @@ public:
     }
 
     /**
+     * @brief Register a callback for when the proxy is connected
+     *
+     * @tparam T Type of the instance
+     * @param instance Object the callback is invoked on
+     * @param proxyConnectedCallback Callback for proxy connected event
+     * @return int Status code
+     */
+    template<typename T>
+    int registerOnProxyConnected(T* instance, int (T::*proxyConnectedCallback)(const std::vector<char>&))
+    {
+        this->proxyConnectedCallback = [instance, proxyConnectedCallback](const std::vector<char>& data)
+        {
+            return (instance->*proxyConnectedCallback)(data);
+        };
+        return 0;
+    }
+
+    /**
      * @brief Route a message based on its header information
      * 
      * @param data Data to be routed
@@ -208,6 +226,7 @@ private:
 
     std::function<int(const std::vector<char>&)> webAppCallback = nullptr;
     std::function<int(const std::vector<char>&)> updaterCallback = nullptr;
+    std::function<int(const std::vector<char>&)> proxyConnectedCallback = nullptr;
     const uint16_t webAppPort = 0;
     const uint16_t updaterPort = 0;
 

@@ -130,6 +130,13 @@ protected:
      */
     int OnWebAppDoorBell(const std::vector<char>& data);
 
+    /**
+     * @brief Synchronously retrieve the updater reply as a JSON object
+     * 
+     * @return nlohmann::json JSON object containing the updater reply
+     */
+    nlohmann::json SynchUpdaterReply();
+
     static constexpr char* IMAGE_LOCATION = (char*)"/data/rc_updater/";
 
     /**
@@ -163,10 +170,10 @@ protected:
     uint64_t m_LastChunkID = 0;
 
     /**
-     * @brief Update status queue
+     * @brief Update status buffer for storing JSON-formatted update status messages
      * 
      */
-    std::queue<std::vector<int>> m_UpdateQueue;
+    Msg::CircularBuffer<nlohmann::json> m_UpdateStatusBuffer;
 };
 }
 

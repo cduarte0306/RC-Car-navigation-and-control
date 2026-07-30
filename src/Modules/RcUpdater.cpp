@@ -13,7 +13,8 @@ static const char* tempFilePath = "/data/firmware/";
 static CFile updateFile;
 
 namespace Modules {
-Updater::Updater(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::UpdateAdapter(name), m_Buffer(10)
+Updater::Updater(ModuleDefs::DeviceType moduleID_, std::string name) :
+Base(moduleID_, name), Adapter::UpdateAdapter(name), m_Buffer(10), m_UpdateStatusBuffer(25)
 {
     Logger* logger = Logger::getLoggerInst();
     logger->log(Logger::LOG_LVL_INFO, "Updater object initialized\r\n");
@@ -50,7 +51,7 @@ int Updater::init(void)
 
     // Initialize the network adapter for the internal updater server if needed
     m_updaterServerAdapter = this->CommsAdapter->OpenNetworkAdapter<NetworkProxy>
-    (getName(), ModuleDefs::MAIN_APP_PROXY_PORT, 0, true);
+    (getName(), WebAppIface::MAIN_APP_PROXY_PORT, 0, true);
     if (!m_updaterServerAdapter)
     {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for internal updater server\r\n");
@@ -175,14 +176,22 @@ void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& pa
     using json = nlohmann::json;
     json j =
     {
-        {"status", "installing"}
+        {"command", WebAppIface::INITIATE_UPDATE}
     };
-    
+
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Firmware installation status: %s\r\n", j.dump().c_str());
     m_updaterServerAdapter->send(reinterpret_cast<const uint8_t*>(j.dump().c_str()), j.dump().size());
-    // int ret = m_updaterServerAdapter->receive();
-    Base::DoAck(true, {});
-    return;
+    j = SynchUpdaterReply();
+    if (j.is_null())
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to get updater reply\r\n");
+        Base::DoAck(false, {});
+    }
+    else
+    {
+        std::vector<char> replyVec(j.dump().begin(), j.dump().end());
+        Base::DoAck(true, replyVec);
+    }
 }
 
 void Updater::queryUpdateStatusHandler(val_type_t val, const std::vector<char>& payload)
@@ -190,11 +199,12 @@ void Updater::queryUpdateStatusHandler(val_type_t val, const std::vector<char>& 
     (void) val;
     (void) payload;
 
-    if (!m_UpdateQueue.empty())
+    if (!m_UpdateStatusBuffer.isEmpty())
     {
-        std::vector<int> updateStatus = m_UpdateQueue.front();
-        m_UpdateQueue.pop();
-        Base::DoAck(true, updateStatus);
+        nlohmann::json updateStatus = m_UpdateStatusBuffer.getHead();
+        m_UpdateStatusBuffer.pop();
+        std::vector<char> updateStatusVec(updateStatus.dump().begin(), updateStatus.dump().end());
+        Base::DoAck(true, updateStatusVec);
     }
     else
     {
@@ -219,6 +229,26 @@ void Updater::OnFileWrite(std::vector<char>& data)
     (void) updateFile.write(data);
 }
 
+nlohmann::json Updater::SynchUpdaterReply()
+{
+    // Implementation for synchronously retrieving the updater reply as a JSON object
+    nlohmann::json reply;
+    if (!m_UpdateStatusBuffer.isEmpty())
+    {
+        try
+        {
+            reply = m_UpdateStatusBuffer.getHead(1);
+            m_UpdateStatusBuffer.pop();   
+        }
+        catch (const std::exception& e)
+        {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to get update status: %s\r\n", e.what());
+            return nlohmann::json();
+        }
+    }
+    return reply;
+}
+
 int Updater::OnUpdateServerDoorBell(const std::vector<char>& data)
 {
     using json = nlohmann::json;
@@ -233,7 +263,7 @@ int Updater::OnUpdateServerDoorBell(const std::vector<char>& data)
         {
             if (j.contains("updateStatus"))
             {
-                m_UpdateQueue.push(j["updateStatus"].get<std::vector<int>>());
+                m_UpdateStatusBuffer.push(j["updateStatus"]);
             }
         }
     }

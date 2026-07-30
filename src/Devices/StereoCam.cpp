@@ -338,20 +338,27 @@ int StereoCam::read(cv::Mat& leftBgr, cv::Mat& rightBgr, int16_t& xGyro, int16_t
     auto startTime = std::chrono::steady_clock::now();
 
     // Wait until frame is ready (producer will notify when a new synchronized frame is available)
-    auto& frames = m_StereoBuffer.getHead(timeoutMs);
-    std::pair<cv::Mat, cv::Mat>& frameBuffers_ = frames.first;
-    Device::GyroScope::GyroData& gyroData = frames.second;
+    try
+    {
+        auto& frames = m_StereoBuffer.getHead(timeoutMs);
+        std::pair<cv::Mat, cv::Mat>& frameBuffers_ = frames.first;
+        Device::GyroScope::GyroData& gyroData = frames.second;
 
-    // No deep clone here. You already clone in readCamera_ after mapping.
-    leftBgr  = frameBuffers_.first;
-    rightBgr = frameBuffers_.second;
+        // No deep clone here. You already clone in readCamera_ after mapping.
+        leftBgr  = frameBuffers_.first;
+        rightBgr = frameBuffers_.second;
 
-    xGyro = gyroData.gx;
-    yGyro = gyroData.gy;
-    zGyro = gyroData.gz;
-    xAccel = gyroData.ax;
-    yAccel = gyroData.ay;
-    zAccel = gyroData.az;
+        xGyro = gyroData.gx;
+        yGyro = gyroData.gy;
+        zGyro = gyroData.gz;
+        xAccel = gyroData.ax;
+        yAccel = gyroData.ay;
+        zAccel = gyroData.az;
+    }
+    catch(const std::exception& e)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to get stereo frame: %s\n", e.what());
+    }
 
     try
     {
