@@ -12,7 +12,8 @@
 static const char* tempFilePath = "/data/firmware/";
 static CFile updateFile;
 
-namespace Modules {
+namespace Modules
+{
 Updater::Updater(ModuleDefs::DeviceType moduleID_, std::string name) :
 Base(moduleID_, name), Adapter::UpdateAdapter(name), m_Buffer(10), m_UpdateStatusBuffer(25)
 {
@@ -40,11 +41,11 @@ int Updater::init(void)
 {
     int ret = 0;
 
-    ret = Base::moduleRegisterCommand(PrepareForUpdate,   &Updater::initUpdateHandler        );
-    ret = Base::moduleRegisterCommand(UploadFirmwareData, &Updater::uploadFirmwareDataHandler);
-    ret = Base::moduleRegisterCommand(VerifyFirmware,     &Updater::verifyFirmwareHandler    );
-    ret = Base::moduleRegisterCommand(InstallFirmware,    &Updater::installFirmwareHandler   );
-    ret = Base::moduleRegisterCommand(QueryUpdateStatus,  &Updater::queryUpdateStatusHandler);
+    ret = Base::moduleRegisterCommand(PrepareForUpdate,   &Updater::initUpdateHandler              );
+    ret = Base::moduleRegisterCommand(UploadFirmwareData, &Updater::uploadFirmwareDataHandler      );
+    ret = Base::moduleRegisterCommand(InstallFirmware,    &Updater::installFirmwareHandler         );
+    ret = Base::moduleRegisterCommand(UpdaterCleanState,  &Updater::OnUpdateServerCleanStateHandler);
+    ret = Base::moduleRegisterCommand(QueryUpdateStatus,  &Updater::queryUpdateStatusHandler       );
 
     // Define the module payload
     Base::DefinePayloadLoc(sizeof(UpdaterReqHeader));
@@ -94,7 +95,7 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
     m_UpdateFileInfo.fileName = fileName;
 
     // Strip filepath
-    std::filesystem::path path(std::string(tempFilePath) + fileName);
+    std::filesystem::path path(fileName);
     fileName = std::string(tempFilePath) + path.filename().string();
     updateFile.open(fileName, "wb");
     if (!updateFile.isOpen())
@@ -112,7 +113,7 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
         return;
     }
 
-    if (m_fwFileAdapter != nullptr)
+    if (m_fwFileAdapter.get() != nullptr)
     {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Closing existing network adapter for firmware file transfers\r\n");
         m_fwFileAdapter->closeSocket();
@@ -153,21 +154,6 @@ void Updater::uploadFirmwareDataHandler(val_type_t val, const std::vector<char>&
     return;
 }
 
-void Updater::verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload)
-{
-    (void) val;
-    (void) payload;
-    std::vector<char> fileHash;
-    int ret = updateFile.GetSha256Hash(fileHash);
-    if (ret < 0)
-    {
-        Base::DoAck(false, {});
-    }
-
-    Base::DoAck(true, fileHash);
-    return;
-}
-
 void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& payload)
 {
     (void) val;
@@ -176,22 +162,18 @@ void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& pa
     using json = nlohmann::json;
     json j =
     {
-        {"command", WebAppIface::INITIATE_UPDATE}
+        {"command",   WebAppIface::INITIATE_UPDATE },
+        {"file_path", updateFile.getFilePath() }
     };
 
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Firmware installation status: %s\r\n", j.dump().c_str());
-    m_updaterServerAdapter->send(reinterpret_cast<const uint8_t*>(j.dump().c_str()), j.dump().size());
-    j = SynchUpdaterReply();
-    if (j.is_null())
+    std::vector<char> updateStatusVec(j.dump().begin(), j.dump().end());
+    m_updaterServerAdapter->dispatchUpdater(j);
     {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to get updater reply\r\n");
-        Base::DoAck(false, {});
+        std::lock_guard<std::mutex> lock(m_CondMutex);
+        m_StatusCv.notify_all();
     }
-    else
-    {
-        std::vector<char> replyVec(j.dump().begin(), j.dump().end());
-        Base::DoAck(true, replyVec);
-    }
+    Base::DoAck(true, {});
 }
 
 void Updater::queryUpdateStatusHandler(val_type_t val, const std::vector<char>& payload)
@@ -199,87 +181,104 @@ void Updater::queryUpdateStatusHandler(val_type_t val, const std::vector<char>& 
     (void) val;
     (void) payload;
 
-    if (!m_UpdateStatusBuffer.isEmpty())
+    std::lock_guard<std::mutex> lock(m_StatusMutex);
+    Base::DoAck(m_InstallState, m_InstallProgress);
+}
+
+void Updater::OnUpdateServerCleanStateHandler(val_type_t val, const std::vector<char>& payload)
+{
+    (void) val;
+    (void) payload;
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Update server received clean state command\r\n");
+
+    m_InstallProgress = 0;  // Reset installation progress
+    m_InstallState = false;  // Reset installation state
+
+    // Perform necessary cleanup and reset the updater state
+    if (updateFile.isOpen())
     {
-        nlohmann::json updateStatus = m_UpdateStatusBuffer.getHead();
-        m_UpdateStatusBuffer.pop();
-        std::vector<char> updateStatusVec(updateStatus.dump().begin(), updateStatus.dump().end());
-        Base::DoAck(true, updateStatusVec);
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Removing update file: %s\r\n", updateFile.getFilePath().c_str());
+        updateFile.remove();
+    }
+    
+    if (m_fwFileAdapter)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Closing and removing firmware file adapter\r\n");
+        m_fwFileAdapter.reset();
     }
     else
     {
-        Base::DoAck(false, {});
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Firmware file adapter is already closed\r\n");
     }
-    return;
+    Base::DoAck(true, {});
 }
 
 void Updater::OnFileWrite(std::vector<char>& data)
 {
     Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Firmware data chunk written of size: %zu\r\n", data.size());
-    typedef struct {
-        uint64_t chunkID;
-        uint64_t fileSize;
-        uint64_t chunkSize;
-    } updateInfo;
-
-    updateInfo* info = reinterpret_cast<updateInfo*>(const_cast<char*>(data.data()));
-    m_LastChunkID = info->chunkID;
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Received file chunk of size: %d\r\n", data.size());
     std::vector<uint8_t> firmwareData(data.begin(), data.end());
-    (void) updateFile.write(data);
-}
-
-nlohmann::json Updater::SynchUpdaterReply()
-{
-    // Implementation for synchronously retrieving the updater reply as a JSON object
-    nlohmann::json reply;
-    if (!m_UpdateStatusBuffer.isEmpty())
+    if(updateFile.write(data))
     {
-        try
-        {
-            reply = m_UpdateStatusBuffer.getHead(1);
-            m_UpdateStatusBuffer.pop();   
-        }
-        catch (const std::exception& e)
-        {
-            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to get update status: %s\r\n", e.what());
-            return nlohmann::json();
-        }
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Firmware data chunk written successfully\r\n");
     }
-    return reply;
+    else
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to write firmware data chunk\r\n");
+    }
 }
 
-int Updater::OnUpdateServerDoorBell(const std::vector<char>& data)
+int Updater::OnUpdateServerDoorBell(const nlohmann::json& j)
 {
-    using json = nlohmann::json;
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Update server received doorbell signal of size: %zu\r\n", data.size());
-
-    // Decode as json
-    json j;
     try
     {
-        j = json::parse(data.begin(), data.end());
-        if (j.contains("status") && j["status"] == "doorbell")
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Update server received doorbell signal of size: %zu\r\n", j.size());
+        if (j.contains("percentage"))
         {
-            if (j.contains("updateStatus"))
-            {
-                m_UpdateStatusBuffer.push(j["updateStatus"]);
-            }
+            std::lock_guard<std::mutex> lock(m_StatusMutex);
+            m_InstallProgress = j["percentage"].get<int>();
+            m_InstallState    = j["status"].get<bool>();
+
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Update progress: %d%%\r\n", m_InstallProgress);
         }
     }
-    catch (const json::parse_error& e)
+    catch (const std::exception& e)
     {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to parse JSON: %s\r\n", e.what());
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to process update server doorbell signal: %s\r\n", e.what());
         return -1;
     }
     return 0;
 }
 
-int Updater::OnWebAppDoorBell(const std::vector<char>& data)
+int Updater::OnWebAppDoorBell(const nlohmann::json& data)
 {
     Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Web app received doorbell signal of size: %zu\r\n", data.size());
     return 0;
 }
 
-void Updater::mainProc() { }
+void Updater::mainProc()
+{
+    using nlohmann::json;
+    Logger* logger = Logger::getLoggerInst();
+    logger->log(Logger::LOG_LVL_INFO, "Updater mainProc thread started\r\n");
+    while(m_Running.load())
+    {
+        std::unique_lock<std::mutex> lock(m_CondMutex);
+        {
+            m_StatusCv.wait(lock);
+            logger->log(Logger::LOG_LVL_INFO, "Updater mainProc thread awakened\r\n");
+        }
+
+        while(m_InstallProgress < 100 && m_Running.load())
+        {
+            // Poll the update status buffer for new updates
+            json j =
+            {
+                {"command",   WebAppIface::READ_UPDATE_STATUS }
+            };
+
+            m_updaterServerAdapter->dispatchUpdater(j);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+    }
+}
 } // namespace Modules

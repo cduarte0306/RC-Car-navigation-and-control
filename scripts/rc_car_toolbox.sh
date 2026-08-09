@@ -49,7 +49,7 @@ elif [[ "$MODE" == "remote" ]]; then
 
     echo "[*] Starting gdbserver on Jetson..."
     ssh "${JETSON_USER}@${JETSON_IP}" \
-        "nohup ${GDBSERVER_PATH} :${PORT} ${REMOTE_APP_PATH} > /dev/null 2>&1 &"
+        "nohup ${GDBSERVER_PATH} :${PORT} ${REMOTE_APP_PATH} > /tmp/gdbserver-app.log 2>&1 &"
 
     sleep 1  # Give gdbserver time to start and begin logging
     

@@ -2,158 +2,232 @@
 #include <sys/sysinfo.h>
 #include <filesystem>
 #include <openssl/sha.h>
+#include <algorithm>
+#include <iostream>
 
+
+namespace {
+
+std::ios::openmode ToOpenMode(const char* mode)
+{
+    std::ios::openmode openMode = std::ios::binary;
+    if (!mode)
+    {
+        return openMode;
+    }
+
+    const std::string modeStr(mode);
+
+    // Parse common fopen-style modes.
+    if (modeStr.find('r') != std::string::npos)
+    {
+        openMode |= std::ios::in;
+    }
+    if (modeStr.find('w') != std::string::npos)
+    {
+        openMode |= std::ios::out | std::ios::trunc;
+    }
+    if (modeStr.find('a') != std::string::npos)
+    {
+        openMode |= std::ios::out | std::ios::app;
+    }
+    if (modeStr.find('+') != std::string::npos)
+    {
+        openMode |= std::ios::in | std::ios::out;
+    }
+
+    // If no direction was specified, default to read+write so the class can
+    // both read and write the file (matching the original FILE* behaviour).
+    if (!(openMode & (std::ios::in | std::ios::out)))
+    {
+        openMode |= std::ios::in | std::ios::out;
+    }
+
+    return openMode;
+}
+
+} // namespace
 
 CFile::CFile(const char* filePath, const char* mode)
 {
-    m_File = fopen(filePath, mode);
+    if (filePath)
+    {
+        open(filePath, mode);
+    }
 }
 
 CFile::~CFile()
 {
-    if (m_File)
-    {
-        fclose(m_File);
-    }
+    close();
 }
 
 int CFile::open(const char* filePath, const char* mode)
 {
-    if (m_File)
+    close();
+
+    if (!filePath)
     {
-        fclose(m_File);
-        m_File = nullptr;
-        m_Size = 0;
-        internalFilePath.clear();
+        return -1;
     }
+
     std::filesystem::path path(filePath);
-    if (!std::filesystem::exists(filePath))
+    if (path.has_parent_path() && !std::filesystem::exists(path.parent_path()))
     {
         std::filesystem::create_directories(path.parent_path());
     }
 
-    m_File = fopen(filePath, mode);
-    if (m_File)
+    auto openMode = ToOpenMode(mode);
+    m_FileStream.open(filePath, openMode);
+    if (!m_FileStream.is_open())
     {
-        internalFilePath = filePath;
+        return -1;
     }
-    return m_File ? 0 : -1;
+
+    internalFilePath = filePath;
+
+    // Determine current file size.
+    m_FileStream.seekg(0, std::ios::end);
+    std::streampos fileSize = m_FileStream.tellg();
+    m_FileStream.seekg(0, std::ios::beg);
+    m_Size = (fileSize > 0) ? static_cast<size_t>(fileSize) : 0;
+    m_Offset = 0;
+
+    return 0;
 }
 
 void CFile::close()
 {
-    if (m_File)
+    if (m_FileStream.is_open())
     {
-        fclose(m_File);
-        m_File = nullptr;
-        m_Size = 0;
+        m_FileStream.close();
     }
-
-    m_Offset = 0;  // Reset the offset
+    internalFilePath.clear();
+    m_Size = 0;
+    m_Offset = 0;
 }
 
 std::vector<char> CFile::read(size_t length)
 {
     std::vector<char> buffer;
-    if (!m_File)
+    if (!m_FileStream.is_open())
     {
         return buffer; // Return empty buffer if file is not open
     }
 
-    // Guard if the caller wants to read the entire file and there is not enough memory to hold it
     if (length == 0)
     {
+        // Guard if the caller wants to read the entire file and there is not
+        // enough memory to hold it.
         struct sysinfo si;
         if (sysinfo(&si) == 0)
         {
-            // Multiply by mem_unit to get actual bytes (unit might be 1, 1024, etc.)
-            unsigned long total_ram = si.totalram * si.mem_unit;
             unsigned long free_ram = si.freeram * si.mem_unit;
-            
             if (free_ram < m_Size)
             {
-                return buffer; // Not enough memory to read the entire file, return empty buffer
+                return buffer; // Not enough memory to read the entire file
             }
         }
-
-        fseek(m_File, 0, SEEK_END);
-        long fileSize = ftell(m_File);
-        fseek(m_File, 0, SEEK_SET);
-        if (fileSize < 0)
-        {
-            return buffer; // Return empty buffer on error
-        }
-
-        
-        length = static_cast<size_t>(fileSize);
+        length = m_Size;
     }
-
-    // Get file size
-    fseek(m_File, 0, SEEK_END);
-    m_Size = ftell(m_File);
-    fseek(m_File, 0, SEEK_SET);
 
     if (length == 0 || length > m_Size)
     {
-        length = m_Size; // Read entire file if length is 0 or exceeds file size
+        length = m_Size; // Clamp to available file size
     }
 
     buffer.resize(length);
-    fread(buffer.data(), sizeof(char), length, m_File);
+
+    m_FileStream.seekg(m_Offset, std::ios::beg);
+    m_FileStream.read(buffer.data(), static_cast<std::streamsize>(length));
+    std::streamsize bytesRead = m_FileStream.gcount();
+    if (bytesRead > 0)
+    {
+        m_Offset += static_cast<size_t>(bytesRead);
+    }
+
+    buffer.resize(static_cast<size_t>(bytesRead));
     return buffer;
 }
 
 int CFile::GetSha256Hash(std::vector<char>& hashOutput)
 {
-    if (!m_File)
+    if (!m_FileStream.is_open())
     {
         return -1; // File not open
     }
 
-    // Get file size
-    fseek(m_File, 0, SEEK_END);
-    long fileSize = ftell(m_File);
-    fseek(m_File, 0, SEEK_SET);
+    // Save current position so we can restore it afterwards.
+    std::streampos originalPos = m_FileStream.tellg();
 
-    if (fileSize < 0)
+    m_FileStream.seekg(0, std::ios::end);
+    std::streampos fileSizePos = m_FileStream.tellg();
+    m_FileStream.seekg(0, std::ios::beg);
+
+    if (fileSizePos < 0)
     {
         return -1; // Error getting file size
     }
 
-    std::vector<char> buffer(fileSize);
-    fread(buffer.data(), sizeof(char), fileSize, m_File);
+    auto fileSize = static_cast<size_t>(fileSizePos);
 
     hashOutput.resize(SHA256_DIGEST_LENGTH);
-    SHA256(reinterpret_cast<const unsigned char*>(buffer.data()), buffer.size(),
-           reinterpret_cast<unsigned char*>(hashOutput.data()));
+
+    if (fileSize == 0)
+    {
+        // Hash of empty input.
+        SHA256(nullptr, 0, reinterpret_cast<unsigned char*>(hashOutput.data()));
+    }
+    else
+    {
+        std::vector<char> buffer(fileSize);
+        m_FileStream.read(buffer.data(), static_cast<std::streamsize>(fileSize));
+        if (static_cast<size_t>(m_FileStream.gcount()) != fileSize)
+        {
+            hashOutput.clear();
+            m_FileStream.seekg(originalPos, std::ios::beg);
+            return -1; // Failed to read entire file
+        }
+
+        SHA256(reinterpret_cast<const unsigned char*>(buffer.data()), buffer.size(),
+               reinterpret_cast<unsigned char*>(hashOutput.data()));
+    }
+
+    m_FileStream.seekg(originalPos, std::ios::beg);
     return 0; // Success
 }
 
 size_t CFile::write(const uint8_t* data, size_t length)
 {
-    if (!m_File)
+    if (!m_FileStream.is_open() || length == 0)
     {
-        return 0; // File not open
+        return 0; // File not open or nothing to write
     }
 
-    fseek(m_File, m_Offset, SEEK_SET);
+    m_FileStream.seekp(m_Offset, std::ios::beg);
+    m_FileStream.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(length));
+    m_FileStream.flush();
+
+    if (!m_FileStream.good())
+    {
+        return 0; // Write failed
+    }
+
     m_Offset += length;
-    size_t bytesWritten = fwrite(data, sizeof(uint8_t), length, m_File);
-    m_Size = std::max(m_Size, m_Offset + bytesWritten); // Update file size if we wrote past the previous end
-    return bytesWritten;
+    if (m_Offset > m_Size)
+    {
+        m_Size = m_Offset;
+    }
+
+    return length; // Return number of bytes written
 }
 
 int CFile::remove()
 {
-    if (!m_File || internalFilePath.empty())
-    {
-        return -1; // File not open
-    }
-    std::string filePath = internalFilePath;
-    close();
-    if (filePath.empty())
+    if (internalFilePath.empty())
     {
         return -1; // No file path available
     }
+    std::string filePath = internalFilePath;
+    close();
     return std::remove(filePath.c_str());
 }

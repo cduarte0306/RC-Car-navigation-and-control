@@ -6,6 +6,8 @@
 #include <atomic>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 // Mirrors Adapter::CommsAdapter's nested adapter-type enum (AdapterBase.hpp), duplicated here
 // because this header can't include AdapterBase.hpp without creating a circular include.
 enum NetworkAdapterType
@@ -124,7 +126,8 @@ public:
     {
         UpdaterRouteAddr = 0x01, /*!< Updater application route address */
         WebAppRouteAddr  = 0x02, /*!< Web application route address */
-        MainAppRouteAddr = 0x03  /*!< Main application route address */
+        MainAppRouteAddr = 0x03, /*!< Main application route address */
+        MaxRouteAddr,            /*!< Maximum route address */
     };
 
     std::function<int(const std::vector<char>&)> receiveCallback = nullptr;
@@ -142,18 +145,18 @@ public:
     /**
      * @brief Dispatch data to the web application
      * 
-     * @param data Data to be dispatched
+     * @param msg Message to be dispatched
      * @return int Status code
      */
-    int dispatchWebApp(const std::vector<char>& data);
+    int dispatchWebApp(const nlohmann::json& msg);
     
     /**
      * @brief Dispatch data to the updater
      * 
-     * @param data Data to be dispatched
+     * @param msg Message to be dispatched
      * @return int Status code
      */
-    int dispatchUpdater(const std::vector<char>& data);
+    int dispatchUpdater(const nlohmann::json& msg);
 
     /**
      * @brief Register callbacks for web app and updater
@@ -164,14 +167,14 @@ public:
      * @return int Status code
      */
     template <typename T>
-    int registerCallbacks(T* instance, int (T::*webAppCallback)(const std::vector<char>&),
-                          int (T::*updaterCallback)(const std::vector<char>&))
+    int registerCallbacks(T* instance, int (T::*webAppCallback)(const nlohmann::json&),
+                          int (T::*updaterCallback)(const nlohmann::json&))
     {
-        this->webAppCallback = [instance, webAppCallback](const std::vector<char>& data)
+        this->webAppCallback = [instance, webAppCallback](const nlohmann::json& data)
         {
             return (instance->*webAppCallback)(data);
         };
-        this->updaterCallback = [instance, updaterCallback](const std::vector<char>& data)
+        this->updaterCallback = [instance, updaterCallback](const nlohmann::json& data)
         {
             return (instance->*updaterCallback)(data);
         };
@@ -222,10 +225,10 @@ private:
     const int UpdaterDestAddr = MainAppRouteAddr;
     const int WebAppDestAddr  = WebAppRouteAddr;
 
-    std::vector<std::function<int(const std::vector<char>&)>> routeCallbacks;
+    std::vector<std::function<int(const nlohmann::json&)>> routeCallbacks;
 
-    std::function<int(const std::vector<char>&)> webAppCallback = nullptr;
-    std::function<int(const std::vector<char>&)> updaterCallback = nullptr;
+    std::function<int(const nlohmann::json&)> webAppCallback = nullptr;
+    std::function<int(const nlohmann::json&)> updaterCallback = nullptr;
     std::function<int(const std::vector<char>&)> proxyConnectedCallback = nullptr;
     const uint16_t webAppPort = 0;
     const uint16_t updaterPort = 0;

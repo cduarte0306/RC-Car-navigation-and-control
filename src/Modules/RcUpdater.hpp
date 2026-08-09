@@ -1,6 +1,8 @@
 #pragma once
 
 #include <queue>
+#include <condition_variable>
+#include <mutex>
 #include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
 
@@ -47,10 +49,10 @@ protected:
     enum {
         PrepareForUpdate = 1,   // Command to prepare the system for an update (e.g., stop motors, close connections)
         UploadFirmwareData,     // Download firmware data command
-        VerifyFirmware,         // Verify firmware command
         InstallFirmware,        // Install firmware command
         QueryUpdateStatus,      // Query update status command
-        UpdaterReboot           // Reboot command
+        UpdaterCleanState,      // Clean state command
+        UpdaterReboot,          // Reboot command
     };
 
     struct UpdaterReqHeader {
@@ -86,14 +88,6 @@ protected:
     void uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
-     * @brief Handle the verify firmware command, which involves checking the integrity and authenticity of the received firmware data (e.g., by comparing hashes) before allowing installation
-     * 
-     * @param payload Command payload containing any necessary information for verifying the firmware (e.g., expected hash value)
-     * @return int Error code indicating success or failure of the verification step
-     */
-    void verifyFirmwareHandler(val_type_t val, const std::vector<char>& payload);
-
-    /**
      * @brief Handle the install firmware command, which involves replacing the existing firmware with the new verified firmware and performing any necessary cleanup or reboot steps
      * 
      * @param payload Command payload containing any necessary information for installing the firmware (e.g., installation instructions)
@@ -110,6 +104,13 @@ protected:
     void queryUpdateStatusHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
+     * @brief Handle the clean state command from the update server, which involves resetting the updater state and performing any necessary cleanup
+     * 
+     * @param data Vector containing any necessary information for handling the clean state command
+     */
+    void OnUpdateServerCleanStateHandler(val_type_t val, const std::vector<char>& payload);
+
+    /**
      * @brief Callback function that is called when a chunk of firmware data is written to the update file
      * 
      * @param data Vector containing the chunk of firmware data that was written
@@ -121,23 +122,46 @@ protected:
      * 
      * @param data Vector containing the doorbell signal data
      */
-    int OnUpdateServerDoorBell(const std::vector<char>& data);
+    int OnUpdateServerDoorBell(const nlohmann::json& j);
 
     /**
      * @brief Callback function that is called when the web application receives a doorbell signal
      * 
      * @param data Vector containing the doorbell signal data
      */
-    int OnWebAppDoorBell(const std::vector<char>& data);
-
-    /**
-     * @brief Synchronously retrieve the updater reply as a JSON object
-     * 
-     * @return nlohmann::json JSON object containing the updater reply
-     */
-    nlohmann::json SynchUpdaterReply();
+    int OnWebAppDoorBell(const nlohmann::json& j);
 
     static constexpr char* IMAGE_LOCATION = (char*)"/data/rc_updater/";
+
+    /**
+     * @brief Progress of the firmware installation (0-100%)
+     * 
+     */
+    int m_InstallProgress = 0;  // Progress of the firmware installation (0-100%)
+
+    /**
+     * @brief State of the firmware installation (true if installation is in progress, false otherwise)
+     * 
+     */
+    bool m_InstallState{false};  // State of the firmware installation (true if installation is in progress, false otherwise)
+
+    /**
+     * @brief Condition variable for synchronizing access to the update status buffer
+     * 
+     */
+    std::condition_variable m_StatusCv;  // Condition variable for synchronizing access to the update status buffer
+
+    /**
+     * @brief Mutex for synchronizing access to the condition variable
+     * 
+     */
+    std::mutex m_CondMutex;  // Mutex for synchronizing access to the condition variable
+
+    /**
+     * @brief Mutex for synchronizing access to the update status buffer
+     * 
+     */
+    std::mutex m_StatusMutex;  // Mutex for synchronizing access to the update status buffer
 
     /**
      * @brief Update file data buffer
@@ -164,16 +188,10 @@ protected:
     std::unique_ptr<NetworkProxy> m_updaterServerAdapter{nullptr};
 
     /**
-     * @brief Last chunk ID received during the firmware update process
+     * @brief Update status buffer for storing update status as a pair of success flag and progress percentage
      * 
      */
-    uint64_t m_LastChunkID = 0;
-
-    /**
-     * @brief Update status buffer for storing JSON-formatted update status messages
-     * 
-     */
-    Msg::CircularBuffer<nlohmann::json> m_UpdateStatusBuffer;
+    Msg::CircularBuffer<std::pair<bool, int>> m_UpdateStatusBuffer;
 };
 }
 

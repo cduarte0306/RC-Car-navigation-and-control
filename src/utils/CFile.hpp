@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <fstream>
 
 class CFile {
 public:
@@ -72,7 +73,7 @@ public:
      */
     bool isOpen() const
     {
-        return m_File != nullptr;
+        return m_FileStream.is_open();
     }
 
     /**
@@ -90,6 +91,16 @@ public:
      */
     int GetSha256Hash(std::vector<char>& hashOutput);
 
+    /**
+     * @brief Get the file path of the currently opened file
+     * 
+     * @return std::string File path
+     */
+    std::string getFilePath() const
+    {
+        return internalFilePath;
+    }
+
 private:
 
     /**
@@ -101,9 +112,9 @@ private:
      */
     size_t write(const uint8_t* data, size_t length);
 
+    std::fstream m_FileStream;
     std::string internalFilePath;
     size_t m_Offset = 0;
-    FILE* m_File = nullptr;
     size_t m_Size = 0;  // Size of the file in bytes
 };
 

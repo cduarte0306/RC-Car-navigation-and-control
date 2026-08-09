@@ -4,6 +4,8 @@
 #include <boost/asio.hpp>
 #include <boost/bind/bind.hpp>
 
+#include <iostream>
+
 namespace Network {
 TcpClient::TcpClient(boost::asio::io_context& io_context, std::string host, unsigned short sPort, unsigned short dPort, size_t bufferSize, bool broadcast) :
     Sockets(io_context, sPort), tcpSocket_(io_context), reconnectTimer_(io_context)
@@ -11,6 +13,7 @@ TcpClient::TcpClient(boost::asio::io_context& io_context, std::string host, unsi
     // Create the socket
     dport_ = dPort;
     m_HostIP = host;
+    m_RecvBuffer.resize(bufferSize > 0 ? bufferSize : 1024);
     (void) Open();
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "TCP client socket created -> %s:%d\r\n", tcpSocket_.local_endpoint().address().to_string().c_str(), tcpSocket_.local_endpoint().port());
 }
@@ -34,24 +37,34 @@ void TcpClient::startReceive(std::function<void(std::vector<char>&)> dataReceive
 
 void TcpClient::startReceive_(void)
 {
-    if (dataReceivedCallback)
+    if (!dataReceivedCallback || !tcpSocket_.is_open())
     {
-        std::vector<char> buffer(1024);
-        tcpSocket_.async_read_some(boost::asio::buffer(buffer.data(), buffer.size()),
-            [this, buffer](const boost::system::error_code& ec, std::size_t bytes_transferred) mutable {
-                if (!ec)
-                {
-                    buffer.resize(bytes_transferred);
-                    dataReceivedCallback(buffer);
-                    startReceive_();
-                }
-                else
+        return;
+    }
+
+    tcpSocket_.async_receive(
+        boost::asio::buffer(m_RecvBuffer),
+        [this](boost::system::error_code ec, std::size_t bytes_recvd)
+        {
+            if (!ec && bytes_recvd > 0)
+            {
+                std::vector<char> data(m_RecvBuffer.begin(), m_RecvBuffer.begin() + bytes_recvd);
+                m_RxBytes += bytes_recvd;
+                dataReceivedCallback(data);
+                // Continue receiving while socket is healthy
+                startReceive_();
+            }
+            else if (ec)
+            {
+                if (ec != boost::asio::error::operation_aborted)
                 {
                     Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "TCP receive error: %s. Attempting to reconnect\r\n", ec.message().c_str());
                     HandleDisconnectEvent();
                 }
-            });
-    }
+            }
+            // bytes_recvd == 0 without error: peer shutdown; do not restart here,
+            // let the next Connect()/HandleDisconnectEvent() re-arm if needed.
+        });
 }
 
 bool TcpClient::receive(std::vector<char>& buffer)

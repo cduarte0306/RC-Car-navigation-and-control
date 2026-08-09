@@ -96,41 +96,48 @@ int NetworkTcpClient::receive(std::vector<char>& buffer)
 	return -1;
 }
 
-int NetworkProxy::
-dispatchWebApp(const std::vector<char>& data)
+int NetworkProxy::dispatchWebApp(const nlohmann::json& msg)
 {
 	if (!sendCallback)
 	{
 		return -1;
 	}
 
-	ProxyMsgHdr hdr;
-	hdr.srcAddr  = NetworkProxy::MainAppRouteAddr;  // Set appropriate source address
-	hdr.destAddr = NetworkProxy::WebAppRouteAddr; // Set appropriate destination address
-	hdr.len = static_cast<int>(data.size());
-	char* tempBuffer = new char[sizeof(ProxyMsgHdr) + data.size()];
-	std::memcpy(tempBuffer, &hdr, sizeof(ProxyMsgHdr));
-	std::memcpy(tempBuffer + sizeof(ProxyMsgHdr), data.data(), data.size());
-	int result = sendCallback(reinterpret_cast<uint8_t*>(tempBuffer), sizeof(ProxyMsgHdr) + data.size());
+	// ProxyMsgHdr hdr;
+	// hdr.srcAddr  = NetworkProxy::MainAppRouteAddr;  // Set appropriate source address
+	// hdr.destAddr = NetworkProxy::WebAppRouteAddr; // Set appropriate destination address
+	// hdr.len = static_cast<int>(msg.dump().length());
+	size_t msglen = sizeof(ProxyMsgHdr) + msg.dump().length();
+	char* tempBuffer = new char[msglen];
+	std::memset(tempBuffer, 0, msglen);
+	// std::memcpy(tempBuffer, &hdr, sizeof(ProxyMsgHdr));
+	ProxyMsgHdr* hdr = reinterpret_cast<ProxyMsgHdr*>(tempBuffer);
+	hdr->srcAddr  = NetworkProxy::MainAppRouteAddr;  // Set appropriate source address
+	hdr->destAddr = NetworkProxy::WebAppRouteAddr; // Set appropriate destination address
+	hdr->len = static_cast<int>(msg.dump().length());
+	std::memcpy(tempBuffer + sizeof(ProxyMsgHdr), msg.dump().data(), msg.dump().length());
+	int result = sendCallback(reinterpret_cast<uint8_t*>(tempBuffer), msglen);
 	delete[] tempBuffer;
 	return result;
 }
 
-int NetworkProxy::dispatchUpdater(const std::vector<char>& data)
+int NetworkProxy::dispatchUpdater(const nlohmann::json& msg)
 {
 	if (!sendCallback)
 	{
 		return -1;
 	}
 
-	ProxyMsgHdr hdr;
-	hdr.srcAddr  = NetworkProxy::MainAppRouteAddr;  // Set appropriate source address
-	hdr.destAddr = NetworkProxy::UpdaterRouteAddr; // Set appropriate destination address
-	hdr.len = static_cast<int>(data.size());
-	char* tempBuffer = new char[sizeof(ProxyMsgHdr) + data.size()];
-	std::memcpy(tempBuffer, &hdr, sizeof(ProxyMsgHdr));
-	std::memcpy(tempBuffer + sizeof(ProxyMsgHdr), data.data(), data.size());
-	int result = sendCallback(reinterpret_cast<uint8_t*>(tempBuffer), sizeof(ProxyMsgHdr) + data.size());
+	size_t msglen = sizeof(ProxyMsgHdr) + msg.dump().length();
+	char* tempBuffer = new char[msglen];
+	std::memset(tempBuffer, 0, msglen);
+	// std::memcpy(tempBuffer, &hdr, sizeof(ProxyMsgHdr));
+	ProxyMsgHdr* hdr = reinterpret_cast<ProxyMsgHdr*>(tempBuffer);
+	hdr->srcAddr  = NetworkProxy::MainAppRouteAddr;  // Set appropriate source address
+	hdr->destAddr = NetworkProxy::UpdaterRouteAddr; // Set appropriate destination address
+	hdr->len = static_cast<int>(msg.dump().length());
+	std::memcpy(tempBuffer + sizeof(ProxyMsgHdr), msg.dump().data(), msg.dump().length());
+	int result = sendCallback(reinterpret_cast<uint8_t*>(tempBuffer), msglen);
 	delete[] tempBuffer;
 	return result;
 }
@@ -141,13 +148,20 @@ int NetworkProxy::routeMsg(const std::vector<char>& data)
 		return 0;
 	
 	const ProxyMsgHdr* hdr = reinterpret_cast<const ProxyMsgHdr*>(data.data());
-	if (hdr->destAddr < 0 || static_cast<size_t>(hdr->destAddr) >= routeCallbacks.size())
+	if (hdr->destAddr < 0 || static_cast<size_t>(hdr->destAddr) == MaxRouteAddr)
 		return -1;
-
-	auto callback = routeCallbacks[hdr->destAddr];
+	auto callback = routeCallbacks[hdr->srcAddr];
 	if (callback)
 	{
-		return callback(data);
+		try
+		{
+			nlohmann::json jsonData = nlohmann::json::parse(std::string(data.data() + sizeof(ProxyMsgHdr), hdr->len));
+			return callback(jsonData);
+		}
+		catch (...)
+		{
+			return -1;
+		}
 	}
 	return -1;
 }

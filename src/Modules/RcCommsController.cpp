@@ -789,8 +789,6 @@ int NetworkComms::configureProxyIface(NetworkAdapter& netAdapter, int adapterIdx
 
     proxy->sendCallback = [this, &registeredPort, &netAdapter](const uint8_t* data, size_t length) -> int
     {
-        if (!netAdapter.connected) return -1;
-
         Network::TcpClient* tcpSocketLoopback = registeredPort.lo();
         if (tcpSocketLoopback)
         {

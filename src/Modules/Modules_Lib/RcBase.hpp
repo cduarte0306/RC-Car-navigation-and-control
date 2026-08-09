@@ -33,7 +33,8 @@ enum DeviceType {
     
 };
 
-class RcThread {
+class RcThread
+{
 public:
     // Variadic template constructor that accepts any arguments 
     // that the std::thread constructor would accept.
@@ -149,25 +150,33 @@ public:
                 return -1;
             }
             motorAdapter->bind(adapterPtr);
-        } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value)
+        {
             if (!CameraAdapter)
             {
                 return -1;
             }
             CameraAdapter->bind(adapterPtr);
-        } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value)
+        {
             if (!CommsAdapter)
             {
                 return -1;
             }
             CommsAdapter->bind(adapterPtr);
-        } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value)
+        {
             if (!TlmAdapter)
             {
                 return -1;
             }
             TlmAdapter->bind(adapterPtr);
-        } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value)
+        {
             if (!UpdateAdapter)
             {
                 return -1;
@@ -189,13 +198,21 @@ public:
         if constexpr (std::is_same<U, Adapter::MotorAdapter>::value)
         {
             motorAdapter = std::make_unique<Adapter::MotorAdapter>(m_name);
-        } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value)
+        {
             CameraAdapter = std::make_unique<Adapter::CameraAdapter>(m_name);
-        } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value)
+        {
             CommsAdapter = std::make_unique<Adapter::CommsAdapter>(m_name);
-        } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value)
+        {
             TlmAdapter = std::make_unique<Adapter::TlmAdapter>(m_name);
-        } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value)
+        {
             UpdateAdapter = std::make_unique<Adapter::UpdateAdapter>(m_name);
         }
         else
@@ -213,13 +230,21 @@ public:
         if constexpr (std::is_same<U, Adapter::MotorAdapter>::value)
         {
             return std::move(motorAdapter);
-        } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value)
+        {
             return std::move(CameraAdapter);
-        } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value)
+        {
             return std::move(CommsAdapter);
-        } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value)
+        {
             return std::move(TlmAdapter);
-        } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value)
+        {
             return std::move(UpdateAdapter);
         }
         else
@@ -267,25 +292,33 @@ public:
                 return -1;
             }
             motorAdapter->bind(adapter);
-        } else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::CameraAdapter>::value)
+        {
             if (!CameraAdapter)
             {
                 return -1;
             }
             CameraAdapter->bind(adapter);
-        } else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::CommsAdapter>::value)
+        {
             if (!CommsAdapter)
             {
                 return -1;
             }
             CommsAdapter->bind(adapter);
-        } else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::TlmAdapter>::value)
+        {
             if (!TlmAdapter)
             {
                 return -1;
             }
             TlmAdapter->bind(adapter);
-        } else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value) {
+        }
+        else if constexpr (std::is_same<U, Adapter::UpdateAdapter>::value)
+        {
             if (!UpdateAdapter)
             {
                 return -1;
