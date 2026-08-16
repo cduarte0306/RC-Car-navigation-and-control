@@ -344,10 +344,8 @@ void Updater::OnTimer()
         if (counter == 0)
         {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "System reset now\r\n");
-            // Wind down the system
-            DoCommandWindDown();
             // Perform system reset or reboot here
-            // std::system("reboot");
+            std::system("reboot");
             m_DoReset.store(true);  // Reset the flag after handling
         }
         else
@@ -361,7 +359,6 @@ void Updater::mainProc()
 {
     using nlohmann::json;
     Logger* logger = Logger::getLoggerInst();
-    logger->log(Logger::LOG_LVL_INFO, "Updater mainProc thread started\r\n");
     while(m_Running.load())
     {
         std::unique_lock<std::mutex> lock(m_CondMutex);
