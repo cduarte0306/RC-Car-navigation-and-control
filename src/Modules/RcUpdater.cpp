@@ -5,10 +5,13 @@
 #include "RcUpdater.hpp"
 #include "utils/CFile.hpp"
 #include "utils/logger.hpp"
+#include "utils/Utils.hpp"
 
 #include "Modules_Lib/ModulesDefs.hpp"
+#include <systemd/sd-journal.h>
+#include <cstdlib>
 
-
+static std::mutex m_StatusMutex;
 static const char* tempFilePath = "/data/firmware/";
 static CFile updateFile;
 
@@ -21,6 +24,7 @@ Base(moduleID_, name), Adapter::UpdateAdapter(name), m_Buffer(10), m_UpdateStatu
     logger->log(Logger::LOG_LVL_INFO, "Updater object initialized\r\n");
 
     setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::UpdateAdapter*>(this)));
+    Base::SetTimerPeriod(1000);  // Set timer period to 1 second
 }
 
 
@@ -41,11 +45,13 @@ int Updater::init(void)
 {
     int ret = 0;
 
-    ret = Base::moduleRegisterCommand(PrepareForUpdate,   &Updater::initUpdateHandler              );
-    ret = Base::moduleRegisterCommand(UploadFirmwareData, &Updater::uploadFirmwareDataHandler      );
-    ret = Base::moduleRegisterCommand(InstallFirmware,    &Updater::installFirmwareHandler         );
-    ret = Base::moduleRegisterCommand(UpdaterCleanState,  &Updater::OnUpdateServerCleanStateHandler);
-    ret = Base::moduleRegisterCommand(QueryUpdateStatus,  &Updater::queryUpdateStatusHandler       );
+    ret = Base::moduleRegisterCommand(RequestFirmwareRev,  &Updater::reqRevHandler                  );
+    ret = Base::moduleRegisterCommand(PrepareForUpdate,    &Updater::initUpdateHandler              );
+    ret = Base::moduleRegisterCommand(UploadFirmwareData,  &Updater::uploadFirmwareDataHandler      );
+    ret = Base::moduleRegisterCommand(InstallFirmware,     &Updater::installFirmwareHandler         );
+    ret = Base::moduleRegisterCommand(UpdaterCleanState,   &Updater::OnUpdateServerCleanStateHandler);
+    ret = Base::moduleRegisterCommand(QueryUpdateStatus,   &Updater::queryUpdateStatusHandler       );
+    ret = Base::moduleRegisterCommand(UpdaterFinalize,     &Updater::finalizeUpdateHandler          );
 
     // Define the module payload
     Base::DefinePayloadLoc(sizeof(UpdaterReqHeader));
@@ -68,6 +74,18 @@ int Updater::init(void)
     );
     // m_updaterServerAdapter->start();
     return ret;
+}
+
+void Updater::reqRevHandler(val_type_t val, const std::vector<char>& payload)
+{
+    (void)val;
+    (void)payload;
+
+    // Respond with the current firmware revision of the updater module
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Request for firmware revision received\r\n");
+    std::string rev = Utils::GetOEVersion();
+    std::vector<char> response(rev.begin(), rev.end());
+    Base::DoAck(true, response);
 }
 
 void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload)
@@ -167,7 +185,6 @@ void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& pa
     };
 
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Firmware installation status: %s\r\n", j.dump().c_str());
-    std::vector<char> updateStatusVec(j.dump().begin(), j.dump().end());
     m_updaterServerAdapter->dispatchUpdater(j);
     {
         std::lock_guard<std::mutex> lock(m_CondMutex);
@@ -185,6 +202,31 @@ void Updater::queryUpdateStatusHandler(val_type_t val, const std::vector<char>& 
     Base::DoAck(m_InstallState, m_InstallProgress);
 }
 
+void Updater::finalizeUpdateHandler(val_type_t val, const std::vector<char>& payload)
+{
+    (void) val;
+    (void) payload;
+
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Finalizing firmware installation\r\n");
+    // Perform any necessary finalization steps after a successful firmware installation
+    // For example, reboot the system or clean up temporary files
+    if (updateFile.isOpen())
+    {
+        std::string filePath = updateFile.getFilePath();
+        if (updateFile.remove() < 0)
+        {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to remove update file: %s\r\n", filePath.c_str());
+            Base::DoAck(false, {});
+            return;
+        }
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Update file closed\r\n");
+    }
+
+    // Set the reset flag
+    m_DoReset.store(true);
+    Base::DoAck(true, {});
+}
+
 void Updater::OnUpdateServerCleanStateHandler(val_type_t val, const std::vector<char>& payload)
 {
     (void) val;
@@ -192,7 +234,7 @@ void Updater::OnUpdateServerCleanStateHandler(val_type_t val, const std::vector<
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Update server received clean state command\r\n");
 
     m_InstallProgress = 0;  // Reset installation progress
-    m_InstallState = false;  // Reset installation state
+    m_InstallState = true;  // Reset installation state
 
     // Perform necessary cleanup and reset the updater state
     if (updateFile.isOpen())
@@ -232,13 +274,27 @@ int Updater::OnUpdateServerDoorBell(const nlohmann::json& j)
     try
     {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Update server received doorbell signal of size: %zu\r\n", j.size());
+        if (j.contains("status"))
+        {
+            std::lock_guard<std::mutex> lock(m_StatusMutex);
+            if (!j["status"].get<bool>())
+            {
+                Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Update server reported an error during firmware installation\r\n");
+                m_InstallState = false;
+            }
+        }
+
+        if (!m_InstallState)
+        {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Firmware installation failed. Please check the update server logs for details.\r\n");
+            return -1;
+        }
+
         if (j.contains("percentage"))
         {
             std::lock_guard<std::mutex> lock(m_StatusMutex);
             m_InstallProgress = j["percentage"].get<int>();
-            m_InstallState    = j["status"].get<bool>();
-
-            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Update progress: %d%%\r\n", m_InstallProgress);
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Update progress: %d%%\r\n", m_InstallProgress);
         }
     }
     catch (const std::exception& e)
@@ -251,8 +307,54 @@ int Updater::OnUpdateServerDoorBell(const nlohmann::json& j)
 
 int Updater::OnWebAppDoorBell(const nlohmann::json& data)
 {
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Web app received doorbell signal of size: %zu\r\n", data.size());
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Web app received doorbell signal of size: %zu\r\n", data.size());
+    DoCommandWindDown();
     return 0;
+}
+
+void Updater::DoCommandWindDown(void)
+{
+    std::lock_guard<std::mutex> lock(m_StatusMutex);
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Performing wind down operations for the updater module\r\n");
+    // Stop motors
+    if (motorAdapter && motorAdapter->stopCmd() < 0)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to stop motors during wind down\r\n");
+    }
+
+    // Close camera connections
+    if (CameraAdapter && CameraAdapter->stopCmd() < 0)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to close camera connections during wind down\r\n");
+    }
+}
+
+void Updater::OnTimer()
+{
+    static int counter = 5;  // Counter to track the number of timer ticks
+    static bool once = false;  // Flag to ensure the message is logged only once
+    if (m_DoReset.load())
+    {
+        if (!once)
+        {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Updater timer callback: Resetting system after update\r\n");
+            once = true;
+        }
+        // Perform system reset or reboot here
+        if (counter == 0)
+        {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "System reset now\r\n");
+            // Wind down the system
+            DoCommandWindDown();
+            // Perform system reset or reboot here
+            // std::system("reboot");
+            m_DoReset.store(true);  // Reset the flag after handling
+        }
+        else
+        {
+            counter--;
+        }
+    }
 }
 
 void Updater::mainProc()
@@ -279,6 +381,8 @@ void Updater::mainProc()
             m_updaterServerAdapter->dispatchUpdater(j);
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
+
+        logger->log(Logger::LOG_LVL_INFO, "Updater mainProc thread exiting\r\n");
     }
 }
 } // namespace Modules

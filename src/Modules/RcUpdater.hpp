@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <queue>
 #include <condition_variable>
 #include <mutex>
@@ -47,12 +48,13 @@ public:
 
 protected:
     enum {
-        PrepareForUpdate = 1,   // Command to prepare the system for an update (e.g., stop motors, close connections)
-        UploadFirmwareData,     // Download firmware data command
-        InstallFirmware,        // Install firmware command
-        QueryUpdateStatus,      // Query update status command
-        UpdaterCleanState,      // Clean state command
-        UpdaterReboot,          // Reboot command
+        RequestFirmwareRev = 1,  // Command to request the firmware revision from the updater module
+        PrepareForUpdate,        // Command to prepare the system for an update (e.g., stop motors, close connections)
+        UploadFirmwareData,      // Download firmware data command
+        InstallFirmware,         // Install firmware command
+        QueryUpdateStatus,       // Query update status command
+        UpdaterCleanState,       // Clean state command
+        UpdaterFinalize,         // Reboot command
     };
 
     struct UpdaterReqHeader {
@@ -70,6 +72,20 @@ protected:
      * 
      */
     virtual void mainProc() override;
+
+    /**
+     * @brief Timer callback function for the updater module, called periodically to perform time-based tasks
+     * 
+     */
+    virtual void OnTimer(void) override;
+
+    /**
+     * @brief Handle the request for firmware revision command, which involves responding with the current firmware version of the updater module
+     * 
+     * @param payload Command payload containing any necessary information for requesting the firmware revision
+     * @return int Error code indicating success or failure of the request
+     */
+    void reqRevHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
      * @brief Handle the prepare for update command, which may involve steps like stopping motors and closing connections to ensure a safe update process
@@ -104,6 +120,14 @@ protected:
     void queryUpdateStatusHandler(val_type_t val, const std::vector<char>& payload);
 
     /**
+     * @brief Handle the finalize update command, which involves performing any necessary finalization steps after a successful firmware installation, such as rebooting the system or cleaning up temporary files
+     * 
+     * @param payload Command payload containing any necessary information for finalizing the update
+     * @return int Error code indicating success or failure of the finalization step
+     */
+    void finalizeUpdateHandler(val_type_t val, const std::vector<char>& payload);
+
+    /**
      * @brief Handle the clean state command from the update server, which involves resetting the updater state and performing any necessary cleanup
      * 
      * @param data Vector containing any necessary information for handling the clean state command
@@ -131,6 +155,12 @@ protected:
      */
     int OnWebAppDoorBell(const nlohmann::json& j);
 
+    /**
+     * @brief Perform necessary wind down operations for the updater module, such as stopping motors and closing connections
+     * 
+     */
+    void DoCommandWindDown(void);
+
     static constexpr char* IMAGE_LOCATION = (char*)"/data/rc_updater/";
 
     /**
@@ -143,7 +173,9 @@ protected:
      * @brief State of the firmware installation (true if installation is in progress, false otherwise)
      * 
      */
-    bool m_InstallState{false};  // State of the firmware installation (true if installation is in progress, false otherwise)
+    bool m_InstallState{true};  // State of the firmware installation (true if installation is in progress, false otherwise)
+
+    std::atomic<bool> m_DoReset{false};  // Flag indicating whether a reset is required after the update process
 
     /**
      * @brief Condition variable for synchronizing access to the update status buffer

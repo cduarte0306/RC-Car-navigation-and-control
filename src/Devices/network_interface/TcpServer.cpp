@@ -116,14 +116,28 @@ bool TcpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_
 
 TcpServer::~TcpServer()
 {
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Closing TCP server at %s:%d\r\n", acceptor_.local_endpoint().address().to_string().c_str(), acceptor_.local_endpoint().port());
+    boost::system::error_code ec;
+    const auto endpoint = acceptor_.local_endpoint(ec);
+    if (!ec)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Closing TCP server at %s:%d\r\n", endpoint.address().to_string().c_str(), endpoint.port());
+    }
+    else
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Closing TCP server\r\n");
+    }
+
     threadCanRun = false;
     if (clientSocket_.is_open())
     {
-        boost::system::error_code ec;
-        clientSocket_.close(ec);
+        boost::system::error_code closeEc;
+        clientSocket_.close(closeEc);
     }
-    acceptor_.close();
+    if (acceptor_.is_open())
+    {
+        boost::system::error_code acceptorCloseEc;
+        acceptor_.close(acceptorCloseEc);
+    }
 }
 
 
@@ -223,8 +237,13 @@ void TcpServer::beginAccept()
         return;
     }
 
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "TCP acceptor starting async accept @ %s:%d\r\n",
-        acceptor_.local_endpoint().address().to_string().c_str(), acceptor_.local_endpoint().port());
+    boost::system::error_code endpointEc;
+    const auto acceptorEndpoint = acceptor_.local_endpoint(endpointEc);
+    if (!endpointEc)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "TCP acceptor starting async accept @ %s:%d\r\n",
+            acceptorEndpoint.address().to_string().c_str(), acceptorEndpoint.port());
+    }
 
     acceptor_.async_accept([this](const boost::system::error_code& error, boost::asio::ip::tcp::socket socket)
     {

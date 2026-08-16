@@ -64,6 +64,7 @@ CFile::~CFile()
 int CFile::open(const char* filePath, const char* mode)
 {
     close();
+    internalFilePath = filePath;
 
     if (!filePath)
     {
@@ -82,8 +83,6 @@ int CFile::open(const char* filePath, const char* mode)
     {
         return -1;
     }
-
-    internalFilePath = filePath;
 
     // Determine current file size.
     m_FileStream.seekg(0, std::ios::end);

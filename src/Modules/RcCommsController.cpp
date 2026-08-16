@@ -6,6 +6,7 @@
 #include <linux/rtnetlink.h>
 #include <sys/socket.h>
 #include <nlohmann/json.hpp>
+#include "utils/Utils.hpp"
 #include "utils/logger.hpp"
 
 using namespace std;
@@ -225,6 +226,7 @@ void NetworkComms::OnWlanHandShakeRecv(std::vector<char>& data)
 
     nlohmann::json replyJson;
     replyJson["message"] = replyStr;
+    replyJson["version"] = Utils::GetOEVersion();
     replyJson["eth_ip"]  = ethIP.value_or("");
     std::string wlanIfName = WLANAdapter;
     replyJson["net_mask"] = Network::Sockets::getNetMask(wlanIfName);
@@ -236,7 +238,6 @@ void NetworkComms::OnWlanHandShakeRecv(std::vector<char>& data)
     logger->log(Logger::LOG_LVL_INFO, "Received handshake data on WLAN (%zu bytes) from %s:%d\r\n", data.size(), destIP.c_str(), m_WlanSocket->getPort());
     bool ok = m_WlanSocket->transmit(reinterpret_cast<const uint8_t*>(data.data()), data.size(), destIP);
 }
-
 
 /**
  * @brief Handler for handshake data received via UDP

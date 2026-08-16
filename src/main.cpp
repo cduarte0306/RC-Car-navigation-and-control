@@ -31,7 +31,9 @@ int main(int argc, char* argv[])
     Utils::install_crash_handler();
 
     Logger* logger = Logger::getLoggerInst();
-    logger->log(Logger::LOG_LVL_INFO, "RC Car navigation and control V%u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
+    std::string versionStr = Utils::GetOEVersion();
+    logger->log(Logger::LOG_LVL_INFO, "RC Car navigation and control V%u.%u.%u\r\nOE version: %s\r\n",
+        VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD, versionStr.c_str());
 
     ret = TensorRTEngine::createEngineFile("/home/models/lanenet/lanenet.onnx", "/data/model-engines/lanenet.engine");
     if (ret != 0)

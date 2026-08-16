@@ -15,7 +15,12 @@ TcpClient::TcpClient(boost::asio::io_context& io_context, std::string host, unsi
     m_HostIP = host;
     m_RecvBuffer.resize(bufferSize > 0 ? bufferSize : 1024);
     (void) Open();
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "TCP client socket created -> %s:%d\r\n", tcpSocket_.local_endpoint().address().to_string().c_str(), tcpSocket_.local_endpoint().port());
+    boost::system::error_code ec;
+    const auto endpoint = tcpSocket_.local_endpoint(ec);
+    if (!ec)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "TCP client socket created -> %s:%d\r\n", endpoint.address().to_string().c_str(), endpoint.port());
+    }
 }
 
 TcpClient::~TcpClient()
@@ -29,7 +34,12 @@ TcpClient::~TcpClient()
 
 void TcpClient::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_)
 {
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Starting TCP receive on socket: %s:%d\r\n", tcpSocket_.local_endpoint().address().to_string().c_str(), tcpSocket_.local_endpoint().port());
+    boost::system::error_code ec;
+    const auto endpoint = tcpSocket_.local_endpoint(ec);
+    if (!ec)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Starting TCP receive on socket: %s:%d\r\n", endpoint.address().to_string().c_str(), endpoint.port());
+    }
     dataReceivedCallback = dataReceivedCallback_;
     asyncReceive = true;
     startReceive_();
