@@ -161,6 +161,12 @@ protected:
      */
     void DoCommandWindDown(void);
 
+    /**
+     * @brief Perform necessary wind up operations for the updater module, such as starting motors and re-establishing connections
+     * 
+     */
+    void DoCommandWindUp(void);
+
     static constexpr char* IMAGE_LOCATION = (char*)"/data/rc_updater/";
 
     /**
@@ -174,6 +180,12 @@ protected:
      * 
      */
     bool m_InstallState{true};  // State of the firmware installation (true if installation is in progress, false otherwise)
+
+    /**
+     * @brief Flag indicating whether an update is currently in progress
+     * 
+     */
+    std::atomic<bool> m_UpdateInProgress{false};
 
     std::atomic<bool> m_DoReset{false};  // Flag indicating whether a reset is required after the update process
 

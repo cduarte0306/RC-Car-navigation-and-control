@@ -174,6 +174,11 @@ int AdapterBase::stopCmd(void)
 	return 0;
 }
 
+int AdapterBase::startCmd(void)
+{
+	return 0;
+}
+
 int AdapterBase::dispatchCommand(Msg::MessageCapsule<std::vector<char>>& capsule)
 {
 	if (!dispatchCommandFunc)

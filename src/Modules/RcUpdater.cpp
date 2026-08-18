@@ -161,6 +161,7 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
             false);
     }
 
+    m_UpdateInProgress.store(true);
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Initializing update file with name: %s\r\n", fileName.c_str());
     Base::DoAck(true, m_fwFileAdapter->getPreferredSrcPort());
 }
@@ -307,8 +308,27 @@ int Updater::OnUpdateServerDoorBell(const nlohmann::json& j)
 
 int Updater::OnWebAppDoorBell(const nlohmann::json& data)
 {
-    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Web app received doorbell signal of size: %zu\r\n", data.size());
-    DoCommandWindDown();
+    if (data.contains("status"))
+    {
+        std::lock_guard<std::mutex> lock(m_StatusMutex);
+        if (data["status"].get<bool>())
+        {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Web app reported update in progress\r\n");
+            m_UpdateInProgress.store(true);
+
+            // Blocks updates coming from the host
+            DoCommandWindDown();
+        }
+        else
+        {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Web app reported update not in progress\r\n");
+            m_UpdateInProgress.store(false);
+        }
+    }
+    else
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "No \"status\" keyword found in message\r\n");
+    }
     return 0;
 }
 
@@ -326,6 +346,23 @@ void Updater::DoCommandWindDown(void)
     if (CameraAdapter && CameraAdapter->stopCmd() < 0)
     {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to close camera connections during wind down\r\n");
+    }
+}
+
+void Updater::DoCommandWindUp(void)
+{
+    std::lock_guard<std::mutex> lock(m_StatusMutex);
+    Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Performing wind up operations for the updater module\r\n");
+    // Start motors
+    if (motorAdapter && motorAdapter->startCmd() < 0)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to start motors during wind up\r\n");
+    }
+
+    // Re-establish camera connections
+    if (CameraAdapter && CameraAdapter->startCmd() < 0)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to re-establish camera connections during wind up\r\n");
     }
 }
 

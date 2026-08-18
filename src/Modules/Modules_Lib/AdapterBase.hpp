@@ -71,6 +71,12 @@ namespace Adapter {
         virtual int stopCmd(void);
 
         /**
+         * @brief Default implementation of startCmd. Adapters that need to
+         * provide custom handling should override this.
+         */
+        virtual int startCmd(void);
+
+        /**
          * @brief Default implementation of moduleCommand. Modules or adapters that need to
          * provide custom handling should override this.
          */
