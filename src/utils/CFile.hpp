@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstdint>
 #include <fstream>
+#include <mutex>
 
 class CFile {
 public:
@@ -101,11 +102,39 @@ public:
         return internalFilePath;
     }
 
+    /**
+     * @brief Check if a file exists at the specified path
+     * 
+     * @param filePath Path to the file to check
+     * @return int 0 if the file exists, -1 if it does not exist
+     */
+    static int FileExists(const std::string& filePath)
+    {
+        std::ifstream file(filePath);
+        return file.good() ? 0 : -1;
+    }
+
+    /**
+     * @brief Remove all files matching a wildcard pattern in the specified path
+     * 
+     * @param path Path to the directory
+     * @param wildCard Wildcard pattern (e.g., "*.txt")
+     * @return int 0 on success, -1 on failure
+     */
+    static int RemoveAll(char* path, char* wildCard);
+
+    /**
+     * @brief Is the file currently locked by another process
+     * 
+     * @return int 0 if the file is available, -1 if it is locked by another process
+     */
+    static int IsFileAvailable(const char* filePath);
+
 private:
 
     /**
      * @brief Write data to the file
-     * 
+     *
      * @param data Pointer to the data to write
      * @param length Number of bytes to write
      * @return size_t Number of bytes actually written
@@ -116,6 +145,8 @@ private:
     std::string internalFilePath;
     size_t m_Offset = 0;
     size_t m_Size = 0;  // Size of the file in bytes
+    int m_LockFd = -1;  // Raw fd holding an exclusive advisory lock on the file
+    std::mutex m_Mutex;  // Mutex for thread-safe operations
 };
 
 #pragma endregion

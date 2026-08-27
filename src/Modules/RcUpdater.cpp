@@ -3,7 +3,6 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include "RcUpdater.hpp"
-#include "utils/CFile.hpp"
 #include "utils/logger.hpp"
 #include "utils/Utils.hpp"
 
@@ -13,7 +12,9 @@
 
 static std::mutex m_StatusMutex;
 static const char* tempFilePath = "/data/firmware/";
+static const char* lockFilePath = "/tmp/update.lock";
 static CFile updateFile;
+static CFile lockFile;
 
 namespace Modules
 {
@@ -33,6 +34,11 @@ Updater::~Updater()
     if (updateFile.isOpen())
     {
         updateFile.close();
+    }
+
+    if (lockFile.isOpen())
+    {
+        lockFile.close();
     }
 }
 
@@ -58,7 +64,7 @@ int Updater::init(void)
 
     // Initialize the network adapter for the internal updater server if needed
     m_updaterServerAdapter = this->CommsAdapter->OpenNetworkAdapter<NetworkProxy>
-    (getName(), WebAppIface::MAIN_APP_PROXY_PORT, 0, true);
+    (getName(), WebAppIface::UPDATER_APP_PORT, 0, true);
     if (!m_updaterServerAdapter)
     {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for internal updater server\r\n");
@@ -72,7 +78,11 @@ int Updater::init(void)
         &Updater::OnWebAppDoorBell,
         &Updater::OnUpdateServerDoorBell
     );
-    // m_updaterServerAdapter->start();
+
+    // Remove any existing .swu and .lock files in the temporary firmware directory
+    assert(CFile::RemoveAll(const_cast<char*>(tempFilePath), const_cast<char*>("*.swu")) == 0);
+    assert(CFile::RemoveAll(const_cast<char*>(tempFilePath), const_cast<char*>("*.lock")) == 0);
+
     return ret;
 }
 
@@ -96,6 +106,15 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
     {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "PrepareForUpdate command received with empty payload\r\n");
+        Base::DoAck(false, {});
+        return;
+    }
+
+    // Check if the update lock file is available before proceeding with the update
+    if (CFile::IsFileAvailable(lockFilePath) != 0)
+    {
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_ERROR, "Update lock file is currently held by another process\r\n");
         Base::DoAck(false, {});
         return;
     }
@@ -161,6 +180,18 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
             false);
     }
 
+    // Open the update file for writing
+    int ret = lockFile.open(lockFilePath, "wb");
+    if (ret < 0)
+    {
+        Logger* logger = Logger::getLoggerInst();
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to create lock file. Another update may be in progress\r\n");
+        Base::DoAck(false, {});
+        return;
+    }
+
+    m_UpdateStopped.store(false);  // Reset the update stopped flag
+    m_UpdateInProgCtr = 0;  // Reset the update in progress counter
     m_UpdateInProgress.store(true);
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Initializing update file with name: %s\r\n", fileName.c_str());
     Base::DoAck(true, m_fwFileAdapter->getPreferredSrcPort());
@@ -177,6 +208,8 @@ void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& pa
 {
     (void) val;
     (void) payload;
+
+    m_UpdateInProgCtr = 0;  // Reset the update in progress counter
 
     using json = nlohmann::json;
     json j =
@@ -199,6 +232,8 @@ void Updater::queryUpdateStatusHandler(val_type_t val, const std::vector<char>& 
     (void) val;
     (void) payload;
 
+    m_UpdateInProgCtr = 0;  // Reset the update in progress counter
+
     std::lock_guard<std::mutex> lock(m_StatusMutex);
     Base::DoAck(m_InstallState, m_InstallProgress);
 }
@@ -207,6 +242,8 @@ void Updater::finalizeUpdateHandler(val_type_t val, const std::vector<char>& pay
 {
     (void) val;
     (void) payload;
+
+    m_UpdateInProgCtr = UPDATE_PROG_TIMEOUT;  // Reset the update in progress counter
 
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Finalizing firmware installation\r\n");
     // Perform any necessary finalization steps after a successful firmware installation
@@ -224,6 +261,7 @@ void Updater::finalizeUpdateHandler(val_type_t val, const std::vector<char>& pay
     }
 
     // Set the reset flag
+    lockFile.close();
     m_DoReset.store(true);
     Base::DoAck(true, {});
 }
@@ -234,6 +272,7 @@ void Updater::OnUpdateServerCleanStateHandler(val_type_t val, const std::vector<
     (void) payload;
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Update server received clean state command\r\n");
 
+    m_UpdateStopped.store(true);  // Set the update stopped flag
     m_InstallProgress = 0;  // Reset installation progress
     m_InstallState = true;  // Reset installation state
 
@@ -243,7 +282,13 @@ void Updater::OnUpdateServerCleanStateHandler(val_type_t val, const std::vector<
         Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Removing update file: %s\r\n", updateFile.getFilePath().c_str());
         updateFile.remove();
     }
-    
+
+    if (lockFile.isOpen())
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Removing lock file\r\n");
+        lockFile.remove();
+    }
+
     if (m_fwFileAdapter)
     {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Closing and removing firmware file adapter\r\n");
@@ -258,6 +303,12 @@ void Updater::OnUpdateServerCleanStateHandler(val_type_t val, const std::vector<
 
 void Updater::OnFileWrite(std::vector<char>& data)
 {
+    if (m_UpdateStopped.load())
+    {
+        return;
+    }
+
+    m_UpdateInProgCtr = 0;  // Reset the update in progress counter
     Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Firmware data chunk written of size: %zu\r\n", data.size());
     std::vector<uint8_t> firmwareData(data.begin(), data.end());
     if(updateFile.write(data))
@@ -272,9 +323,11 @@ void Updater::OnFileWrite(std::vector<char>& data)
 
 int Updater::OnUpdateServerDoorBell(const nlohmann::json& j)
 {
+    m_UpdateInProgCtr = 0;  // Reset the update in progress counter
+
     try
     {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Update server received doorbell signal of size: %zu\r\n", j.size());
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Update server received doorbell signal of size: %zu\r\n", j.size());
         if (j.contains("status"))
         {
             std::lock_guard<std::mutex> lock(m_StatusMutex);
@@ -308,9 +361,13 @@ int Updater::OnUpdateServerDoorBell(const nlohmann::json& j)
 
 int Updater::OnWebAppDoorBell(const nlohmann::json& data)
 {
-    if (data.contains("status"))
+    if (data.contains("ping"))
     {
-        std::lock_guard<std::mutex> lock(m_StatusMutex);
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Received ping from web app\r\n");
+        CommsAdapter->RefreshConnectionState();
+    }
+    else if (data.contains("status"))
+    {
         if (data["status"].get<bool>())
         {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Web app reported update in progress\r\n");
@@ -321,14 +378,11 @@ int Updater::OnWebAppDoorBell(const nlohmann::json& data)
         }
         else
         {
-            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Web app reported update not in progress\r\n");
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Web app reported update ended\r\n");
             m_UpdateInProgress.store(false);
         }
     }
-    else
-    {
-        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "No \"status\" keyword found in message\r\n");
-    }
+
     return 0;
 }
 
@@ -389,6 +443,19 @@ void Updater::OnTimer()
         {
             counter--;
         }
+    }
+
+    if (m_UpdateInProgCtr >= UPDATE_PROG_TIMEOUT)
+    {
+        if (lockFile.isOpen())
+        {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Update in progress timeout reached. Closing lock file.\r\n");
+            lockFile.close();
+        }
+    }
+    else
+    {
+        m_UpdateInProgCtr ++;
     }
 }
 

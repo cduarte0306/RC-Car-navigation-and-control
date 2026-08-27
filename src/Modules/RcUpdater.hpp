@@ -4,6 +4,7 @@
 #include <queue>
 #include <condition_variable>
 #include <mutex>
+#include "utils/CFile.hpp"
 #include "RcBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
 
@@ -182,6 +183,12 @@ protected:
     bool m_InstallState{true};  // State of the firmware installation (true if installation is in progress, false otherwise)
 
     /**
+     * @brief Timeout in seconds for update in progress
+     * 
+     */
+    static constexpr int UPDATE_PROG_TIMEOUT = 5; // Timeout in seconds for update in progress
+
+    /**
      * @brief Flag indicating whether an update is currently in progress
      * 
      */
@@ -236,6 +243,24 @@ protected:
      * 
      */
     Msg::CircularBuffer<std::pair<bool, int>> m_UpdateStatusBuffer;
+
+    /**
+     * @brief Update in progress timeout
+     * 
+     */
+    uint8_t m_UpdateInProgCtr{UPDATE_PROG_TIMEOUT};
+
+    /**
+     * @brief Lock file for ensuring exclusive access to the update process
+     * 
+     */
+    CFile lockFile;  // Lock file for ensuring exclusive access to the update process
+
+    /**
+     * @brief Update file for storing incoming firmware data
+     * 
+     */
+    std::atomic<bool> m_UpdateStopped{false};
 };
 }
 

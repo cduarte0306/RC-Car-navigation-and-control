@@ -43,8 +43,7 @@ namespace WebAppIface
         READ_UPDATE_STATUS
     };
 
-    constexpr static uint16_t WEB_APP_PROXY_PORT  = 8080; /*!< Web application proxy port */
-    constexpr static uint16_t MAIN_APP_PROXY_PORT = 9090; /*!< Main application proxy port */
+    constexpr static uint16_t UPDATER_APP_PORT = 9090; /*!< Main application proxy port */
 } // namespace WebAppIface
 
 #pragma endregion

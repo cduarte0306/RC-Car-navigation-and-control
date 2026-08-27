@@ -410,7 +410,13 @@ namespace Adapter {
          * @return std::string 
          */
         virtual std::string readStats() override;
-        
+
+        /**
+         * @brief Refresh connection to host
+         * 
+         */
+        virtual void RefreshConnectionState();
+
         /**
          * @brief Get the Eth Connection State 
          * 
@@ -424,6 +430,7 @@ namespace Adapter {
         std::function<std::unique_ptr<NetworkAdapter>(const std::string&, int, int, int, size_t, bool, bool)>  openAdapterCommand     = nullptr;
         std::function<int(NetworkAdapter& adapter, std::function<void(std::vector<char>&)>, bool)>             dataReceivedCommand    = nullptr;
         std::function<int(NetworkAdapter& adapter, std::function<void(std::string&)>)>                         clientConnectedCommand = nullptr;
+        std::function<void(void)>                                                                              refreshConnectionStateCommand = nullptr;
         std::function<std::unique_ptr<NetworkProxy>(const std::string&, int, int, std::string, size_t, bool)>  openProxyCommand       = nullptr;
         
         std::function<std::string(NetworkAdapter& adapter)> hostIPQueryCommand = nullptr;
@@ -499,6 +506,12 @@ namespace Adapter {
          * @return int Status code of the operation
          */
         virtual int configureAdapter(NetworkAdapter& netAdapter, int adapterIdx, int type, bool internal=false);
+
+        /**
+         * @brief Refresh connection to host
+         * 
+         */
+        virtual void RefreshConnectionState_();
     };
 
     class TlmAdapter : public AdapterBase {

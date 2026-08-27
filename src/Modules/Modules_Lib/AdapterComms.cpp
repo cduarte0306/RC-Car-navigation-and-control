@@ -98,6 +98,14 @@ bool CommsAdapter::GetEthConnectionState() const
 	return ethConnectionState.load();
 }
 
+void CommsAdapter::RefreshConnectionState()
+{
+	if (refreshConnectionStateCommand)
+	{
+		refreshConnectionStateCommand();
+	}
+}
+
 int CommsAdapter::bind_(AdapterBase* Adapter)
 {
 	CommsAdapter* Adapter_ = static_cast<CommsAdapter*>(Adapter);
@@ -137,6 +145,11 @@ void CommsAdapter::bindInterface(CommsAdapter* adapter)
 	this->readStatsCommand = [adapter]() -> std::string
 	{
 		return adapter->readStats();
+	};
+
+	this->refreshConnectionStateCommand = [adapter]() -> void
+	{
+		adapter->RefreshConnectionState_();
 	};
 }
 
@@ -233,6 +246,8 @@ int CommsAdapter::configureAdapter(NetworkAdapter& netAdapter, int adapterIdx, i
 	(void)internal;
 	return 0;
 }
+
+void CommsAdapter::RefreshConnectionState_() {}
 
 template std::unique_ptr<NetworkUdp> CommsAdapter::OpenNetworkAdapter<NetworkUdp, 2048>(const std::string& callerName, int sPort, int dPort, bool internal, bool broadcast);
 template std::unique_ptr<NetworkUdp> CommsAdapter::OpenNetworkAdapter<NetworkUdp, CommsAdapter::MaxUDPPacketSize>(const std::string& callerName, int sPort, int dPort, bool internal, bool broadcast);

@@ -95,6 +95,11 @@ protected:
      */
     virtual int OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& capsule) override;
 
+    /**
+     * @brief Refresh the connection state to the host
+     */
+    virtual void RefreshConnectionState_();
+
     // Opens network adapters
     int configureUDPAdapter(NetworkAdapter& netAdapter, int adapterIdx, bool internal=true);
 

@@ -15,7 +15,7 @@ using namespace Adapter;
 namespace Modules {
 
 
-static constexpr uint8_t HostConnectionTimeout = 3; // 3 seconds of no contact 
+static constexpr uint8_t HostConnectionTimeout = 5; // 3 seconds of no contact 
 static const std::string replyStr = "HANDSHAKE_ACK";
 
 
@@ -98,7 +98,6 @@ void NetworkComms::OnEthCmdRecv(std::vector<char>& data)
     }
 
     hostTmr = HostConnectionTimeout;
-    
     m_LastCommandSource[hdr->seqID] = EthAdapter;
     if (m_EthCmdDispatcher)
     {
@@ -121,8 +120,6 @@ void NetworkComms::OnWlanCmdRecv(std::vector<char>& data)
     }
 
     hostTmr = HostConnectionTimeout;
-
-    // Submit to pool
     m_LastCommandSource[hdr->seqID] = WlanAdapter;
     if (m_WlanCmdDispatcher)
     {
@@ -197,6 +194,15 @@ int NetworkComms::OnModuleMsgReceived(Msg::MessageCapsule<std::vector<char>>& ca
 {
     // Base handler remains a safe default for module-originated messages.
     return Base::OnModuleMsgReceived(capsule);
+}
+
+void NetworkComms::RefreshConnectionState_()
+{
+    // Refresh host connection state only if the host has been detected
+    if (hostDetected.load())
+    {
+        hostTmr = HostConnectionTimeout;
+    }
 }
 
 /**

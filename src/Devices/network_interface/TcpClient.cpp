@@ -62,7 +62,6 @@ void TcpClient::startReceive_(void)
                 m_RxBytes += bytes_recvd;
                 dataReceivedCallback(data);
                 // Continue receiving while socket is healthy
-                startReceive_();
             }
             else if (ec)
             {
@@ -70,10 +69,11 @@ void TcpClient::startReceive_(void)
                 {
                     Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "TCP receive error: %s. Attempting to reconnect\r\n", ec.message().c_str());
                     HandleDisconnectEvent();
+                    return;
                 }
             }
-            // bytes_recvd == 0 without error: peer shutdown; do not restart here,
-            // let the next Connect()/HandleDisconnectEvent() re-arm if needed.
+
+            startReceive_();
         });
 }
 

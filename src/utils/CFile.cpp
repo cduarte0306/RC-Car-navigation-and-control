@@ -1,10 +1,13 @@
 #include "CFile.hpp"
 #include <sys/sysinfo.h>
+#include <sys/file.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <filesystem>
 #include <openssl/sha.h>
 #include <algorithm>
 #include <iostream>
-
+#include <regex>
 
 namespace {
 
@@ -46,6 +49,25 @@ std::ios::openmode ToOpenMode(const char* mode)
     return openMode;
 }
 
+// Flags used solely to obtain a raw fd for flock()'ing the file; this fd is
+// never used for I/O, so it just needs whatever access is enough to open it
+// (creating it if the caller's mode implies the file may not exist yet).
+int ToLockOpenFlags(const char* mode)
+{
+    if (!mode)
+    {
+        return O_RDWR | O_CREAT;
+    }
+
+    const std::string modeStr(mode);
+    const bool readOnly = modeStr.find('r') != std::string::npos &&
+                           modeStr.find('w') == std::string::npos &&
+                           modeStr.find('a') == std::string::npos &&
+                           modeStr.find('+') == std::string::npos;
+
+    return readOnly ? O_RDONLY : (O_RDWR | O_CREAT);
+}
+
 } // namespace
 
 CFile::CFile(const char* filePath, const char* mode)
@@ -63,8 +85,12 @@ CFile::~CFile()
 
 int CFile::open(const char* filePath, const char* mode)
 {
-    close();
-    internalFilePath = filePath;
+    if (m_FileStream.is_open())
+    {
+        // Already open on this instance; caller must close() first rather
+        // than silently losing track of the previous file.
+        return -1;
+    }
 
     if (!filePath)
     {
@@ -77,12 +103,33 @@ int CFile::open(const char* filePath, const char* mode)
         std::filesystem::create_directories(path.parent_path());
     }
 
+    // Take an exclusive, non-blocking advisory lock on the file so no other
+    // process (or another CFile instance) can hold it open at the same
+    // time. This fd is only used for locking, not for I/O.
+    int lockFd = ::open(filePath, ToLockOpenFlags(mode), 0644);
+    if (lockFd < 0)
+    {
+        return -1;
+    }
+
+    if (flock(lockFd, LOCK_EX | LOCK_NB) < 0)
+    {
+        // Someone else already has this file open.
+        ::close(lockFd);
+        return -1;
+    }
+
     auto openMode = ToOpenMode(mode);
     m_FileStream.open(filePath, openMode);
     if (!m_FileStream.is_open())
     {
+        flock(lockFd, LOCK_UN);
+        ::close(lockFd);
         return -1;
     }
+
+    m_LockFd = lockFd;
+    internalFilePath = filePath;
 
     // Determine current file size.
     m_FileStream.seekg(0, std::ios::end);
@@ -100,6 +147,14 @@ void CFile::close()
     {
         m_FileStream.close();
     }
+
+    if (m_LockFd >= 0)
+    {
+        flock(m_LockFd, LOCK_UN);
+        ::close(m_LockFd);
+        m_LockFd = -1;
+    }
+
     internalFilePath.clear();
     m_Size = 0;
     m_Offset = 0;
@@ -229,4 +284,72 @@ int CFile::remove()
     std::string filePath = internalFilePath;
     close();
     return std::remove(filePath.c_str());
+}
+
+int CFile::RemoveAll(char* path, char* wildCard)
+{
+    if ((path == nullptr) || (wildCard == nullptr))
+    {
+        return -1; // Invalid arguments
+    }
+
+    std::filesystem::path dirPath(path);
+    if (!std::filesystem::exists(dirPath) || !std::filesystem::is_directory(dirPath))
+    {
+        return -1; // Directory does not exist
+    }
+
+    std::string pattern(wildCard);
+    std::string regexPattern = std::regex_replace(pattern, std::regex(R"(\.)"), R"(\.)");
+    regexPattern = std::regex_replace(regexPattern, std::regex(R"(\*)"), R"(.*)");
+    regexPattern = std::regex_replace(regexPattern, std::regex(R"(\?)"), R"(.)");
+    std::regex fileRegex(regexPattern);
+    
+    // Iterate through the directory and remove matching files
+    for (const auto& entry : std::filesystem::directory_iterator(dirPath))
+    {
+        if (std::filesystem::is_regular_file(entry.status()))
+        {
+            std::string fileName = entry.path().filename().string();
+            if (std::regex_match(fileName, fileRegex))
+            {
+                std::error_code ec;
+                if (ec)
+                std::filesystem::remove(entry.path(), ec);
+                {
+                    return -1; // Failed to remove a file
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+int CFile::IsFileAvailable(const char* filePath)
+{
+    if (filePath == nullptr)
+    {
+        return -1; // Invalid argument
+    }
+
+    std::filesystem::path filePathObj(filePath);
+    if (!std::filesystem::exists(filePathObj))
+    {
+        return 0; // File does not exist
+    }
+
+    int lockFd = ::open(filePath, O_RDWR);
+    if (lockFd < 0)
+    {
+        return -1; // Failed to open the file
+    }
+
+    if (flock(lockFd, LOCK_EX | LOCK_NB) < 0)
+    {
+        // Someone else already has this file open.
+        ::close(lockFd);
+        return -1;
+    }
+    ::close(lockFd);
+    return 0; // File is available
 }

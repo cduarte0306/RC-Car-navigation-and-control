@@ -103,10 +103,6 @@ int NetworkProxy::dispatchWebApp(const nlohmann::json& msg)
 		return -1;
 	}
 
-	// ProxyMsgHdr hdr;
-	// hdr.srcAddr  = NetworkProxy::MainAppRouteAddr;  // Set appropriate source address
-	// hdr.destAddr = NetworkProxy::WebAppRouteAddr; // Set appropriate destination address
-	// hdr.len = static_cast<int>(msg.dump().length());
 	size_t msglen = sizeof(ProxyMsgHdr) + msg.dump().length();
 	char* tempBuffer = new char[msglen];
 	std::memset(tempBuffer, 0, msglen);
