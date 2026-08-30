@@ -23,7 +23,6 @@ TcpServer::TcpServer(boost::asio::io_context& io_context, std::string adapter, s
     openSocket(adapter, sPort, dPort, bufferSize, broadcast);
 }
 
-
 bool TcpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize, bool broadcast)
 {
     (void) broadcast; // Broadcast is not applicable for TCP, but kept for interface consistency.
@@ -113,7 +112,6 @@ bool TcpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_
     return true;
 }
 
-
 TcpServer::~TcpServer()
 {
     boost::system::error_code ec;
@@ -140,7 +138,6 @@ TcpServer::~TcpServer()
     }
 }
 
-
 int TcpServer::close()
 {
     boost::system::error_code ec;
@@ -155,19 +152,16 @@ int TcpServer::close()
     return 0;
 }
 
-
 int TcpServer::acceptConnection()
 {
     beginAccept();
     return 0;
 }
 
-
 void TcpServer::onConnectionEstablished(std::function<void()> callback)
 {
     connectionEstablishedCallback_ = std::move(callback);
 }
-
 
 bool TcpServer::transmit(const uint8_t* pBuf, size_t length)
 {
@@ -195,7 +189,6 @@ bool TcpServer::transmit(const uint8_t* pBuf, size_t length)
     return true;
 }
 
-
 bool TcpServer::receive(uint8_t* pBuf, size_t length)
 {
     if (pBuf == nullptr || length == 0)
@@ -221,7 +214,6 @@ bool TcpServer::receive(uint8_t* pBuf, size_t length)
     m_RxBytes += bytesReceived;
     return true;
 }
-
 
 void TcpServer::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback)
 {
@@ -315,5 +307,3 @@ void TcpServer::startReceive_(void)
             beginAccept();
         });
 }
-
-

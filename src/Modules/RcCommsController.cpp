@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 #include "utils/Utils.hpp"
 #include "utils/logger.hpp"
+#include <iostream>
 
 using namespace std;
 using namespace Adapter;
@@ -608,7 +609,11 @@ int NetworkComms::configureTcpServer(NetworkAdapter& netAdapter, int adapterIdx,
     netAdapter.preferredSrcPortCb = [&registeredPort, &netAdapter]() -> int
     {
         Network::TcpServer* tcpSocket = registeredPort.preferred();
-        return tcpSocket ? tcpSocket->getSrcPort() : netAdapter.sPort;
+        if (!tcpSocket)
+        {
+            return netAdapter.sPort;
+        }
+        return tcpSocket->getSrcPort();
     };
 
     const int socketDesc = netAdapter.socketDesc;

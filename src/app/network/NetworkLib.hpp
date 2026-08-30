@@ -27,6 +27,8 @@ protected:
     int srcPort_;
     int dstPort_;
     const size_t bufferSize{1024};
+    bool m_EthOk{false};
+    bool m_WlanOk{false};
 };
 
 template<>

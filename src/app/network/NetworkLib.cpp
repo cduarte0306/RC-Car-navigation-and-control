@@ -38,9 +38,9 @@ int NetworkPort<Network::UdpServer>::open(int srcPort, int dstPort)
     std::string wlanAdapter = WlanAdpt;
 
     int ret = false;
-    const bool ethOk = m_Eth->openSocket(ethAdapter, srcPort, dstPort, bufferSize, false);
-    const bool wlanOk = m_Wlan->openSocket(wlanAdapter, srcPort, dstPort, bufferSize, false);
-    return (ethOk && wlanOk) ? 0 : -1;
+    m_EthOk = m_Eth->openSocket(ethAdapter, srcPort, dstPort, bufferSize, false);
+    m_WlanOk = m_Wlan->openSocket(wlanAdapter, srcPort, dstPort, bufferSize, false);
+    return (m_EthOk && m_WlanOk) ? 0 : -1;
 }
 
 int NetworkPort<Network::UdpServer>::close()
@@ -148,6 +148,12 @@ PortManager(ioContext, srcPort, dstPort, bufferSize_)
     }
     m_Eth = std::make_unique<Network::TcpServer>(ioContext, "enP8p1s0", "wlP1p1s0", srcPort, dstPort);
     m_Wlan = std::make_unique<Network::TcpServer>(ioContext, "wlP1p1s0", "enP8p1s0", srcPort, dstPort);
+
+    // TcpServer's constructor already attempts openSocket() internally; reflect
+    // its actual result here so preferred() can tell which interface (if any)
+    // really came up, instead of always defaulting to "none".
+    m_EthOk = m_Eth->isOpen();
+    m_WlanOk = m_Wlan->isOpen();
 }
 
 NetworkPort<Network::TcpServer>::NetworkPort(boost::asio::io_context& ioContext) : 
@@ -175,9 +181,9 @@ int NetworkPort<Network::TcpServer>::open(int srcPort, int dstPort)
     std::string ethAdapter = EthAdpt;
     std::string wlanAdapter = WlanAdpt;
 
-    const bool ethOk = m_Eth->openSocket(ethAdapter, srcPort, dstPort, bufferSize, false);
-    const bool wlanOk = m_Wlan->openSocket(wlanAdapter, srcPort, dstPort, bufferSize, false);
-    return (ethOk && wlanOk) ? 0 : -1;
+    m_EthOk  = m_Eth->openSocket(ethAdapter, srcPort, dstPort, bufferSize, false);
+    m_WlanOk = m_Wlan->openSocket(wlanAdapter, srcPort, dstPort, bufferSize, false);
+    return (m_EthOk && m_WlanOk) ? 0 : -1;
 }
 
 int NetworkPort<Network::TcpServer>::close()
@@ -207,13 +213,28 @@ Network::TcpServer* NetworkPort<Network::TcpServer>::wlan() const
 {
     return m_Wlan.get();
 }
+
 Network::TcpServer* NetworkPort<Network::TcpServer>::preferred() const
 {
     if (m_Lo)
     {
         return m_Lo.get();
     }
-    return m_Eth ? m_Eth.get() : m_Wlan.get();
+    Network::TcpServer* preferred = nullptr;
+    if (m_EthOk && m_WlanOk)
+    {
+        preferred = (m_Eth) ? m_Eth.get() : m_Wlan.get();
+    }
+    else if (m_WlanOk && !m_EthOk)
+    {
+        preferred = m_Wlan.get();
+    }
+    else if (m_EthOk && !m_WlanOk)
+    {
+        preferred = m_Eth.get();
+    }
+
+    return preferred;
 }
 
 bool NetworkPort<Network::TcpServer>::hasEth() const

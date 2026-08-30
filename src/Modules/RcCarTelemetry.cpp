@@ -145,6 +145,7 @@ void RcCarTelemetry::mainProc()
     Logger* logger = Logger::getLoggerInst();
     RegisterMap* regMap = RegisterMap::getInstance();
     std::string hostIP;
+    unsigned int telemetryInterval = 100; // in microseconds
     while (m_Running.load())
     {
         // Resolve host IP if needed
@@ -189,7 +190,7 @@ void RcCarTelemetry::mainProc()
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
+        std::this_thread::sleep_for(std::chrono::microseconds(telemetryInterval));
     }
 }
 }

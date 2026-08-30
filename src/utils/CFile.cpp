@@ -3,6 +3,8 @@
 #include <sys/file.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
 #include <openssl/sha.h>
 #include <algorithm>
@@ -89,6 +91,7 @@ int CFile::open(const char* filePath, const char* mode)
     {
         // Already open on this instance; caller must close() first rather
         // than silently losing track of the previous file.
+        std::cerr << "CFile::open: file is already open on this instance: " << filePath << std::endl;
         return -1;
     }
 
@@ -109,12 +112,16 @@ int CFile::open(const char* filePath, const char* mode)
     int lockFd = ::open(filePath, ToLockOpenFlags(mode), 0644);
     if (lockFd < 0)
     {
+        std::cerr << "CFile::open: failed to open '" << filePath << "' for locking: "
+                   << std::strerror(errno) << " (errno " << errno << ")" << std::endl;
         return -1;
     }
 
     if (flock(lockFd, LOCK_EX | LOCK_NB) < 0)
     {
         // Someone else already has this file open.
+        std::cerr << "CFile::open: failed to lock '" << filePath << "': "
+                   << std::strerror(errno) << " (errno " << errno << ")" << std::endl;
         ::close(lockFd);
         return -1;
     }
@@ -123,10 +130,13 @@ int CFile::open(const char* filePath, const char* mode)
     m_FileStream.open(filePath, openMode);
     if (!m_FileStream.is_open())
     {
+        std::cerr << "CFile::open: failed to open '" << filePath << "' with std::fstream" << std::endl;
         flock(lockFd, LOCK_UN);
         ::close(lockFd);
         return -1;
     }
+
+    std::cout << "CFile::open: successfully opened '" << filePath << "' with std::fstream" << std::endl;
 
     m_LockFd = lockFd;
     internalFilePath = filePath;
@@ -314,8 +324,8 @@ int CFile::RemoveAll(char* path, char* wildCard)
             if (std::regex_match(fileName, fileRegex))
             {
                 std::error_code ec;
-                if (ec)
                 std::filesystem::remove(entry.path(), ec);
+                if (ec)
                 {
                     return -1; // Failed to remove a file
                 }
@@ -323,33 +333,4 @@ int CFile::RemoveAll(char* path, char* wildCard)
         }
     }
     return 0;
-}
-
-int CFile::IsFileAvailable(const char* filePath)
-{
-    if (filePath == nullptr)
-    {
-        return -1; // Invalid argument
-    }
-
-    std::filesystem::path filePathObj(filePath);
-    if (!std::filesystem::exists(filePathObj))
-    {
-        return 0; // File does not exist
-    }
-
-    int lockFd = ::open(filePath, O_RDWR);
-    if (lockFd < 0)
-    {
-        return -1; // Failed to open the file
-    }
-
-    if (flock(lockFd, LOCK_EX | LOCK_NB) < 0)
-    {
-        // Someone else already has this file open.
-        ::close(lockFd);
-        return -1;
-    }
-    ::close(lockFd);
-    return 0; // File is available
 }

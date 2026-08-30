@@ -101,20 +101,22 @@ void Updater::reqRevHandler(val_type_t val, const std::vector<char>& payload)
 void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload)
 {
     (void)val;
+    Logger* logger = Logger::getLoggerInst();
+
     // Perform necessary steps to prepare the system for an update, such as stopping motors and closing connections
     if (payload.size() == 0)
     {
-        Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "PrepareForUpdate command received with empty payload\r\n");
         Base::DoAck(false, {});
         return;
     }
 
-    // Check if the update lock file is available before proceeding with the update
-    if (CFile::IsFileAvailable(lockFilePath) != 0)
+    // Acquire the update lock before touching anything else. This fails
+    // atomically if the lock is already held -- whether by another process,
+    // or by this one from a prior update that was never finalized.
+    if (lockFile.open(lockFilePath, "wb") < 0)
     {
-        Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_ERROR, "Update lock file is currently held by another process\r\n");
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to acquire update lock. Another update may be in progress\r\n");
         Base::DoAck(false, {});
         return;
     }
@@ -123,7 +125,6 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
     if (updateFile.isOpen())
     {
         // Do file cleanup
-        Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_INFO, "Closing previously opened update file\r\n");
         updateFile.close();
     }
@@ -137,8 +138,8 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
     updateFile.open(fileName, "wb");
     if (!updateFile.isOpen())
     {
-        Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "Failed to open update file\r\n");
+        lockFile.close();
         Base::DoAck(false, {});
         return;
     }
@@ -146,6 +147,8 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
     // Command motor shut off
     if (motorAdapter && motorAdapter->stopCmd() < 0)
     {
+        updateFile.close();
+        lockFile.close();
         Base::DoAck(false, {});
         return;
     }
@@ -165,6 +168,8 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
         if (!m_fwFileAdapter)
         {
             Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to create network adapter for firmware file transfers\r\n");
+            updateFile.close();
+            lockFile.close();
             Base::DoAck(false, {});
             return;
         }
@@ -178,16 +183,6 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
             *m_fwFileAdapter,
             std::bind(&Updater::OnFileWrite, this, std::placeholders::_1),
             false);
-    }
-
-    // Open the update file for writing
-    int ret = lockFile.open(lockFilePath, "wb");
-    if (ret < 0)
-    {
-        Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to create lock file. Another update may be in progress\r\n");
-        Base::DoAck(false, {});
-        return;
     }
 
     m_UpdateStopped.store(false);  // Reset the update stopped flag

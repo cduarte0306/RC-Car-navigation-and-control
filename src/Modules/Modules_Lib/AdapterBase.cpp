@@ -51,7 +51,8 @@ void AdapterBase::procReplyThread(void)
 	int ret = 0;
 	while (m_ReplyThreadRunning)
 	{
-		Msg::MessageAck<std::vector<char>>& ack = m_ReplyMailBox.getHead();
+		m_ReplyMailBox.getHead(); // Blocks until an item is available
+		Msg::MessageAck<std::vector<char>>& ack = m_ReplyMailBox.peek(0); // Oldest item, matching what pop() removes
 		Logger::getLoggerInst()->log(Logger::LOG_LVL_DEBUG, "Adapter %s processing reply for Command ID: %d, Seq ID: %d, Adapter parent module ID: %d\r\n",
 			parentName.c_str(), ack.mCommandID, ack.mSeqID, m_ModuleID);
 
@@ -72,7 +73,8 @@ void AdapterBase::procInputThread(void)
 	int ret = 0;
 	while (true)
 	{
-		auto& capsule = m_InputMailBox.getHead();
+		m_InputMailBox.getHead(); // Blocks until an item is available
+		auto& capsule = m_InputMailBox.peek(0); // Oldest item, matching what pop() removes
 		if (moduleDispatchCmd)
 		{
 			ret = moduleDispatchCmd(capsule);

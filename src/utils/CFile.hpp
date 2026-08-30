@@ -123,13 +123,6 @@ public:
      */
     static int RemoveAll(char* path, char* wildCard);
 
-    /**
-     * @brief Is the file currently locked by another process
-     * 
-     * @return int 0 if the file is available, -1 if it is locked by another process
-     */
-    static int IsFileAvailable(const char* filePath);
-
 private:
 
     /**
