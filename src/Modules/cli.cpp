@@ -33,9 +33,11 @@
 
 namespace Modules
 {
-AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
+AppCLI::AppCLI(ModuleDefs::DeviceType moduleID, std::string name) : Base(moduleID, name)
+{
     const CliCommandBinding cmdBindings[] = {
-        (CliCommandBinding){
+        (CliCommandBinding)
+        {
             "read-psoc",
             
             "Reads PSoC data\r\n"
@@ -43,7 +45,8 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
             
             false, this,
             
-            [](EmbeddedCli *cli, char *args, void *context) {
+            [](EmbeddedCli *cli, char *args, void *context)
+            {
                 typedef struct {
                     val_type_t version_major;   // Major version
                     val_type_t version_minor;   // Minor version
@@ -62,7 +65,8 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 
                 AppCLI* _cli = static_cast<AppCLI*>(context);
                 int ret = _cli->motorAdapter->moduleCommand(buff, sizeof(buff));
-                if (ret < 0) {
+                if (ret < 0)
+                {
                     _cli->writeIface("Failed to read register: %d\r\n", cmd->data_1.u8);
                 }
 
@@ -79,7 +83,8 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 _cli->writeIface("%s\r\n", out.str().c_str());
             }
         },
-        (CliCommandBinding){
+        (CliCommandBinding)
+        {
             "write-spi",
             
             "Writes SPI data\r\n"
@@ -87,7 +92,8 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
             
             false, this,
             
-            [](EmbeddedCli *cli, char *args, void *context) {
+            [](EmbeddedCli *cli, char *args, void *context)
+            {
                 (void)args;
                 (void)cli;
                 AppCLI* _cli = static_cast<AppCLI*>(context);
@@ -95,14 +101,16 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 
                 int index = 1;
                 const char *arg1 = nullptr;
-                while(embeddedCliGetToken(args, index)) {
+                while(embeddedCliGetToken(args, index))
+                {
                     arg1 = embeddedCliGetToken(args, index++);
                     array.push_back(std::stoi(std::string(arg1)));
                 }
                 char buff[1024];
                 Modules::MotorController::MotorCommand_t* cmd = reinterpret_cast<Modules::MotorController::MotorCommand_t*>(buff);
                 cmd->command = Modules::MotorController::MotorCmdSpiWrite;
-                if (!arg1) {
+                if (!arg1)
+                {
                     _cli->writeIface("ERROR: Failed to provide argument\r\n");
                     return;
                 }
@@ -110,20 +118,23 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 int ret = _cli->motorAdapter->moduleCommand(buff, sizeof(buff));
             }
         },
-        (CliCommandBinding){
+        (CliCommandBinding)
+        {
             "read-spi-reg",
             
             "Reads SPI register\r\n"
                 "\tread-spi-reg \"<reg>\"\r\n",
             true, this,
             
-            [](EmbeddedCli *cli, char *args, void *context) {
+            [](EmbeddedCli *cli, char *args, void *context)
+            {
                 (void)cli;
                 const char *reg_ = embeddedCliGetToken(args, 1);
                 AppCLI* _cli = static_cast<AppCLI*>(context);
 
                 int reg = std::stoi(std::string(reg_));
-                if (reg_ == nullptr) {
+                if (reg_ == nullptr)
+                {
                     _cli->writeIface("ERROR: Failed to provide argument\r\n");
                     return;
                 }
@@ -132,13 +143,15 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 Modules::MotorController::MotorCommand_t* cmd = reinterpret_cast<Modules::MotorController::MotorCommand_t*>(buff);
                 cmd->command = Modules::MotorController::MotorCmdSpiRead;
                 int ret = _cli->motorAdapter->moduleCommand(buff, sizeof(buff));
-                if (ret < 0) {
+                if (ret < 0)
+                {
                     _cli->writeIface("Failed to read register: %d\r\n", cmd->data_1.u8);
                 }
                 _cli->writeIface("Register %d: %u\r\n", reg, cmd->data_1.u8);
             }
         },
-        (CliCommandBinding){
+        (CliCommandBinding)
+        {
             "read-stats",
             
             "Reads stats from specied module\r\n"
@@ -147,11 +160,13 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 "\tread-stats \"<module ID>\"\r\n",
             true, this,
             
-            [](EmbeddedCli *cli, char *args, void *context) {
+            [](EmbeddedCli *cli, char *args, void *context)
+            {
                 (void)cli;
                 AppCLI* _cli = static_cast<AppCLI*>(context);
                 const char *moduleIdx_ = embeddedCliGetToken(args, 1);
-                if (moduleIdx_ == nullptr) {
+                if (moduleIdx_ == nullptr)
+                {
                     _cli->writeIface("ERROR: Failed to provide argument\r\n");
                     return;
                 }
@@ -177,7 +192,8 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 }
             }
         },
-        (CliCommandBinding){
+        (CliCommandBinding)
+        {
             "save-snapshot",
             
             "Saves a snapshot from the camera\r\n"
@@ -185,7 +201,8 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
             
             false, this,
             
-            [](EmbeddedCli *cli, char *args, void *context) {
+            [](EmbeddedCli *cli, char *args, void *context)
+            {
                 (void)cli;
                 (void)args;
                 AppCLI* _cli = static_cast<AppCLI*>(context);
@@ -194,7 +211,8 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
                 _cli->CameraAdapter->cliCommand(buffer);
             }
         },
-        (CliCommandBinding){
+        (CliCommandBinding)
+        {
             "reboot-cpu",
             
             "Reboots CPU after shutting off all RC car components\r\n"
@@ -202,7 +220,8 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
             
             false, this,
             
-            [](EmbeddedCli *cli, char *args, void *context) {
+            [](EmbeddedCli *cli, char *args, void *context)
+            {
                 (void)args;
                 (void)cli;
                 AppCLI* _cli = static_cast<AppCLI*>(context);
@@ -217,7 +236,8 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
     uint16_t req_size;
 
     EmbeddedCliConfig *config = embeddedCliDefaultConfig();
-    if ( config == NULL ) {
+    if ( config == NULL )
+    {
         throw("config is nullptr");
     }
 
@@ -253,13 +273,15 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
     }
 
     // Override the writeChar function to send output over UDP
-    CLI->writeChar = [](EmbeddedCli *cli, char c ) {
+    CLI->writeChar = [](EmbeddedCli *cli, char c )
+    {
         AppCLI* _cli = static_cast<AppCLI*>(cli->appContext);
         std::vector<char> data = {c};
         int ret = _cli->m_CliAdapter->send(reinterpret_cast<const uint8_t*>(data.data()), data.size());
         Logger* logger = Logger::getLoggerInst();
-        if (ret < 0) {
-            logger->log(Logger::LOG_LVL_ERROR, "%s, %s, Error writing to TTY\r\n", __func__, __LINE__);
+        if (ret < 0)
+        {
+            logger->log(Logger::LOG_LVL_ERROR, "%s, %d, Error writing to TTY\r\n", __func__, __LINE__);
         }
     };
 
@@ -268,19 +290,27 @@ AppCLI::AppCLI(int moduleID_, std::string name) : Base(moduleID_, name) {
 }
 
 
-AppCLI::~AppCLI() {
+AppCLI::~AppCLI()
+{
 }
 
-int AppCLI::init(void) {
-    m_CliAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::TcpAdapterType, CLI_PORT, 0, "lo", Adapter::CommsAdapter::MaxUDPPacketSize);
+int AppCLI::init(void)
+{
+    m_CliAdapter = this->CommsAdapter->OpenNetworkAdapter<NetworkTcpServer>(
+        getName(),
+        CLI_PORT,
+        0,
+        true);
     m_CliAdapter->setParent(this->getName());
 
     return 0;
 }
 
-int AppCLI::stop(void) {
+int AppCLI::stop(void)
+{
     // Stop main loop and close TTY
-    if (fd >= 0) {
+    if (fd >= 0)
+    {
         close(fd);
         fd = -1;
     }
@@ -288,15 +318,16 @@ int AppCLI::stop(void) {
 }
 
 
-void AppCLI::mainProc() {
+void AppCLI::mainProc()
+{
     uint8_t buffer[128];
     bool connected = false;
-        
-    // Simulate the enter key press to show the invitation prompt
-    embeddedCliReceiveChar(this->CLI, '\n');
-    embeddedCliProcess(this->CLI);
+    m_CliAdapter->onConnected = [this]()
+    {
+        // Simulate the enter key press to show the invitation prompt
+        embeddedCliReceiveChar(this->CLI, '\n');
+        embeddedCliProcess(this->CLI);
 
-    m_CliAdapter->onConnected = [this]() {
         this->writeIface("\033[2J\033[H");
         this->writeIface("\r\n*************************RC Car CLI Interface*************************\r\n");
         this->writeIface("Software version: %u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
@@ -305,16 +336,19 @@ void AppCLI::mainProc() {
 
     this->CommsAdapter->startReceive(
         *m_CliAdapter,
-        [this](std::vector<char>& data) {
+        [this](std::vector<char>& data)
+        {
             std::lock_guard<std::mutex> lock(this->mutex);
-            for (char c : data) {
+            for (char c : data)
+            {
                 embeddedCliReceiveChar(this->CLI, c);
             }
             embeddedCliProcess(this->CLI);
         }, false
     );
     
-    while (true) {
+    while (true)
+    {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 }
@@ -327,18 +361,15 @@ void AppCLI::mainProc() {
  * @param ... 
  * @return int Number of bytes written, or -1 on error
  */
-int AppCLI::writeIface(const char* format, ...) {
-    if (this->fd < 0) {
-        std::cerr << "TTY interface not opened" << std::endl;
-        return -1;
-    }
-
+int AppCLI::writeIface(const char* format, ...)
+{
     char buffer[1024];
     va_list args;
     va_start(args, format);
     int len = vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    if (len < 0) {
+    if (len < 0)
+    {
         std::cerr << "Error formatting string" << std::endl;
         return -1;
     }

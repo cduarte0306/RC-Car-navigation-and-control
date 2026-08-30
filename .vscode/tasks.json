@@ -22,6 +22,19 @@
       "command": "${workspaceFolder}/scripts/rc_car_toolbox.sh",
       "args": ["remote"],
       "problemMatcher": []
+    },
+    {
+      "label": "Debug Core Dump (Jetson)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/rc_car_toolbox.sh",
+      "args": ["coredump"],
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": []
     }
   ]
 }

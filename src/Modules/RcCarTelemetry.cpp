@@ -1,7 +1,8 @@
 #include "Modules/RcCarTelemetry.hpp"
-#include "Devices/RegisterMap.hpp"
+#include "lib/RegisterMap.hpp"
 
 #include "utils/logger.hpp"
+#include "utils/Utils.hpp"
 #include <nlohmann/json.hpp>
 
 #include <chrono>
@@ -13,27 +14,35 @@
 
 namespace Modules {
 static nlohmann::json tempTlm;
+static std::mutex tempTlmMutex;
 
-RcCarTelemetry::RcCarTelemetry(int moduleID, std::string name) : Modules::Base(moduleID, name), Adapter::TlmAdapter(name) {
+RcCarTelemetry::RcCarTelemetry(ModuleDefs::DeviceType moduleID, std::string name) : Modules::Base(moduleID, name), Adapter::TlmAdapter(name)
+{
+    setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::TlmAdapter*>(this)));
 }
 
-int RcCarTelemetry::init(void) {
+int RcCarTelemetry::init(void)
+{
     // Initialize transmission adapter
     Logger* logger = Logger::getLoggerInst();
-    m_TxAdapter = this->CommsAdapter->createNetworkAdapter(getName(), Adapter::CommsAdapter::UdpAdapterType, 0, 6000, "wlP1p1s0");
-    if (!m_TxAdapter) {
+    constexpr int kTelemetryPort = static_cast<int>(ModuleDefs::NetworkPorts::TelemetryPort);
+    m_TxAdapter = this->CommsAdapter->OpenNetworkAdapter<NetworkUdp>(getName(), 0, kTelemetryPort);
+
+    if (!m_TxAdapter)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create telemetry transmission adapter\r\n");
         return -1;
     }
 
-    setPeriod(1000);
-
+    SetTimerPeriod(1000);
+    m_SysVers = Utils::GetOEVersion();
     logger->log(Logger::LOG_LVL_INFO, "Telemetry module initialized\r\n");
     return 0;
 }
 
 
-Adapter::AdapterBase* RcCarTelemetry::getInputAdapter() {
+Adapter::AdapterBase* RcCarTelemetry::getInputAdapter()
+{
     return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::TlmAdapter*>(this));
 }
 
@@ -44,8 +53,10 @@ Adapter::AdapterBase* RcCarTelemetry::getInputAdapter() {
  * @param sourceName Name of the telemetry source
  * @return int Status code
  */
-int RcCarTelemetry::registerTelemetrySource_(const std::string& sourceName) {
-    if (sourceName.empty()) {
+int RcCarTelemetry::registerTelemetrySource_(const std::string& sourceName)
+{
+    if (sourceName.empty())
+    {
         return -1;
     }
 
@@ -64,18 +75,22 @@ int RcCarTelemetry::registerTelemetrySource_(const std::string& sourceName) {
  * @param length Size of data
  * @return int Status code
  */
-int RcCarTelemetry::publishTelemetry_(const std::string& sourceName, const uint8_t* data, size_t length) {
-    if (!data || length == 0) {
+int RcCarTelemetry::publishTelemetry_(const std::string& sourceName, const uint8_t* data, size_t length)
+{
+    if (!data || length == 0)
+    {
         return -1;
     }
 
     // Only allow known sources
-    if (m_registeredSources.find(sourceName) == m_registeredSources.end()) {
+    if (m_registeredSources.find(sourceName) == m_registeredSources.end())
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Telemetry publish from unregistered source: %s\r\n", sourceName.c_str());
         return -1;
     }
 
-    if (!m_TxAdapter || !this->CommsAdapter) {
+    if (!m_TxAdapter || !this->CommsAdapter)
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Telemetry publish failed: Transmission adapter not initialized\r\n");
         return -1;
     }
@@ -89,7 +104,8 @@ int RcCarTelemetry::publishTelemetry_(const std::string& sourceName, const uint8
 }
 
 
-void RcCarTelemetry::OnTimer() {
+void RcCarTelemetry::OnTimer()
+{
     // Read CPU temperature
     const std::vector<std::pair<std::string, std::string>> zones = {
         {"/sys/devices/virtual/thermal/thermal_zone0/temp", "CPU_TEMP"},
@@ -97,15 +113,24 @@ void RcCarTelemetry::OnTimer() {
         {"/sys/devices/virtual/thermal/thermal_zone2/temp", "SOC_TEMP"},
     };
 
-    for (const auto& [path, label] : zones) {
-        std::ifstream file(path);
-        if (!file.is_open()) continue;
+    try
+    {
+        std::lock_guard<std::mutex> lock(tempTlmMutex);
+        for (const auto& [path, label] : zones)
+        {
+            std::ifstream file(path);
+            if (!file.is_open()) continue;
 
-        int raw;
-        file >> raw;
+            int raw;
+            file >> raw;
 
-        // Data is millicelcius
-        tempTlm[label] = raw / 1000.0;
+            // Data is millicelcius
+            tempTlm[label] = raw / 1000.0;
+        }
+    }
+    catch (std::exception& e)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Exception detected: %s", e.what());
     }
 }
 
@@ -115,39 +140,57 @@ void RcCarTelemetry::OnTimer() {
  * @brief Main processing loop
  * 
  */
-void RcCarTelemetry::mainProc() {
+void RcCarTelemetry::mainProc()
+{
     Logger* logger = Logger::getLoggerInst();
     RegisterMap* regMap = RegisterMap::getInstance();
     std::string hostIP;
-    while (m_Running.load()) {
+    unsigned int telemetryInterval = 100; // in microseconds
+    while (m_Running.load())
+    {
         // Resolve host IP if needed
         {
             auto retVal = regMap->get<std::string>(RegisterMap::RegisterKeys::HostIP);
-            if (retVal.has_value()) {
+            if (retVal.has_value())
+            {
                 hostIP = *retVal;
-            } else {
+            }
+            else
+            {
                 hostIP.clear();
             }
         }
 
         // Poll telemetry data from buffer
-        while (!m_TlmBuffer.isEmpty()) {
+        while (!m_TlmBuffer.isEmpty())
+        {
             std::lock_guard<std::mutex> lock(m_txMutex);
             nlohmann::json tlmData = m_TlmBuffer.getHead();
-            
+
+            nlohmann::json tempSnapshot;
+            {
+                std::lock_guard<std::mutex> tempLock(tempTlmMutex);
+                tempSnapshot = tempTlm;
+            }
+
             // Append temperature telemetry
-            for (auto& [key, value] : tempTlm.items()) {
+            for (auto& [key, value] : tempSnapshot.items())
+            {
                 tlmData[key] = value;
             }
-            
+
             m_TlmBuffer.pop();
             std::string payload = tlmData.dump();
-            m_TxAdapter->send(
+            
+            if (m_TxAdapter->IsHostPresent())
+            {
+                m_TxAdapter->send(
                 reinterpret_cast<const uint8_t*>(payload.data()),
                 payload.size());
+            }
         }
 
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
+        std::this_thread::sleep_for(std::chrono::microseconds(telemetryInterval));
     }
 }
 }

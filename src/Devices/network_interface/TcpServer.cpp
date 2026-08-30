@@ -17,122 +17,169 @@ using namespace Network;
 
 
 TcpServer::TcpServer(boost::asio::io_context& io_context, std::string adapter, std::string fallbackAdapter, unsigned short sPort, unsigned short dPort, size_t bufferSize, bool broadcast):
-    Sockets(io_context, sPort), acceptor_(io_context), clientSocket_(io_context), m_Broadcast(broadcast) {
+    Sockets(io_context, sPort), acceptor_(io_context), clientSocket_(io_context), m_Broadcast(broadcast)
+    {
+    (void) fallbackAdapter; // fallback adapter is not currently used during reopen
+    openSocket(adapter, sPort, dPort, bufferSize, broadcast);
+}
 
-    (void) broadcast; // Broadcast is not applicable for TCP, but we keep the parameter for interface consistency with UdpServer
+bool TcpServer::openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize, bool broadcast)
+{
+    (void) broadcast; // Broadcast is not applicable for TCP, but kept for interface consistency.
+
     sport_ = sPort;
     dport_ = dPort;
     Logger* logger = Logger::getLoggerInst();
 
     m_RecvBuffer.resize(bufferSize);
 
-    auto getAdapter = [&logger](std::string& adapterName) -> std::string {
+    if (clientSocket_.is_open())
+    {
+        boost::system::error_code closeEc;
+        clientSocket_.close(closeEc);
+    }
+
+    if (acceptor_.is_open())
+    {
+        boost::system::error_code cancelEc;
+        acceptor_.cancel(cancelEc);
+        boost::system::error_code closeEc;
+        acceptor_.close(closeEc);
+    }
+
+    auto getAdapter = [&logger](std::string& adapter) -> std::string
+    {
         std::string ipAddress;
 
-        // Look for enP8p1s0 interface to bind to
         struct ifaddrs* ifaddr;
-        if (getifaddrs(&ifaddr) == -1) {
+        if (getifaddrs(&ifaddr) == -1)
+        {
             perror("getifaddrs");
             logger->log(Logger::LOG_LVL_ERROR, "Failed to get network interfaces\r\n");
-            throw std::runtime_error("");
+            return "";
         }
 
-        for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
-            if (ifa->ifa_addr == nullptr) continue;
+        for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next)
+        {
+            if (ifa->ifa_addr == nullptr)
+            {
+                continue;
+            }
 
             if (ifa->ifa_addr->sa_family == AF_INET &&
-                !(std::strcmp(ifa->ifa_name, adapterName.c_str()))) {
+                !(std::strcmp(ifa->ifa_name, adapter.c_str())))
+                {
                 char host[NI_MAXHOST];
                 int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
                                     host, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
-                if (s == 0) {
+                if (s == 0)
+                {
                     ipAddress = host;
                     break;
                 }
             }
         }
+
         freeifaddrs(ifaddr);
         return ipAddress;
     };
 
-    std::string ipAddress = getAdapter(adapter);
-    if (ipAddress.empty() && !fallbackAdapter.empty()) {
-        ipAddress = getAdapter(fallbackAdapter);
-    }
-    if (ipAddress.empty()) {
-        throw std::runtime_error("Failed to get IP address for adapter: " + adapter);
-    }
-
-    boost::asio::ip::tcp::endpoint listen_endpoint(boost::asio::ip::make_address(ipAddress), sport_);
-    acceptor_.open(listen_endpoint.protocol());
-    acceptor_.set_option(boost::asio::socket_base::reuse_address(true));
-    acceptor_.bind(listen_endpoint);
-    acceptor_.listen();
-    logger->log(Logger::LOG_LVL_INFO, "Opened TCP socket: %s:%d\r\n", ipAddress.c_str(), sport_);
-    
-}
-
-
-TcpServer::~TcpServer() {
-    threadCanRun = false;
-    if (clientSocket_.is_open()) {
-        boost::system::error_code ec;
-        clientSocket_.close(ec);
-    }
-    acceptor_.close();
-}
-
-
-int TcpServer::acceptConnection() {
-    if (clientSocket_.is_open()) {
-        boost::system::error_code ec;
-        clientSocket_.close(ec);
-    }
-
-    boost::system::error_code ec;
-    acceptor_.accept(clientSocket_, ec);
-    if (ec) {
-        Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_ERROR, "TCP accept error: %s\r\n", ec.message().c_str());
-        return -1;
-    }
-
-    const auto clientEndpoint = clientSocket_.remote_endpoint(ec);
-    if (ec) {
-        Logger* logger = Logger::getLoggerInst();
-        logger->log(Logger::LOG_LVL_ERROR, "TCP endpoint error: %s\r\n", ec.message().c_str());
-        return -1;
-    }
-
-    m_HostIP = clientEndpoint.address().to_string();
-    Logger* logger = Logger::getLoggerInst();
-    logger->log(Logger::LOG_LVL_INFO, "Client connected: %s:%d\r\n", m_HostIP.c_str(), clientEndpoint.port());
-
-    if (connectionEstablishedCallback_) {
-        connectionEstablishedCallback_();
-    }
-
-    return 0;
-}
-
-
-void TcpServer::onConnectionEstablished(std::function<void()> callback) {
-    connectionEstablishedCallback_ = std::move(callback);
-}
-
-
-bool TcpServer::transmit(uint8_t* pBuf, size_t length) {
-    if (pBuf == nullptr || length == 0) {
+    std::string ipAddress = getAdapter(adapterName);
+    if (ipAddress.empty())
+    {
+        logger->log(Logger::LOG_LVL_ERROR, "Failed to get IP address for adapter: %s\r\n", adapterName.c_str());
         return false;
     }
 
-    if (!clientSocket_.is_open() && acceptConnection() != 0) {
+    boost::system::error_code ec;
+    boost::asio::ip::tcp::endpoint listenEndpoint(boost::asio::ip::make_address(ipAddress, ec), sport_);
+    if (ec)
+    {
+        logger->log(Logger::LOG_LVL_ERROR, "Invalid TCP bind address: %s\r\n", ec.message().c_str());
+        return false;
+    }
+
+    acceptor_.open(listenEndpoint.protocol(), ec);
+    acceptor_.set_option(boost::asio::socket_base::reuse_address(true), ec);
+    acceptor_.bind(listenEndpoint, ec);
+    const auto boundEndpoint = acceptor_.local_endpoint(ec);
+
+    // If caller requested an ephemeral port (0), update cached source port with the assigned one.
+    sport_ = static_cast<int>(boundEndpoint.port());
+    acceptor_.listen(boost::asio::socket_base::max_listen_connections, ec);
+
+    logger->log(Logger::LOG_LVL_INFO, "Opened TCP server socket: %s:%d\r\n", ipAddress.c_str(), sport_);
+    return true;
+}
+
+TcpServer::~TcpServer()
+{
+    boost::system::error_code ec;
+    const auto endpoint = acceptor_.local_endpoint(ec);
+    if (!ec)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Closing TCP server at %s:%d\r\n", endpoint.address().to_string().c_str(), endpoint.port());
+    }
+    else
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Closing TCP server\r\n");
+    }
+
+    threadCanRun = false;
+    if (clientSocket_.is_open())
+    {
+        boost::system::error_code closeEc;
+        clientSocket_.close(closeEc);
+    }
+    if (acceptor_.is_open())
+    {
+        boost::system::error_code acceptorCloseEc;
+        acceptor_.close(acceptorCloseEc);
+    }
+}
+
+int TcpServer::close()
+{
+    boost::system::error_code ec;
+    if (clientSocket_.is_open())
+    {
+        clientSocket_.close(ec);
+    }
+    if (acceptor_.is_open())
+    {
+        acceptor_.close(ec);
+    }
+    return 0;
+}
+
+int TcpServer::acceptConnection()
+{
+    beginAccept();
+    return 0;
+}
+
+void TcpServer::onConnectionEstablished(std::function<void()> callback)
+{
+    connectionEstablishedCallback_ = std::move(callback);
+}
+
+bool TcpServer::transmit(const uint8_t* pBuf, size_t length)
+{
+    if (pBuf == nullptr || length == 0)
+    {
+        return false;
+    }
+
+    if (!clientSocket_.is_open())
+    {
+        beginAccept();
         return false;
     }
 
     boost::system::error_code ec;
     const size_t bytesSent = boost::asio::write(clientSocket_, boost::asio::buffer(pBuf, length), ec);
-    if (ec || bytesSent == 0) {
+    if (ec || bytesSent == 0)
+    {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "TCP send error: %s\r\n", ec.message().c_str());
         return false;
@@ -142,19 +189,23 @@ bool TcpServer::transmit(uint8_t* pBuf, size_t length) {
     return true;
 }
 
-
-bool TcpServer::receive(uint8_t* pBuf, size_t length) {
-    if (pBuf == nullptr || length == 0) {
+bool TcpServer::receive(uint8_t* pBuf, size_t length)
+{
+    if (pBuf == nullptr || length == 0)
+    {
         return false;
     }
 
-    if (!clientSocket_.is_open() && acceptConnection() != 0) {
+    if (!clientSocket_.is_open())
+    {
+        beginAccept();
         return false;
     }
 
     boost::system::error_code ec;
     const size_t bytesReceived = clientSocket_.read_some(boost::asio::buffer(pBuf, length), ec);
-    if (ec || bytesReceived == 0) {
+    if (ec || bytesReceived == 0)
+    {
         Logger* logger = Logger::getLoggerInst();
         logger->log(Logger::LOG_LVL_ERROR, "TCP receive error: %s\r\n", ec.message().c_str());
         return false;
@@ -164,48 +215,86 @@ bool TcpServer::receive(uint8_t* pBuf, size_t length) {
     return true;
 }
 
+void TcpServer::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback)
+{
+    this->dataReceivedCallback = std::move(dataReceivedCallback);
+    beginAccept();
+}
 
-void TcpServer::startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_, bool asyncTx) {
-    dataReceivedCallback = std::move(dataReceivedCallback_);
-    m_AsyncTx = asyncTx;
-
-    if (!clientSocket_.is_open() && acceptConnection() != 0) {
+void TcpServer::beginAccept()
+{
+    if (!acceptor_.is_open() || acceptInProgress_.exchange(true))
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "TCP acceptor not open or accept already in progress\r\n");
         return;
     }
 
-    this->startReceive_();
+    boost::system::error_code endpointEc;
+    const auto acceptorEndpoint = acceptor_.local_endpoint(endpointEc);
+    if (!endpointEc)
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "TCP acceptor starting async accept @ %s:%d\r\n",
+            acceptorEndpoint.address().to_string().c_str(), acceptorEndpoint.port());
+    }
+
+    acceptor_.async_accept([this](const boost::system::error_code& error, boost::asio::ip::tcp::socket socket)
+    {
+        acceptInProgress_.store(false);
+
+        if (error)
+        {
+            Logger* logger = Logger::getLoggerInst();
+            logger->log(Logger::LOG_LVL_ERROR, "TCP accept error: %s\r\n", error.message().c_str());
+            return;
+        }
+
+        boost::system::error_code closeEc;
+        if (clientSocket_.is_open())
+        {
+            clientSocket_.close(closeEc);
+        }
+
+        clientSocket_ = std::move(socket);
+
+        boost::system::error_code endpointEc;
+        const auto clientEndpoint = clientSocket_.remote_endpoint(endpointEc);
+        if (!endpointEc)
+        {
+            m_HostIP = clientEndpoint.address().to_string();
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "Client connected: %s:%d\r\n", m_HostIP.c_str(), clientEndpoint.port());
+        }
+
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "TCP connection established with client %s:%d\r\n",
+            m_HostIP.c_str(), clientEndpoint.port());
+
+        if (connectionEstablishedCallback_)
+        {
+            connectionEstablishedCallback_();
+        }
+
+        startReceive_();
+    });
 }
 
-
-void TcpServer::startReceive_(void) {
-    if (!clientSocket_.is_open()) {
+void TcpServer::startReceive_(void)
+{
+    if (!clientSocket_.is_open())
+    {
         return;
     }
 
     clientSocket_.async_read_some(
         boost::asio::buffer(m_RecvBuffer),
-        [this](const boost::system::error_code& ec, std::size_t bytes_recvd) {
-            if (!ec && bytes_recvd > 0) {
+        [this](const boost::system::error_code& ec, std::size_t bytes_recvd)
+        {
+            if (!ec && bytes_recvd > 0)
+            {
                 m_RxBytes += bytes_recvd;
 
-                if (dataReceivedCallback) {
+                if (dataReceivedCallback)
+                {
                     std::vector<char> dataReceived(m_RecvBuffer.begin(), m_RecvBuffer.begin() + bytes_recvd);
                     dataReceivedCallback(dataReceived);
-
-                    if (m_AsyncTx && !dataReceived.empty()) {
-                        auto txData = std::make_shared<std::vector<char>>(std::move(dataReceived));
-                        boost::asio::async_write(
-                            clientSocket_,
-                            boost::asio::buffer(*txData),
-                            [this, txData](const boost::system::error_code& writeEc, std::size_t bytes_sent) {
-                                if (!writeEc) {
-                                    m_TxBytes += bytes_sent;
-                                    return;
-                                }
-                                Logger* logger = Logger::getLoggerInst();
-                                logger->log(Logger::LOG_LVL_ERROR, "TCP async send error: %s\r\n", writeEc.message().c_str());
-                            });
-                    }
                 }
 
                 this->startReceive_();
@@ -215,10 +304,6 @@ void TcpServer::startReceive_(void) {
             Logger* logger = Logger::getLoggerInst();
             logger->log(Logger::LOG_LVL_ERROR, "TCP receive loop ended: %s\r\n", ec.message().c_str());
             clientSocket_.close();
-            if (acceptConnection() == 0) {
-                this->startReceive_();
-            }
+            beginAccept();
         });
 }
-
-

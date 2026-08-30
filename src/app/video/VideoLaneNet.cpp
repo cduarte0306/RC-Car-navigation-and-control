@@ -16,7 +16,8 @@ public:
     explicit TrtLogger(const char* name) : nvinfer1::ILogger(), m_Name(name) {}
     void log(Severity severity, const char* msg) noexcept override {
         // Filter out info-level noise, only print warnings and above
-        if (severity <= Severity::kWARNING) {
+        if (severity <= Severity::kWARNING)
+        {
             Logger* logger = Logger::getLoggerInst();
             logger->log(Logger::LOG_LVL_ERROR, "[TensorRT] %s\r\n", msg);
         }
@@ -37,7 +38,8 @@ namespace Vision {
     LaneNet::LaneNet(const char* onnxModelPath, const char* enginePath)
         : m_OnnxPath(onnxModelPath), m_EnginePath(enginePath), m_LaneMaskOut() {}
 
-    LaneNet::~LaneNet() {
+    LaneNet::~LaneNet()
+    {
         cudaFree(m_InputBuffer);
         cudaFree(m_OutputBuffer);
         cudaStreamDestroy(inferenceStream);
@@ -47,7 +49,8 @@ namespace Vision {
 
     }
 
-    int LaneNet::init() {
+    int LaneNet::init()
+    {
         Logger* logger = Logger::getLoggerInst();
 
         // Resolve engine path: explicit override takes priority
@@ -55,7 +58,8 @@ namespace Vision {
             ? std::filesystem::path(m_EnginePath)
             : std::filesystem::path(m_OnnxPath).replace_extension(".engine");
 
-        if (!std::filesystem::exists(enginePath)) {
+        if (!std::filesystem::exists(enginePath))
+        {
             logger->log(Logger::LOG_LVL_INFO, "No engine file found at %s. Generating...\r\n", enginePath.string().c_str());
             onnxToEngine(m_OnnxPath, enginePath.string().c_str());
         }
@@ -65,7 +69,8 @@ namespace Vision {
 
         std::vector<char> modelData;
         std::ifstream engineFile(enginePath, std::ios::binary);
-        if (!engineFile) {
+        if (!engineFile)
+        {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to open engine file: %s\r\n", enginePath.string().c_str());
             return -1; // Return -1 on failure
         }
@@ -74,13 +79,15 @@ namespace Vision {
         engineFile.close();
 
         m_Engine = m_Runtime->deserializeCudaEngine(modelData.data(), modelData.size());
-        if (!m_Engine) {
+        if (!m_Engine)
+        {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to deserialize engine from file: %s\r\n", enginePath.string().c_str());
             return -1; // Return -1 on failure
         }
 
         m_Context = m_Engine->createExecutionContext();
-        if (!m_Context) {
+        if (!m_Context)
+        {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to create execution context from engine\r\n");
             return -1; // Return -1 on failure
         }
@@ -106,7 +113,8 @@ namespace Vision {
         return 0; // Return 0 on success
     }
 
-    int LaneNet::onnxToEngine(const char* onnxModelPath, const char* enginePath) {
+    int LaneNet::onnxToEngine(const char* onnxModelPath, const char* enginePath)
+    {
         using namespace nvonnxparser;
 
         Logger* logger = Logger::getLoggerInst();
@@ -116,13 +124,15 @@ namespace Vision {
         IParser* parser = nvonnxparser::createParser(*network, trtLogger);
         parser->parseFromFile(m_OnnxPath, static_cast<int>(nvinfer1::ILogger::Severity::kWARNING));
         bool failure = false; // Assume success unless we find errors
-        for (int i = 0; i < parser->getNbErrors(); ++i) {
+        for (int i = 0; i < parser->getNbErrors(); ++i)
+        {
             auto des = parser->getError(i)->desc();            
             logger->log(Logger::LOG_LVL_ERROR, "ONNX Parser error: %s\r\n", des);
             failure = true;
         }
 
-        if (failure) {
+        if (failure)
+        {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to parse ONNX model. Aborting engine creation.\r\n");
             return -1; // Return -1 on failure
         }
@@ -133,14 +143,16 @@ namespace Vision {
         config->setFlag(nvinfer1::BuilderFlag::kFP16);
         nvinfer1::IHostMemory* serializedModel = builder->buildSerializedNetwork(*network, *config);
 
-        if (!serializedModel) {
+        if (!serializedModel)
+        {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to build TensorRT engine. Aborting.\r\n");
             return -1; // Return -1 on failure
         }
 
         // Save the serialized engine to a file
         std::ofstream engineFile(std::string(enginePath), std::ios::binary);
-        if (!engineFile) {
+        if (!engineFile)
+        {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to open engine file for writing: %s\r\n", enginePath);
             return -1; // Return -1 on failure
         }
@@ -157,7 +169,8 @@ namespace Vision {
         return 0; // Return 0 on success
     }
 
-    int LaneNet::infer(const cv::Mat& inputFrame, cv::Mat& outputFrame) {
+    int LaneNet::infer(const cv::Mat& inputFrame, cv::Mat& outputFrame)
+    {
         Logger* logger = Logger::getLoggerInst();
         // Resize input frame to match model input dimensions
         cv::cuda::Stream stream;
@@ -174,7 +187,8 @@ namespace Vision {
         cv::cuda::GpuMat d_channels[3];
         cv::cuda::split(d_normalized, d_channels, stream); // Split into separate channels for direct copying to input buffer
 
-        for (int i  = 0; i < 3; ++i) {
+        for (int i  = 0; i < 3; ++i)
+        {
             // Normalize each channel using ImageNet mean and std
             cv::cuda::subtract(d_channels[i], MEAN[i], d_channels[i], cv::noArray(), -1, stream);
             cv::cuda::divide(d_channels[i], STD[i], d_channels[i], 1, -1, stream);
@@ -184,7 +198,8 @@ namespace Vision {
 
         float* dst = static_cast<float*>(m_InputBuffer);
         size_t rowBytes = m_TensorWidth * sizeof(float);
-        for (int c = 0; c < 3; ++c) {
+        for (int c = 0; c < 3; ++c)
+        {
             cudaMemcpy2DAsync(dst + c * m_TensorHeight * m_TensorWidth,
                               rowBytes,                  // dst pitch (contiguous)
                               d_channels[c].data,
@@ -197,7 +212,8 @@ namespace Vision {
 
         m_Context->enqueueV3(inferenceStream);
         cudaError_t res = cudaStreamSynchronize(inferenceStream);
-        if (res != cudaSuccess) {
+        if (res != cudaSuccess)
+        {
             logger->log(Logger::LOG_LVL_ERROR, "CUDA stream synchronization failed: %s\r\n", cudaGetErrorString(res));
         }
 
@@ -230,7 +246,8 @@ namespace Vision {
         // Add line from center of lane to edge of detection. First find the midpoint and see if it falls
         // within the mask
         cv::Moments m = cv::moments(mask, true);
-        if (m.m00 > 0) {
+        if (m.m00 > 0)
+        {
             // Centroid in mask coordinates
             cv::Point maskCenter(m.m10 / m.m00, m.m01 / m.m00);
 
@@ -242,7 +259,8 @@ namespace Vision {
 
             cv::circle(outputFrame, drawCenter, 8, cv::Scalar(0, 0, 255), -1);
 
-            if (mask.at<uchar>(maskCenter) == 255) {
+            if (mask.at<uchar>(maskCenter) == 255)
+            {
                 std::cout << "Car is within lane\r";
             }
         }

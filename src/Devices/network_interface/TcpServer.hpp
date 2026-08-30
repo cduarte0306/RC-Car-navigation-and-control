@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <unistd.h>
 
+#include <atomic>
 #include <mutex>
 
 #include "sockets.hpp"
@@ -19,15 +20,19 @@ public:
 
     bool receive(uint8_t* pBuf, size_t length) override;
 
-    bool transmit(uint8_t* pBuf, size_t length) override;
+    bool transmit(const uint8_t* pBuf, size_t length) override;
 
-    virtual void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_, bool asyncTx=true) override;
-
+    bool openSocket(std::string& adapterName, int sPort, int dPort, size_t bufferSize=1024, bool broadcast=false) override;
+    int close() override;
+    bool isOpen() const { return acceptor_.is_open(); }
+    virtual void startReceive(std::function<void(std::vector<char>&)> dataReceivedCallback_) override;
     int acceptConnection();
-    void onConnectionEstablished(std::function<void()> callback);
+    void onConnectionEstablished(std::function<void(void)> callback);
 
 private:
-    std::function<void()> connectionEstablishedCallback_;
+    void beginAccept();
+
+    std::function<void(void)> connectionEstablishedCallback_;
     void startReceive_(void);
     
     boost::asio::ip::tcp::acceptor acceptor_;
@@ -40,6 +45,7 @@ private:
     static constexpr int TIMEOUT = 5000;
 
     bool threadCanRun = true;
+    std::atomic<bool> acceptInProgress_{false};
 
     bool m_Broadcast{false};
 

@@ -3,24 +3,34 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 
 set(SOURCE
     main.cpp
+    utils/CFile.cpp
     utils/logger.cpp
+    utils/Utils.cpp
     cuda/cudaVision.cu
     cuda/include/cudaVision.hpp
     Modules/cli.hpp
     Modules/cli.cpp
-    Modules/RcBase.cpp
-    Modules/RcBase.hpp
+    Modules/Modules_Lib/RcBase.cpp
+    Modules/Modules_Lib/RcBase.hpp
+    Modules/Modules_Lib/AdapterBase.cpp
+    Modules/Modules_Lib/AdapterComms.cpp
+    Modules/Modules_Lib/AdapterCamera.cpp
+    Modules/Modules_Lib/AdapterCli.cpp
+    Modules/Modules_Lib/AdapterMotor.cpp
+    Modules/Modules_Lib/AdapterTlm.cpp
+    Modules/Modules_Lib/AdapterUpdater.cpp
+    Modules/Modules_Lib/ModulesDefs.hpp
+    Modules/Modules_Lib/NetworkTypes.cpp
     Modules/RcMotorController.cpp
     Modules/RcMotorController.hpp
-    Modules/RcMessageLib.hpp
-    Modules/RcCommandAndControl.hpp
-    Modules/RcCommandAndControl.cpp
     Modules/RcCommsController.hpp
     Modules/RcCommsController.cpp
     Modules/RcVisionControl.cpp
     Modules/RcVisionControl.hpp
     Modules/RcCarTelemetry.cpp
     Modules/RcCarTelemetry.hpp
+    Modules/RcUpdater.cpp
+    Modules/RcUpdater.hpp
     app/motor/MotorLogController.cpp
     app/motor/MotorLogController.hpp
     app/video/VideoFrame.cpp
@@ -37,6 +47,8 @@ set(SOURCE
     app/video/VideoLaneNet.cpp
     app/ml/TensorRTEngine.hpp
     app/ml/TensorRTEngine.cpp
+    app/network/NetworkLib.hpp
+    app/network/NetworkLib.cpp
     Devices/peripheralDriver.hpp
     Devices/peripheralDriver.cpp
     Devices/Pwm.cpp
@@ -45,14 +57,18 @@ set(SOURCE
     Devices/network_interface/UdpServer.hpp
     Devices/network_interface/TcpServer.hpp
     Devices/network_interface/TcpServer.cpp
-    Devices/RegisterMap.hpp
-    Devices/RegisterMap.cpp
+    Devices/network_interface/TcpServer.hpp
+    Devices/network_interface/TcpClient.hpp
+    Devices/network_interface/TcpClient.cpp
     Devices/GyroScope.cpp
     Devices/GyroScope.hpp
     Devices/StereoCam.cpp
     Devices/StereoCam.hpp
     lib/Thread.cpp
     lib/Thread.hpp
+    lib/MessageLib.hpp
+    lib/RegisterMap.hpp
+    lib/RegisterMap.cpp
     Devices/Gpio.cpp
     Devices/Gpio.hpp
 )
@@ -94,6 +110,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src/cuda/include
     ${CMAKE_SOURCE_DIR}/src/lib
     ${CMAKE_SOURCE_DIR}/src/Modules
+    ${CMAKE_SOURCE_DIR}/src/Modules/Modules_Lib
     ${OPENCV_INCLUDE_DIRS}
 )
 
@@ -214,4 +231,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 target_compile_options(${PROJECT_NAME} PRIVATE
     ${GPIOD_CFLAGS_OTHER}
+    $<$<CONFIG:Debug>:-g3 -O0 -fno-omit-frame-pointer>
+    $<$<CONFIG:Release>:-g1 -O2 -fno-omit-frame-pointer>  # keep minimal symbols
 )

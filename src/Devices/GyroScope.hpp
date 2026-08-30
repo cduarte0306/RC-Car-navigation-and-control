@@ -6,7 +6,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
-#include <RcMessageLib.hpp>
+#include <lib/MessageLib.hpp>
 #include "DeviceBase.hpp"
 
 
@@ -59,7 +59,8 @@ public:
      */
     int getData(int16_t& gx, int16_t& gy, int16_t& gz, int16_t& ax, int16_t& ay, int16_t& az, uint64_t& timestamp);
 
-    Msg::CircularBuffer<GyroData>& getDataHistory(void) {
+    Msg::CircularBuffer<GyroData>& getDataHistory(void)
+    {
         return m_GyroBuffer;
     }
 private:

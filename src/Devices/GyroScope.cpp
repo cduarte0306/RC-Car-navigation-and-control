@@ -164,23 +164,29 @@
 
 namespace Device {
 GyroScope::GyroScope(const char* device, const char* irqChip, int irqLineOffset)
-    : devicePath_(device) {
-    if (initializeI2C() != 0) {
+    : devicePath_(device)
+    {
+    if (initializeI2C() != 0)
+    {
         throw std::runtime_error("Failed to initialize I2C communication");
     }
 
-    if (irqChip && irqLineOffset >= 0) {
+    if (irqChip && irqLineOffset >= 0)
+    {
         Logger* logger = Logger::getLoggerInst();
         const int ret = initializeInterrupt(irqChip, static_cast<unsigned int>(irqLineOffset));
-        if (ret != 0) {
+        if (ret != 0)
+        {
             logger->log(Logger::LOG_LVL_ERROR,
                         "Failed to initialize gyro IRQ (%s:%d), falling back to timed polling\r\n",
                         irqChip, irqLineOffset);
         }
     }
 
-    if (initializeDevice() != 0) {
-        if (fd_ != -1) {
+    if (initializeDevice() != 0)
+    {
+        if (fd_ != -1)
+        {
             close(fd_);
             fd_ = -1;
         }
@@ -192,40 +198,49 @@ GyroScope::GyroScope(const char* device, const char* irqChip, int irqLineOffset)
 }
 
 
-GyroScope::~GyroScope() {
+GyroScope::~GyroScope()
+{
     m_ThreadCanRun = false;
 
-    if (m_PollThread.joinable()) {
+    if (m_PollThread.joinable())
+    {
         m_PollThread.join();
     }
 
-    if (fd_ != -1) {
+    if (fd_ != -1)
+    {
         close(fd_);
     }
 
-    if (m_IrqRequest) {
+    if (m_IrqRequest)
+    {
         gpiod_line_request_release(m_IrqRequest);
         m_IrqRequest = nullptr;
     }
 
-    if (m_IrqEventBuffer) {
+    if (m_IrqEventBuffer)
+    {
         gpiod_edge_event_buffer_free(m_IrqEventBuffer);
         m_IrqEventBuffer = nullptr;
     }
 
-    if (m_IrqChip) {
+    if (m_IrqChip)
+    {
         gpiod_chip_close(m_IrqChip);
         m_IrqChip = nullptr;
     }
 }
 
 
-int GyroScope::waitFrameSynchReady(int timeoutMs) {
+int GyroScope::waitFrameSynchReady(int timeoutMs)
+{
     // If an interrupt line is configured, wait on its edge; otherwise fall back
     // to the old sleep-based placeholder.
-    if (m_IrqRequest) {
+    if (m_IrqRequest)
+    {
         const int ret = waitInterrupt(timeoutMs);
-        if (ret != 0) {
+        if (ret != 0)
+        {
             return ret;
         }
         (void)clearDataReadyInterrupt();
@@ -237,8 +252,10 @@ int GyroScope::waitFrameSynchReady(int timeoutMs) {
 }
 
 
-int GyroScope::getData(int16_t& gx, int16_t& gy, int16_t& gz, int16_t& ax, int16_t& ay, int16_t& az, uint64_t& timestamp) {
-    if (m_GyroBuffer.isEmpty()) {
+int GyroScope::getData(int16_t& gx, int16_t& gy, int16_t& gz, int16_t& ax, int16_t& ay, int16_t& az, uint64_t& timestamp)
+{
+    if (m_GyroBuffer.isEmpty())
+    {
         return -1;
     }
 
@@ -255,14 +272,17 @@ int GyroScope::getData(int16_t& gx, int16_t& gy, int16_t& gz, int16_t& ax, int16
 }
 
 
-int GyroScope::initializeI2C() {
+int GyroScope::initializeI2C()
+{
     Logger* logger = Logger::getLoggerInst();
     fd_ = open(devicePath_, O_RDWR);
-    if (fd_ < 0) {
+    if (fd_ < 0)
+    {
         throw std::runtime_error("Failed to open I2C bus");
     }
 
-    if (ioctl(fd_, I2C_SLAVE, gyroAddress_) < 0) {
+    if (ioctl(fd_, I2C_SLAVE, gyroAddress_) < 0)
+    {
         close(fd_);
         throw std::runtime_error("Failed to acquire bus access and/or talk to slave");
     }
@@ -271,41 +291,50 @@ int GyroScope::initializeI2C() {
 }
 
 
-int GyroScope::readI2CData(uint8_t reg, uint8_t* data, size_t length) {
-    if (write(fd_, &reg, 1) != 1) {
+int GyroScope::readI2CData(uint8_t reg, uint8_t* data, size_t length)
+{
+    if (write(fd_, &reg, 1) != 1)
+    {
         return -1;
     }
-    if (read(fd_, data, length) != static_cast<ssize_t>(length)) {
+    if (read(fd_, data, length) != static_cast<ssize_t>(length))
+    {
         return -1;
     }
     return 0;
 }
 
 
-int GyroScope::writeI2CData(uint8_t reg, const uint8_t* data, size_t length) {
+int GyroScope::writeI2CData(uint8_t reg, const uint8_t* data, size_t length)
+{
     std::vector<uint8_t> buffer(length + 1);
     buffer[0] = reg;
     std::memcpy(&buffer[1], data, length);
-    if (write(fd_, buffer.data(), length + 1) != static_cast<ssize_t>(length + 1)) {
+    if (write(fd_, buffer.data(), length + 1) != static_cast<ssize_t>(length + 1))
+    {
         return -1;
     }
     return 0;
 }
 
 
-int GyroScope::setRegisterBankLocked(uint8_t bank) {
-    if (bank > ICM20948_BANK_3) {
+int GyroScope::setRegisterBankLocked(uint8_t bank)
+{
+    if (bank > ICM20948_BANK_3)
+    {
         errno = EINVAL;
         return -1;
     }
 
-    if (m_CurrentBank == bank) {
+    if (m_CurrentBank == bank)
+    {
         return 0;
     }
 
     const uint8_t regVal = static_cast<uint8_t>(bank << 4);
     uint8_t tmp = regVal;
-    if (writeI2CData(ICM20948_REG_BANK_SEL, &tmp, 1) != 0) {
+    if (writeI2CData(ICM20948_REG_BANK_SEL, &tmp, 1) != 0)
+    {
         return -1;
     }
 
@@ -314,43 +343,51 @@ int GyroScope::setRegisterBankLocked(uint8_t bank) {
 }
 
 
-int GyroScope::readRegister(uint8_t bank, uint8_t reg, uint8_t* data, size_t length) {
+int GyroScope::readRegister(uint8_t bank, uint8_t reg, uint8_t* data, size_t length)
+{
     std::lock_guard<std::mutex> lock(m_I2cMutex);
-    if (setRegisterBankLocked(bank) != 0) {
+    if (setRegisterBankLocked(bank) != 0)
+    {
         return -1;
     }
     return readI2CData(reg, data, length);
 }
 
 
-int GyroScope::writeRegister(uint8_t bank, uint8_t reg, const uint8_t* data, size_t length) {
+int GyroScope::writeRegister(uint8_t bank, uint8_t reg, const uint8_t* data, size_t length)
+{
     std::lock_guard<std::mutex> lock(m_I2cMutex);
-    if (setRegisterBankLocked(bank) != 0) {
+    if (setRegisterBankLocked(bank) != 0)
+    {
         return -1;
     }
     return writeI2CData(reg, data, length);
 }
 
 
-int GyroScope::clearDataReadyInterrupt() {
+int GyroScope::clearDataReadyInterrupt()
+{
     uint8_t status = 0;
     return readRegister(ICM20948_BANK_0, ICM20948_REG_B0_INT_STATUS_1, &status, 1);
 }
 
 
-int GyroScope::initializeDevice() {
+int GyroScope::initializeDevice()
+{
     Logger* logger = Logger::getLoggerInst();
 
     // Force bank selection on first access.
     m_CurrentBank = 0xFF;
 
     uint8_t whoami = 0;
-    if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_WHO_AM_I, &whoami, 1) != 0) {
+    if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_WHO_AM_I, &whoami, 1) != 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to read ICM-20948 WHO_AM_I\r\n");
         return -1;
     }
 
-    if (whoami != ICM20948_WHO_AM_I_VALUE) {
+    if (whoami != ICM20948_WHO_AM_I_VALUE)
+    {
         logger->log(Logger::LOG_LVL_ERROR,
                     "Unexpected WHO_AM_I 0x%02X (expected 0x%02X)\r\n",
                     whoami,
@@ -360,36 +397,42 @@ int GyroScope::initializeDevice() {
 
     // Reset the device, then wake it up (device comes up in sleep mode).
     const uint8_t reset = ICM20948_PWR_MGMT_1_DEVICE_RESET;
-    if (writeRegister(ICM20948_BANK_0, ICM20948_REG_B0_PWR_MGMT_1, &reset, 1) != 0) {
+    if (writeRegister(ICM20948_BANK_0, ICM20948_REG_B0_PWR_MGMT_1, &reset, 1) != 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to reset ICM-20948\r\n");
         return -1;
     }
     usleep(100000);
 
     const uint8_t pwrMgmt1 = ICM20948_PWR_MGMT_1_CLKSEL_AUTO;  // SLEEP=0, CLKSEL=auto
-    if (writeRegister(ICM20948_BANK_0, ICM20948_REG_B0_PWR_MGMT_1, &pwrMgmt1, 1) != 0) {
+    if (writeRegister(ICM20948_BANK_0, ICM20948_REG_B0_PWR_MGMT_1, &pwrMgmt1, 1) != 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to wake ICM-20948\r\n");
         return -1;
     }
     usleep(10000);
 
     const uint8_t pwrMgmt2 = 0x00;  // enable accel+gyro
-    if (writeRegister(ICM20948_BANK_0, ICM20948_REG_B0_PWR_MGMT_2, &pwrMgmt2, 1) != 0) {
+    if (writeRegister(ICM20948_BANK_0, ICM20948_REG_B0_PWR_MGMT_2, &pwrMgmt2, 1) != 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to enable ICM-20948 sensors\r\n");
         return -1;
     }
 
     // If we're using a GPIO IRQ, configure the INT pin to latch so events aren't missed,
     // and enable RAW_DATA ready interrupt on INT1.
-    if (m_IrqRequest) {
+    if (m_IrqRequest)
+    {
         const uint8_t intPinCfg = ICM20948_INT_PIN_CFG_INT1_LATCH_EN;
-        if (writeRegister(ICM20948_BANK_0, ICM20948_REG_B0_INT_PIN_CFG, &intPinCfg, 1) != 0) {
+        if (writeRegister(ICM20948_BANK_0, ICM20948_REG_B0_INT_PIN_CFG, &intPinCfg, 1) != 0)
+        {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to configure ICM-20948 INT pin\r\n");
             return -1;
         }
 
         const uint8_t intEnable1 = ICM20948_INT_ENABLE_1_RAW_DATA_0_RDY_EN;
-        if (writeRegister(ICM20948_BANK_0, ICM20948_REG_B0_INT_ENABLE_1, &intEnable1, 1) != 0) {
+        if (writeRegister(ICM20948_BANK_0, ICM20948_REG_B0_INT_ENABLE_1, &intEnable1, 1) != 0)
+        {
             logger->log(Logger::LOG_LVL_ERROR, "Failed to enable ICM-20948 data-ready interrupt\r\n");
             return -1;
         }
@@ -402,14 +445,17 @@ int GyroScope::initializeDevice() {
 }
 
 
-int GyroScope::readGyroData(GyroData& data) {
+int GyroScope::readGyroData(GyroData& data)
+{
     uint8_t gyroData[6];
-    if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_GYRO_XOUT_H, gyroData, 6) != 0) {
+    if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_GYRO_XOUT_H, gyroData, 6) != 0)
+    {
         return -1;
     }
 
     uint8_t accelData[6];
-    if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_ACCEL_XOUT_H, accelData, 6) != 0) {
+    if (readRegister(ICM20948_BANK_0, ICM20948_REG_B0_ACCEL_XOUT_H, accelData, 6) != 0)
+    {
         return -1;
     }
     data.gx = (static_cast<int16_t>(gyroData[0]) << 8) | gyroData[1];
@@ -422,61 +468,74 @@ int GyroScope::readGyroData(GyroData& data) {
 }
 
 
-void GyroScope::pollGyroData(void) {
+void GyroScope::pollGyroData(void)
+{
     // If an interrupt line is configured, use it to block until data-ready.
     // Otherwise fall back to periodic reads.
     struct timespec now;
     
-    while (m_ThreadCanRun.load()) {
-        if (m_IrqRequest) {
+    while (m_ThreadCanRun.load())
+    {
+        if (m_IrqRequest)
+        {
             // Use a finite timeout so the thread can exit promptly.
             const int ret = waitInterrupt(250);
-            if (ret != 0) {
+            if (ret != 0)
+            {
                 continue;
             }
-        } else {
+        }
+        else
+        {
             usleep(10000);  // Poll every 10 ms
         }
 
         GyroData data;
-        if (readGyroData(data) == 0) {
+        if (readGyroData(data) == 0)
+        {
             // Grab timestamp
             clock_gettime(CLOCK_MONOTONIC, &now);
             data.timestamp = static_cast<int64_t>(now.tv_sec) * 1000000000LL + static_cast<int64_t>(now.tv_nsec);
             m_GyroBuffer.push(data);
         }
 
-        if (m_IrqRequest) {
+        if (m_IrqRequest)
+        {
             (void)clearDataReadyInterrupt();
         }
     }
 }
 
 
-int GyroScope::initializeInterrupt(const char* irqChip, unsigned int irqLineOffset) {
+int GyroScope::initializeInterrupt(const char* irqChip, unsigned int irqLineOffset)
+{
     Logger* logger = Logger::getLoggerInst();
 
     m_IrqChip = gpiod_chip_open(irqChip);
-    if (!m_IrqChip) {
+    if (!m_IrqChip)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "gpiod_chip_open(%s) failed: %s\r\n", irqChip, strerror(errno));
         return -1;
     }
 
     struct gpiod_line_settings* settings = gpiod_line_settings_new();
-    if (!settings) {
+    if (!settings)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "gpiod_line_settings_new failed: %s\r\n", strerror(errno));
         return -1;
     }
 
     struct gpiod_line_config* lineCfg = gpiod_line_config_new();
-    if (!lineCfg) {
+    if (!lineCfg)
+    {
         gpiod_line_settings_free(settings);
         logger->log(Logger::LOG_LVL_ERROR, "gpiod_line_config_new failed: %s\r\n", strerror(errno));
         return -1;
     }
 
     struct gpiod_request_config* reqCfg = gpiod_request_config_new();
-    if (!reqCfg) {
+    if (!reqCfg)
+    {
         gpiod_line_config_free(lineCfg);
         gpiod_line_settings_free(settings);
         logger->log(Logger::LOG_LVL_ERROR, "gpiod_request_config_new failed: %s\r\n", strerror(errno));
@@ -484,7 +543,8 @@ int GyroScope::initializeInterrupt(const char* irqChip, unsigned int irqLineOffs
     }
 
     // Configure as input + rising edge detection.
-    if (gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_INPUT) != 0) {
+    if (gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_INPUT) != 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "gpiod_line_settings_set_direction failed: %s\r\n", strerror(errno));
         gpiod_request_config_free(reqCfg);
         gpiod_line_config_free(lineCfg);
@@ -492,7 +552,8 @@ int GyroScope::initializeInterrupt(const char* irqChip, unsigned int irqLineOffs
         return -1;
     }
 
-    if (gpiod_line_settings_set_edge_detection(settings, GPIOD_LINE_EDGE_RISING) != 0) {
+    if (gpiod_line_settings_set_edge_detection(settings, GPIOD_LINE_EDGE_RISING) != 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "gpiod_line_settings_set_edge_detection failed: %s\r\n", strerror(errno));
         gpiod_request_config_free(reqCfg);
         gpiod_line_config_free(lineCfg);
@@ -501,7 +562,8 @@ int GyroScope::initializeInterrupt(const char* irqChip, unsigned int irqLineOffs
     }
 
     const unsigned int offsets[] = {irqLineOffset};
-    if (gpiod_line_config_add_line_settings(lineCfg, offsets, 1, settings) != 0) {
+    if (gpiod_line_config_add_line_settings(lineCfg, offsets, 1, settings) != 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "gpiod_line_config_add_line_settings failed: %s\r\n", strerror(errno));
         gpiod_request_config_free(reqCfg);
         gpiod_line_config_free(lineCfg);
@@ -512,7 +574,8 @@ int GyroScope::initializeInterrupt(const char* irqChip, unsigned int irqLineOffs
     gpiod_request_config_set_consumer(reqCfg, "rc-car-nav-gyro");
 
     m_IrqRequest = gpiod_chip_request_lines(m_IrqChip, reqCfg, lineCfg);
-    if (!m_IrqRequest) {
+    if (!m_IrqRequest)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "gpiod_chip_request_lines failed: %s\r\n", strerror(errno));
         gpiod_request_config_free(reqCfg);
         gpiod_line_config_free(lineCfg);
@@ -521,7 +584,8 @@ int GyroScope::initializeInterrupt(const char* irqChip, unsigned int irqLineOffs
     }
 
     m_IrqEventBuffer = gpiod_edge_event_buffer_new(1);
-    if (!m_IrqEventBuffer) {
+    if (!m_IrqEventBuffer)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "gpiod_edge_event_buffer_new failed: %s\r\n", strerror(errno));
         return -1;
     }
@@ -535,16 +599,20 @@ int GyroScope::initializeInterrupt(const char* irqChip, unsigned int irqLineOffs
     return 0;
 }
 
-int GyroScope::waitInterrupt(int timeoutMs) {
-    if (!m_IrqRequest) {
+int GyroScope::waitInterrupt(int timeoutMs)
+{
+    if (!m_IrqRequest)
+    {
         errno = ENODEV;
         return -1;
     }
 
     const int64_t timeoutNs = (timeoutMs < 0) ? -1 : static_cast<int64_t>(timeoutMs) * 1000000LL;
     const int ret = gpiod_line_request_wait_edge_events(m_IrqRequest, timeoutNs);
-    if (ret <= 0) {
-        if (ret == 0) {
+    if (ret <= 0)
+    {
+        if (ret == 0)
+        {
             errno = ETIMEDOUT;
         }
         return -1;
@@ -552,7 +620,8 @@ int GyroScope::waitInterrupt(int timeoutMs) {
 
     // Drain at least one event.
     const int readRet = gpiod_line_request_read_edge_events(m_IrqRequest, m_IrqEventBuffer, 1);
-    if (readRet < 0) {
+    if (readRet < 0)
+    {
         return -1;
     }
 

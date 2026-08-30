@@ -5,18 +5,19 @@
 #include <string>
 #include <mutex>
 #include <nlohmann/json.hpp>
-#include "Modules/RcBase.hpp"
-#include "RcMessageLib.hpp"
+#include "Modules/Modules_Lib/RcBase.hpp"
+#include "lib/MessageLib.hpp"
 
 
 namespace Modules {
 class RcCarTelemetry : public Modules::Base, public Adapter::TlmAdapter {
 public:
-    RcCarTelemetry(int moduleID, std::string name);
+    RcCarTelemetry(ModuleDefs::DeviceType moduleID, std::string name);
     ~RcCarTelemetry() {}
 
     int init(void) override;
-    int stop(void) override {
+    int stop(void) override
+    {
         return 0;
     }
 
@@ -30,7 +31,8 @@ protected:
 
     Msg::CircularBuffer<nlohmann::json> m_TlmBuffer{400};
     std::mutex m_txMutex;
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TxAdapter{nullptr};
+    std::string m_SysVers{""};
+    std::unique_ptr<NetworkAdapter> m_TxAdapter{nullptr};
     std::unordered_set<std::string> m_registeredSources;
 };
 }

@@ -3,36 +3,40 @@
 #include <algorithm>
 
 #include <thread>
-#include "Devices/RegisterMap.hpp"
+#include "lib/RegisterMap.hpp"
 
 #ifdef HAVE_OPENCV_CUDAIMGPROC
 #include <opencv2/cudaimgproc.hpp>
 #endif
 
 #include "utils/logger.hpp"
+#include "NetworkTypes.hpp"
 
 
 namespace Vision {
-VideoStreamer::VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter, Adapter::CommsAdapter::NetworkAdapter& txAdapterEth,
+VideoStreamer::VideoStreamer(NetworkAdapter& txAdapter,
                             std::size_t bufferCapacity)
       : m_TxAdapter(txAdapter),
-        m_TxAdapterEth(txAdapterEth),
         m_Buffer(bufferCapacity), 
         m_BufferStereo(bufferCapacity),
         m_BufferStereoMono(bufferCapacity) {}
 
 
-VideoStreamer::~VideoStreamer() {
+VideoStreamer::~VideoStreamer()
+{
     stop();
 }
 
 
-void VideoStreamer::start() {
-    if (m_Running.exchange(true)) {
+void VideoStreamer::start()
+{
+    if (m_Running.exchange(true))
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_WARN, "VideoStreamer already running.\n");
         return;  // already running
     }
 
+    // Start producer and consumer threads. The producer threads will push frames into the buffers, and the consumer threads will read from the buffers and transmit the data. The running flag will be used to signal the threads to stop when needed.
     m_ThreadMono = std::thread(&VideoStreamer::runMono, this);
     m_ThreadStereo = std::thread(&VideoStreamer::runStereo, this);
     m_ThreadStereoMono = std::thread(&VideoStreamer::runStereoMono, this);
@@ -41,30 +45,39 @@ void VideoStreamer::start() {
 }
 
 
-void VideoStreamer::stop() {
-    if (!m_Running.exchange(false)) {
+void VideoStreamer::stop()
+{
+    if (!m_Running.exchange(false))
+    {
         return;
     }
-    if (m_ThreadMono.joinable()) {
+
+    // With the running flag set to false, the producer threads will stop pushing new frames, and the consumer threads will eventually exit once they process all remaining frames in the buffers. To unblock any waiting consumer threads immediately, we can call killProcess on the buffers, which will notify all waiting threads and cause them to exit their wait states. After that, we join the threads to ensure they have finished executing before we proceed with cleanup.
+    m_Buffer.killProcess();
+    m_BufferStereo.killProcess();
+    m_BufferStereoMono.killProcess();
+
+    if (m_ThreadMono.joinable())
+    {
         m_ThreadMono.join();
     }
-    if (m_ThreadStereo.joinable()) {
+    if (m_ThreadStereo.joinable())
+    {
         m_ThreadStereo.join();
     }
-    if (m_ThreadStereoMono.joinable()) {
+    if (m_ThreadStereoMono.joinable())
+    {
         m_ThreadStereoMono.join();
     }
-
-    m_Buffer.flush();
-    m_BufferStereoMono.flush();
-    m_BufferStereo.flush();
 
     Logger::getLoggerInst()->log(Logger::LOG_LVL_INFO, "VideoStreamer stopped.\n");
 }
 
 
-int VideoStreamer::setJpegQuality(int quality) {
-    if (quality < 1 || quality > 100) {
+int VideoStreamer::setJpegQuality(int quality)
+{
+    if (quality < 1 || quality > 100)
+    {
         Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "JPEG quality must be between 1 and 100.\n");
         return -1;
     }
@@ -73,10 +86,12 @@ int VideoStreamer::setJpegQuality(int quality) {
 }
 
 
-int VideoStreamer::setStreamFrameRate(FrameRate fps) {
+int VideoStreamer::setStreamFrameRate(FrameRate fps)
+{
     const uint8_t rawFps = static_cast<uint8_t>(fps);
 
-    switch (fps) {
+    switch (fps)
+    {
         case FrameRate::_5Fps:
             frameIntervalMs.store(250);
             break;
@@ -96,7 +111,8 @@ int VideoStreamer::setStreamFrameRate(FrameRate fps) {
             break;
         default:
             // Allow callers to pass a raw FPS value (e.g. 5/15/30) via cast.
-            if (rawFps == 0 || rawFps > 120) {
+            if (rawFps == 0 || rawFps > 120)
+            {
                 Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Unsupported frame rate.\n");
                 return -1;
             }
@@ -107,8 +123,10 @@ int VideoStreamer::setStreamFrameRate(FrameRate fps) {
 }
 
 
-int VideoStreamer::decodePacket(const char* pbuf, size_t len, VideoPacket& packet) {
-    if (len < sizeof(FragmentHeader) + sizeof(Metadata)) {
+int VideoStreamer::decodePacket(const char* pbuf, size_t len, VideoPacket& packet)
+{
+    if (len < sizeof(FragmentHeader) + sizeof(Metadata))
+    {
         return -1;
     }
 
@@ -119,7 +137,8 @@ int VideoStreamer::decodePacket(const char* pbuf, size_t len, VideoPacket& packe
 
     const std::size_t payloadLen = meta.length;
     const std::size_t headerLen = sizeof(hdr) + sizeof(meta);
-    if (len < headerLen + payloadLen) {
+    if (len < headerLen + payloadLen)
+    {
         return -1;
     }
 
@@ -131,9 +150,12 @@ int VideoStreamer::decodePacket(const char* pbuf, size_t len, VideoPacket& packe
     packet.setSequenceID(meta.sequenceID);
 
     const std::size_t nameLen = strnlen(meta.videoName, sizeof(meta.videoName));
-    try {
+    try
+    {
         packet.setVideoName(std::string(meta.videoName, nameLen));
-    } catch (const std::invalid_argument&) {
+    }
+    catch (const std::invalid_argument&)
+    {
         return -1;
     }
 
@@ -144,8 +166,9 @@ int VideoStreamer::decodePacket(const char* pbuf, size_t len, VideoPacket& packe
 }
 
 
-void VideoStreamer::pushFrame(const cv::Mat& frame,  int16_t xGyro, int16_t yGyro, int16_t zGyro, int16_t xAccel, int16_t yAccel, int16_t zAccel, cv::Matx44d& Q) {
-    if (!m_Running.load()) return;
+void VideoStreamer::pushFrame(const cv::Mat& frame,  int16_t xGyro, int16_t yGyro, int16_t zGyro, int16_t xAccel, int16_t yAccel, int16_t zAccel, cv::Matx44d& Q)
+{
+    if (!m_Running.load() || !m_TxAdapter.IsHostPresent()) return;
     if (frame.empty()) return;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
     stereoPayload payload{};
@@ -155,7 +178,8 @@ void VideoStreamer::pushFrame(const cv::Mat& frame,  int16_t xGyro, int16_t yGyr
     payload.stereoHeader.ax = xAccel;
     payload.stereoHeader.ay = yAccel;
     payload.stereoHeader.az = zAccel;
-    for (size_t i = 0; i < QSize; ++i) {
+    for (size_t i = 0; i < QSize; ++i)
+    {
         payload.stereoHeader.Q[i] = Q.val[i];
     }
     payload.Q = Q;
@@ -164,44 +188,36 @@ void VideoStreamer::pushFrame(const cv::Mat& frame,  int16_t xGyro, int16_t yGyr
 }
 
 
-void VideoStreamer::pushFrame(const cv::Mat& frame, cv::Matx44d& Q) {
+void VideoStreamer::pushFrame(const cv::Mat& frame, cv::Matx44d& Q)
+{
     if (!m_Running.load()) return;
     if (frame.empty()) return;
     stereoPayload payload{};
 
-    for (size_t i = 0; i < QSize; ++i) {
+    for (size_t i = 0; i < QSize; ++i)
+    {
         payload.stereoHeader.Q[i] = Q.val[i];
     }
     payload.Q = Q;
     payload.stereoFrame = frame;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
     m_Buffer.push(payload);
-
-    // Notify any waiting readers that a new frame is available
-    {
-        std::lock_guard<std::mutex> lk(m_BufferStereoMtx);
-        m_BufferStereoCv.notify_all();
-    }
 }
 
 
-void VideoStreamer::pushFrame(const cv::Mat& frame) {
+void VideoStreamer::pushFrame(const cv::Mat& frame)
+{
     if (!m_Running.load()) return;
     if (frame.empty()) return;
     stereoPayload payload{};
     payload.stereoFrame = frame;
     // Lowest-latency path: avoid deep copies; CircularBuffer overwrites when full.
     m_Buffer.push(payload);
-
-    // Notify any waiting readers that a new frame is available
-    {
-        std::lock_guard<std::mutex> lk(m_BufferStereoMtx);
-        m_BufferStereoCv.notify_all();
-    }
 }
 
 
-void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
+void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair)
+{
     const cv::Mat& frameL = framePair.first;
     const cv::Mat& frameR = framePair.second;
     if (!m_Running.load()) return;
@@ -210,23 +226,18 @@ void VideoStreamer::pushFrame(const std::pair<cv::Mat, cv::Mat>& framePair) {
 }
 
 
-void VideoStreamer::runMono() {
-    while (m_Running) {
-        // Wait until it's time to send the next frame based on the configured frame rate.
-        {
-            std::unique_lock<std::mutex> lk(m_BufferStereoMtx);
-            m_BufferStereoCv.wait_for(lk, std::chrono::milliseconds(1), [this] {
-                return !m_Buffer.isEmpty() || !m_Running.load();
-            });
-        }
-
+void VideoStreamer::runMono()
+{
+    while (m_Running)
+    {
         VideoStreamer::throttleFps(frameIntervalMs.load());
 
         if (m_Buffer.isEmpty()) continue;
 
         // For lowest latency, always transmit the newest frame.
         stereoPayload bufPayload;
-        do {
+        do
+        {
             bufPayload = m_Buffer.getHead();
             m_Buffer.pop();
         } while (!m_Buffer.isEmpty());
@@ -237,28 +248,25 @@ void VideoStreamer::runMono() {
 }
 
 
-void VideoStreamer::runStereo() {
+void VideoStreamer::runStereo()
+{
     std::pair<cv::Mat, cv::Mat> stereoFrames;
 
-    while (m_Running) {
-        {
-            std::unique_lock<std::mutex> lk(m_BufferStereoMtx);
-            m_BufferStereoCv.wait_for(lk, std::chrono::milliseconds(1), [this] {
-                return !m_BufferStereo.isEmpty() || !m_Running.load();
-            });
-        }
-
+    while (m_Running)
+    {
         VideoStreamer::throttleFps(frameIntervalMs.load());
 
         if (m_BufferStereo.isEmpty()) continue;
 
         // For lowest latency, always transmit the newest stereo pair.
-        do {
+        do
+        {
             stereoFrames = m_BufferStereo.getHead();
             m_BufferStereo.pop();
         } while (!m_BufferStereo.isEmpty());
 
-        if (stereoFrames.first.empty() || stereoFrames.second.empty()) {
+        if (stereoFrames.first.empty() || stereoFrames.second.empty())
+        {
             continue;
         }
 
@@ -266,12 +274,15 @@ void VideoStreamer::runStereo() {
 }
 
 
-void VideoStreamer::runStereoMono() {
+void VideoStreamer::runStereoMono()
+{
 
     stereoPayload stereoFrame;
 
-    while (m_Running) {
-        if (m_BufferStereoMono.isEmpty()) {
+    while (m_Running)
+    {
+        if (m_BufferStereoMono.isEmpty())
+        {
             std::this_thread::sleep_for(std::chrono::microseconds(1));
             continue;
         }
@@ -282,12 +293,14 @@ void VideoStreamer::runStereoMono() {
         if (m_BufferStereoMono.isEmpty()) continue;
 
         // For lowest latency, always transmit the newest frame.
-        do {
+        do
+        {
             stereoFrame = m_BufferStereoMono.getHead();
             m_BufferStereoMono.pop();
         } while (!m_BufferStereoMono.isEmpty());
 
-        if (stereoFrame.stereoFrame.empty()) {
+        if (stereoFrame.stereoFrame.empty())
+        {
             continue;
         }
 
@@ -297,9 +310,11 @@ void VideoStreamer::runStereoMono() {
 }
 
 
-int VideoStreamer::transmitFrame(stereoPayload& stereoFrame) {
+int VideoStreamer::transmitFrame(stereoPayload& stereoFrame)
+{
     cv::Mat& frame = stereoFrame.stereoFrame;
-    if (frame.empty()) {
+    if (frame.empty())
+    {
         return -1;
     }
 
@@ -311,35 +326,47 @@ int VideoStreamer::transmitFrame(stereoPayload& stereoFrame) {
     cv::Mat converted;
     std::vector<uint8_t> body;
 
-    if (frame.type() == CV_32FC3 || frame.type() == CV_32FC(6))  {
+    if (frame.type() == CV_32FC3 || frame.type() == CV_32FC(6))
+    {
         const size_t dataLen = frame.total() * frame.elemSize();
         body.resize(dataLen);
-        if (dataLen > 0) {
+        if (dataLen > 0)
+        {
             std::memcpy(body.data(), frame.data, dataLen);
         }
-    } else if (m_TxAdapterEth.ethLinkDetected.load()) {
-        if (frame.channels() == 3) {
+    }
+    else if (m_TxAdapter.IsEthPresent())
+    {
+        if (frame.channels() == 3)
+        {
             cv::cvtColor(frame, converted, cv::COLOR_BGR2RGB);
             headerFrame = &converted;
-        } else if (frame.channels() == 4) {
+        }
+        else if (frame.channels() == 4)
+        {
             cv::cvtColor(frame, converted, cv::COLOR_BGRA2RGB);
             headerFrame = &converted;
         }
 
-        if (!headerFrame->isContinuous()) {
+        if (!headerFrame->isContinuous())
+        {
             converted = headerFrame->clone();
             headerFrame = &converted;
         }
 
         const size_t dataLen = headerFrame->total() * headerFrame->elemSize();
         body.resize(dataLen);
-        if (dataLen > 0) {
+        if (dataLen > 0)
+        {
             std::memcpy(body.data(), headerFrame->data, dataLen);
         }
-    } else {
+    }
+    else
+    {
         cv::Mat encodeBgr;
         const cv::Mat* encodeFrame = &frame;
-        if (frame.channels() == 4) {
+        if (frame.channels() == 4)
+        {
             cv::cvtColor(frame, encodeBgr, cv::COLOR_BGRA2BGR);
             encodeFrame = &encodeBgr;
         }
@@ -347,7 +374,8 @@ int VideoStreamer::transmitFrame(stereoPayload& stereoFrame) {
         headerFrame = encodeFrame;
 
         std::vector<int> params = { cv::IMWRITE_JPEG_QUALITY, m_EncodeQuality };
-        if (!cv::imencode(".jpg", *encodeFrame, body, params) || body.empty()) {
+        if (!cv::imencode(".jpg", *encodeFrame, body, params) || body.empty())
+        {
             return -1;
         }
     }
@@ -367,11 +395,13 @@ int VideoStreamer::transmitFrame(stereoPayload& stereoFrame) {
     headerPtr->elemSize = static_cast<uint16_t>(headerFrame->elemSize());
     headerPtr->channels = static_cast<uint8_t>(headerFrame->channels());
 
-    for (size_t i = 0; i < QSize; i++) {
+    for (size_t i = 0; i < QSize; i++)
+    {
         headerPtr->Q[i] = stereoFrame.Q.val[i];
     }
 
-    if (!body.empty()) {
+    if (!body.empty())
+    {
         std::memcpy(payload.data() + sizeof(stereoHeader_t), body.data(), body.size());
     }
 
@@ -383,8 +413,10 @@ int VideoStreamer::transmitFrame(stereoPayload& stereoFrame) {
 }
 
 
-int VideoStreamer::transmitPayload(const uint8_t* payload, size_t totalSize, uint8_t frameType) {
-    if (payload == nullptr || totalSize == 0) {
+int VideoStreamer::transmitPayload(const uint8_t* payload, size_t totalSize, uint8_t frameType)
+{
+    if (payload == nullptr || totalSize == 0)
+    {
         return -1;
     }
 
@@ -397,7 +429,8 @@ int VideoStreamer::transmitPayload(const uint8_t* payload, size_t totalSize, uin
     FragmentPayload packet{};
     Metadata meta{};
 
-    while (bytesRemaining > 0) {
+    while (bytesRemaining > 0)
+    {
         std::memset(meta.videoName, 0, sizeof(meta.videoName));
         meta.sequenceID = m_FrameID;
         meta.totalLength = static_cast<uint32_t>(totalSize);
@@ -426,19 +459,15 @@ int VideoStreamer::transmitPayload(const uint8_t* payload, size_t totalSize, uin
 }
 
 
-int VideoStreamer::xfer(unsigned char* pBuf, size_t length) {
-    if (pBuf == nullptr) {
+int VideoStreamer::xfer(unsigned char* pBuf, size_t length)
+{
+    if (pBuf == nullptr)
+    {
         return -1;
     }
 
     // Check if the ethernet adapter is connected
-    if (m_TxAdapterEth.ethLinkDetected.load()) {
-        m_TxAdapterEth.send(reinterpret_cast<uint8_t*>(pBuf), length);
-    } else {
-        m_TxAdapter.send(reinterpret_cast<uint8_t*>(pBuf), length);
-    }
-
-    return 0;
+    return m_TxAdapter.send(reinterpret_cast<uint8_t*>(pBuf), length);
 }
 
 } // namespace Vision

@@ -1,0 +1,145 @@
+#pragma once
+
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <fstream>
+#include <mutex>
+
+class CFile {
+public:
+    CFile() = default;
+    CFile(const char* filePath, const char* mode);
+    ~CFile();
+
+    /**
+     * @brief Open a file with the specified path and mode
+     * 
+     * @param filePath Path to the file to open
+     * @param mode File open mode (e.g., "r", "w", "rb", "wb")
+     * @return int 0 on success, -1 on failure
+     */
+    int open(const char* filePath, const char* mode);
+
+    /**
+     * @brief Open a file with the specified path and mode (overload for std::string)
+     * 
+     * @param filePath Path to the file to open
+     * @param mode File open mode (e.g., "r", "w", "rb", "wb")
+     * @return int 0 on success, -1 on failure
+     */
+    int open(std::string filePath, std::string mode)
+    {
+        return open(filePath.c_str(), mode.c_str());
+    }
+
+    /**
+     * @brief Close the file if it is open
+     */
+    void close();
+
+    /**
+     * @brief Write data to the file (overload for std::vector<char>)
+     * 
+     * @param buffer Buffer containing the data to write
+     * @return size_t Number of bytes actually written
+     */
+    size_t write(const std::vector<char>& buffer)
+    {
+        return write(reinterpret_cast<const uint8_t*>(buffer.data()), buffer.size());
+    }
+
+    /**
+     * @brief Read data from the file
+     * 
+     * @param length Number of bytes to read; if 0, read the entire file
+     * @return std::vector<char> Buffer containing the read data
+     */
+    std::vector<char> read(size_t length=0);
+
+    /**
+     * @brief Get the size of the file in bytes
+     * 
+     * @return size_t Size of the file
+     */
+    size_t size() const
+    {
+        return m_Size;
+    }
+
+    /**
+     * @brief Check if the file is open
+     * 
+     * @return true if the file is open, false otherwise
+     */
+    bool isOpen() const
+    {
+        return m_FileStream.is_open();
+    }
+
+    /**
+     * @brief Remove the file from the filesystem
+     * 
+     * @return int 0 on success, -1 on failure
+     */
+    int remove();
+
+    /**
+     * @brief Get the Sha 256 hash of the file contents
+     * 
+     * @param hashOutput 
+     * @return int 
+     */
+    int GetSha256Hash(std::vector<char>& hashOutput);
+
+    /**
+     * @brief Get the file path of the currently opened file
+     * 
+     * @return std::string File path
+     */
+    std::string getFilePath() const
+    {
+        return internalFilePath;
+    }
+
+    /**
+     * @brief Check if a file exists at the specified path
+     * 
+     * @param filePath Path to the file to check
+     * @return int 0 if the file exists, -1 if it does not exist
+     */
+    static int FileExists(const std::string& filePath)
+    {
+        std::ifstream file(filePath);
+        return file.good() ? 0 : -1;
+    }
+
+    /**
+     * @brief Remove all files matching a wildcard pattern in the specified path
+     * 
+     * @param path Path to the directory
+     * @param wildCard Wildcard pattern (e.g., "*.txt")
+     * @return int 0 on success, -1 on failure
+     */
+    static int RemoveAll(char* path, char* wildCard);
+
+private:
+
+    /**
+     * @brief Write data to the file
+     *
+     * @param data Pointer to the data to write
+     * @param length Number of bytes to write
+     * @return size_t Number of bytes actually written
+     */
+    size_t write(const uint8_t* data, size_t length);
+
+    std::fstream m_FileStream;
+    std::string internalFilePath;
+    size_t m_Offset = 0;
+    size_t m_Size = 0;  // Size of the file in bytes
+    int m_LockFd = -1;  // Raw fd holding an exclusive advisory lock on the file
+    std::mutex m_Mutex;  // Mutex for thread-safe operations
+};
+
+#pragma endregion

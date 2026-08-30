@@ -8,7 +8,7 @@
 #include <mutex>
 #include <condition_variable>
 #include "lib/Thread.hpp"
-#include "Modules/RcMessageLib.hpp"
+#include "lib/MessageLib.hpp"
 #include "Devices/GyroScope.hpp"
 
 struct NvBufSurface;
@@ -58,7 +58,8 @@ public:
      * 
      * @return uint64_t Timestamp difference in nanoseconds
      */
-    uint64_t getTimestampDiffNs() const {
+    uint64_t getTimestampDiffNs() const
+    {
         return m_TimestampDiffNs_;
     }
 

@@ -8,8 +8,8 @@
 #include <condition_variable>
 #include <opencv2/opencv.hpp>
 
-#include "Modules/AdapterBase.hpp"
-#include "Modules/RcMessageLib.hpp"
+#include "Modules/Modules_Lib/AdapterBase.hpp"
+#include "lib/MessageLib.hpp"
 
 
 namespace Vision {
@@ -37,8 +37,10 @@ class VideoStreamer {
 
         constexpr static size_t MaxVideoNameLength = 128;
 
-        void setVideoName(const std::string& name) {
-            if (name.length() > MaxVideoNameLength) {
+        void setVideoName(const std::string& name)
+        {
+            if (name.length() > MaxVideoNameLength)
+            {
                 throw std::invalid_argument("Video name too long");
             }
             videoName = name;
@@ -48,7 +50,8 @@ class VideoStreamer {
          * @brief Set the length of the video packet.
          * @param len Length in bytes.
          */
-        void setLength(uint32_t len) {
+        void setLength(uint32_t len)
+        {
             length = len;
         }
 
@@ -56,7 +59,8 @@ class VideoStreamer {
          * @brief Set the number of segments in the video packet.
          * @param numSeg Number of segments.
          */
-        void setNumSegments(uint8_t numSeg) {
+        void setNumSegments(uint8_t numSeg)
+        {
             numSegments = numSeg;
         }
 
@@ -64,7 +68,8 @@ class VideoStreamer {
          * @brief Set the segment ID of the video packet.
          * @param segID Segment ID.
          */
-        void setSegmentID(uint8_t segID) {
+        void setSegmentID(uint8_t segID)
+        {
             segmentID = segID;
         }
 
@@ -72,7 +77,8 @@ class VideoStreamer {
          * @brief Set the total length of the video packet.
          * @param totalLen Total length in bytes.
          */
-        void setTotalLength(uint32_t totalLen) {
+        void setTotalLength(uint32_t totalLen)
+        {
             totalLength = totalLen;
         }
 
@@ -80,7 +86,8 @@ class VideoStreamer {
          * @brief Set the payload length of the video packet.
          * @param payLen Payload length in bytes.
          */
-        void setPayloadLen(uint64_t payLen) {
+        void setPayloadLen(uint64_t payLen)
+        {
             payloadLen = payLen;
         }
 
@@ -88,7 +95,8 @@ class VideoStreamer {
          * @brief Set the sequence ID of the video packet.
          * @param seqID Sequence ID.
          */
-        void setSequenceID(uint64_t seqID) {
+        void setSequenceID(uint64_t seqID)
+        {
             sequenceID = seqID;
         }
 
@@ -96,7 +104,8 @@ class VideoStreamer {
          * @brief Set the payload data of the video packet.
          * @param data Vector containing the payload data.
          */
-        void setPayload(const std::vector<uint8_t>& data) {
+        void setPayload(const std::vector<uint8_t>& data)
+        {
             payload = data;
         }
 
@@ -104,7 +113,8 @@ class VideoStreamer {
          * @brief Get the video name.
          * @return std::string Video name.
          */
-        std::string getVideoName() const {
+        std::string getVideoName() const
+        {
             return videoName;
         }
 
@@ -112,7 +122,8 @@ class VideoStreamer {
          * @brief Get the length of the video packet.
          * @return uint32_t Length in bytes.
          */
-        uint32_t getLength() const {
+        uint32_t getLength() const
+        {
             return length;
         }
 
@@ -120,7 +131,8 @@ class VideoStreamer {
          * @brief Get the number of segments in the video packet.
          * @return uint8_t Number of segments.
          */
-        uint8_t getNumSegments() const {
+        uint8_t getNumSegments() const
+        {
             return numSegments;
         }
 
@@ -128,7 +140,8 @@ class VideoStreamer {
          * @brief Get the segment ID of the video packet.
          * @return uint8_t Segment ID.
          */
-        uint8_t getSegmentID() const {
+        uint8_t getSegmentID() const
+        {
             return segmentID;
         }
 
@@ -136,7 +149,8 @@ class VideoStreamer {
          * @brief Get the total length of the video packet.
          * @return uint32_t Total length in bytes.
          */
-        uint32_t getTotalLength() const {
+        uint32_t getTotalLength() const
+        {
             return totalLength;
         }
 
@@ -144,7 +158,8 @@ class VideoStreamer {
          * @brief Get the payload length of the video packet.
          * @return uint64_t Payload length in bytes.
          */
-        uint64_t getPayloadLen() const {
+        uint64_t getPayloadLen() const
+        {
             return payloadLen;
         }
 
@@ -152,7 +167,8 @@ class VideoStreamer {
          * @brief Get the sequence ID of the video packet.
          * @return uint64_t Sequence ID.
          */
-        uint64_t getSequenceID() const {
+        uint64_t getSequenceID() const
+        {
             return sequenceID;
         }
 
@@ -160,7 +176,8 @@ class VideoStreamer {
          * @brief Get the payload data of the video packet.
          * @return const std::vector<uint8_t>& Payload data.
          */
-        const std::vector<uint8_t>& getPayload() const {
+        const std::vector<uint8_t>& getPayload() const
+        {
             return payload;
         }
 
@@ -179,24 +196,12 @@ public:
     /**
      * @brief Construct a streamer.
      * @param txAdapter outbound network adapter used to send packets.
-     * @param destIpProvider callable returning the current destination IP (thread-safe in caller).
-     * @param jpegQuality JPEG quality [0-100]; defaults to 35.
-     * @param bufferCapacity number of frames buffered for jitter smoothing.
-     */
-    VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter,
-                  std::function<std::string()> destIpProvider,
-                  int jpegQuality = 35,
-                  std::size_t bufferCapacity = 100);
-
-    /**
-     * @brief Construct a streamer.
-     * @param txAdapter outbound network adapter used to send packets.
      * @param txAdapter outbound network adapter used to send packets (Ethernet)
      * @param destIpProvider callable returning the current destination IP (thread-safe in caller).
      * @param jpegQuality JPEG quality [0-100]; defaults to 35.
      * @param bufferCapacity number of frames buffered for jitter smoothing.
      */
-    VideoStreamer(Adapter::CommsAdapter::NetworkAdapter& txAdapter, Adapter::CommsAdapter::NetworkAdapter& txAdapterEth,
+    VideoStreamer(NetworkAdapter& txAdapter,
                   std::size_t bufferCapacity = 100);
 
     /**
@@ -239,8 +244,10 @@ public:
      * 
      * @return uint8_t Frame rate
      */
-    uint8_t getFrameRate() {
-        switch (static_cast<FrameRate>(frameIntervalMs.load())) {
+    uint8_t getFrameRate()
+    {
+        switch (static_cast<FrameRate>(frameIntervalMs.load()))
+        {
             case FrameRate::_5Fps:
                 return 5;
             case FrameRate::_10Fps:
@@ -261,7 +268,8 @@ public:
      * 
      * @return uint8_t Quality
      */
-    int getQuality() const {
+    int getQuality() const
+    {
         return m_EncodeQuality;
     }
 
@@ -336,7 +344,8 @@ private:
 
     static constexpr size_t QSize = 16;
 
-    typedef struct __attribute__((__packed__)) {
+    typedef struct __attribute__((__packed__))
+    {
         int16_t gx;  // Gyro X-axis
         int16_t gy;  // Gyro Y-axis
         int16_t gz;  // Gyro Z-axis
@@ -403,12 +412,14 @@ private:
      * 
      * @param fps Frames per second setting
      */
-    static void throttleFps(int intervalMs) {
+    static void throttleFps(int intervalMs)
+    {
         if (intervalMs <= 0) return;
         thread_local auto lastTime = std::chrono::steady_clock::now();
         const auto target = lastTime + std::chrono::milliseconds(intervalMs);
         const auto now = std::chrono::steady_clock::now();
-        if (now < target) {
+        if (now < target)
+        {
             std::this_thread::sleep_until(target);
         }
         lastTime = std::chrono::steady_clock::now();
@@ -416,8 +427,7 @@ private:
 
     std::atomic<int> frameIntervalMs{33};  // default ~30 FPS
     int m_EncodeQuality = 35;
-    Adapter::CommsAdapter::NetworkAdapter& m_TxAdapter;
-    Adapter::CommsAdapter::NetworkAdapter& m_TxAdapterEth;
+    NetworkAdapter& m_TxAdapter;
     std::string m_DestIp;
 
     uint32_t m_FrameID = 0;
@@ -439,10 +449,6 @@ private:
      * 
      */
     Msg::CircularBuffer<std::pair<cv::Mat, cv::Mat>> m_BufferStereo;
-
-    std::condition_variable m_BufferStereoCv;
-    std::mutex m_BufferStereoMtx;
-
 
     // Msg::CircularBuffer<
     std::atomic<bool> m_Running{false};

@@ -1,0 +1,238 @@
+#ifndef NETWORK_TYPES_HPP
+#define NETWORK_TYPES_HPP
+
+#include <string>
+#include <functional>
+#include <atomic>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+// Mirrors Adapter::CommsAdapter's nested adapter-type enum (AdapterBase.hpp), duplicated here
+// because this header can't include AdapterBase.hpp without creating a circular include.
+enum NetworkAdapterType
+{
+    UdpAdapterType       = 1,
+    TcpServerAdapterType = 2,
+    TcpClientAdapterType = 3
+};
+
+class NetworkAdapter
+{
+public:
+NetworkAdapter(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048);
+    ~NetworkAdapter();
+    std::function<int(const uint8_t*, size_t)> sendCallbackEth    = nullptr;
+    std::function<int(const uint8_t*, size_t)> sendCallbackWlan   = nullptr;
+    std::function<int(const uint8_t*, size_t)> sendCallback       = nullptr;
+    std::function<int(const uint8_t*, size_t)> sendCallbackTcp    = nullptr;
+    std::function<int(void)>                   preferredSrcPortCb = nullptr;
+    std::function<int(void)>                   closeSocketCb      = nullptr;
+    std::function<bool(void)>                  EthPresent         = nullptr;
+    std::function<bool(void)>                  hostPresentCB      = nullptr;
+    std::function<void()> onConnected = nullptr;
+
+    int id = -1;
+    int typeID = -1;
+    int sPort = -1;
+    int sPortEth = -1;
+    int dPort = -1;
+    const size_t bufferSize = 0;
+    bool loopback = false;
+    bool connected = false;
+    std::string adapter;
+    std::string parent;
+    std::atomic<bool> wlanLinkDetected;
+    std::atomic<bool> ethLinkDetected;
+    bool broadcast = false;
+    int adapterType = -1;
+    int type = -1;
+
+    int socketDesc{-1};
+
+    int send(const uint8_t* data, size_t length, std::string destIp="");
+
+    int getPreferredSrcPort() const;
+
+    int closeSocket();
+
+    bool IsEthPresent(void) const;
+
+    bool IsHostPresent(void) const;
+
+    void setParent(const std::string& name);
+    
+    void OnEthLinkDetected(bool state);
+
+    void OnWlanLinkDetected(bool state);
+};
+
+class NetworkUdp : public NetworkAdapter
+{
+public:
+    std::function<int(const std::vector<char>&)> receiveCallback = nullptr;
+
+    NetworkUdp(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048)
+        : NetworkAdapter(adapter_, sPort_, dPort_, bufferSize_)
+    {
+        adapterType = UdpAdapterType;
+    }
+};
+
+class NetworkTcpServer : public NetworkAdapter
+{
+public:
+    std::function<int(const std::vector<char>&)> receiveCallback = nullptr;
+
+    NetworkTcpServer(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048)
+        : NetworkAdapter(adapter_, sPort_, dPort_, bufferSize_)
+        {
+        adapterType = TcpServerAdapterType;
+    }
+
+    /**
+     * @brief Receive data from the TCP network adapter
+     * 
+     * @param buffer Buffer to store received data
+     * @return int Status code
+     */
+    int receive(std::vector<char>& buffer);
+};
+
+class NetworkTcpClient : public NetworkAdapter
+{
+public:
+    std::function<int(const std::vector<char>&)> receiveCallback = nullptr;
+
+    NetworkTcpClient(const std::string& adapter_, int sPort_, int dPort_, size_t bufferSize_=2048)
+        : NetworkAdapter(adapter_, sPort_, dPort_, bufferSize_)
+    {
+        adapterType = TcpClientAdapterType;
+    }
+
+    /**
+     * @brief Receive data from the TCP network adapter
+     * 
+     * @param buffer Buffer to store received data
+     * @return int Status code
+     */
+    int receive(std::vector<char>& buffer);
+};
+
+class NetworkProxy : public NetworkAdapter
+{
+public:
+    enum
+    {
+        UpdaterRouteAddr = 0x01, /*!< Updater application route address */
+        WebAppRouteAddr  = 0x02, /*!< Web application route address */
+        MainAppRouteAddr = 0x03, /*!< Main application route address */
+        MaxRouteAddr,            /*!< Maximum route address */
+    };
+
+    std::function<int(const std::vector<char>&)> receiveCallback = nullptr;
+
+    std::function<int(const std::vector<char>&)> OnReceiveWebApp = nullptr;
+    std::function<int(const std::vector<char>&)> OnReceiveUpdater = nullptr;
+
+    NetworkProxy(int port, size_t bufferSize_=2048) 
+        : NetworkAdapter("lo", 0, port, bufferSize_)
+    {
+            // Route IDs are sparse integer tags, so size by max tag and index safely.
+            routeCallbacks.resize(MainAppRouteAddr + 1);
+    }
+
+    /**
+     * @brief Dispatch data to the web application
+     * 
+     * @param msg Message to be dispatched
+     * @return int Status code
+     */
+    int dispatchWebApp(const nlohmann::json& msg);
+    
+    /**
+     * @brief Dispatch data to the updater
+     * 
+     * @param msg Message to be dispatched
+     * @return int Status code
+     */
+    int dispatchUpdater(const nlohmann::json& msg);
+
+    /**
+     * @brief Register callbacks for web app and updater
+     *
+     * @param instance Object the callbacks are invoked on
+     * @param webAppCallback Callback for web app messages
+     * @param updaterCallback Callback for updater messages
+     * @return int Status code
+     */
+    template <typename T>
+    int registerCallbacks(T* instance, int (T::*webAppCallback)(const nlohmann::json&),
+                          int (T::*updaterCallback)(const nlohmann::json&))
+    {
+        this->webAppCallback = [instance, webAppCallback](const nlohmann::json& data)
+        {
+            return (instance->*webAppCallback)(data);
+        };
+        this->updaterCallback = [instance, updaterCallback](const nlohmann::json& data)
+        {
+            return (instance->*updaterCallback)(data);
+        };
+
+        if (routeCallbacks.size() <= static_cast<size_t>(MainAppRouteAddr))
+        {
+            routeCallbacks.resize(MainAppRouteAddr + 1);
+        }
+        routeCallbacks[WebAppRouteAddr ] = this->webAppCallback;
+        routeCallbacks[UpdaterRouteAddr] = this->updaterCallback;
+        return 0;
+    }
+
+    /**
+     * @brief Register a callback for when the proxy is connected
+     *
+     * @tparam T Type of the instance
+     * @param instance Object the callback is invoked on
+     * @param proxyConnectedCallback Callback for proxy connected event
+     * @return int Status code
+     */
+    template<typename T>
+    int registerOnProxyConnected(T* instance, int (T::*proxyConnectedCallback)(const std::vector<char>&))
+    {
+        this->proxyConnectedCallback = [instance, proxyConnectedCallback](const std::vector<char>& data)
+        {
+            return (instance->*proxyConnectedCallback)(data);
+        };
+        return 0;
+    }
+
+    /**
+     * @brief Route a message based on its header information
+     * 
+     * @param data Data to be routed
+     * @return int Status code
+     */
+    int routeMsg(const std::vector<char>& data);
+
+private:
+    struct ProxyMsgHdr
+    {
+        int srcAddr;   /*!< Source address */
+        int destAddr;  /*!< Destination address */
+        int len;
+    };
+
+    const int UpdaterDestAddr = MainAppRouteAddr;
+    const int WebAppDestAddr  = WebAppRouteAddr;
+
+    std::vector<std::function<int(const nlohmann::json&)>> routeCallbacks;
+
+    std::function<int(const nlohmann::json&)> webAppCallback = nullptr;
+    std::function<int(const nlohmann::json&)> updaterCallback = nullptr;
+    std::function<int(const std::vector<char>&)> proxyConnectedCallback = nullptr;
+    const uint16_t webAppPort = 0;
+    const uint16_t updaterPort = 0;
+
+};
+
+#endif // NETWORK_TYPES_HPP

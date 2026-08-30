@@ -18,3 +18,8 @@ test/
 venv/
 *.engine
 *.MOV*
+
+# Debug artifacts — never commit these
+*.core
+rc-car-nav-device
+device-libs/

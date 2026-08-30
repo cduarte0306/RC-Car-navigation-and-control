@@ -15,6 +15,11 @@
 
 #include "logger.hpp"
 
+#ifndef LEVEL_DEBUG
+#define LOG_LEVEL Logger::LOG_LVL_ERROR
+#else
+#define LOG_LEVEL Logger::LOG_LVL_DEBUG
+#endif
 
 #define INFO_PREPEND "[INFO]"
 #define WARN_PREPEND "[WARN]"
@@ -23,8 +28,10 @@
 
 Logger* logInstance = nullptr;
 
-Logger* Logger::getLoggerInst(void) {
-    if (!logInstance) {
+Logger* Logger::getLoggerInst(void)
+{
+    if (!logInstance)
+    {
         logInstance = new Logger();
         
         // Open the log file
@@ -35,7 +42,12 @@ Logger* Logger::getLoggerInst(void) {
 }
 
 
-void Logger::log(int logLvl, const char* format, ...) {
+void Logger::log(int logLvl, const char* format, ...)
+{
+    if (logLvl > LOG_LEVEL)
+    {
+        return;
+    }
     char buffer[1024];
     va_list args;
     va_start(args, format);
@@ -48,7 +60,8 @@ void Logger::log(int logLvl, const char* format, ...) {
     int level;
     const char* prepend = nullptr;
 
-    switch (logLvl) {
+    switch (logLvl)
+    {
         case Logger::LOG_LVL_INFO:
             level = LOG_INFO;
             prepend = INFO_PREPEND;
@@ -65,7 +78,8 @@ void Logger::log(int logLvl, const char* format, ...) {
             break;
 
         case Logger::LOG_LVL_DEBUG:
-            return;
+            level = LOG_DEBUG;
+            prepend = "[DEBUG]";
             break;
         
         default:

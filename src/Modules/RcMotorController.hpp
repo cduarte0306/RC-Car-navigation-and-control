@@ -1,9 +1,9 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
-#include "AdapterBase.hpp"
+#include "Modules_Lib/AdapterBase.hpp"
 #include "RcBase.hpp"
-#include "RcMessageLib.hpp"
+#include "lib/MessageLib.hpp"
 #include "Devices/peripheralDriver.hpp"
 #include "Devices/Pwm.hpp"
 #include "Devices/DeviceBase.hpp"
@@ -14,21 +14,25 @@
 namespace Modules {
 class MotorController : public Modules::Base, public Adapter::MotorAdapter {
 public:
-    MotorController(int moduleID_, std::string name);
+    MotorController(ModuleDefs::DeviceType moduleID_, std::string name);
     ~MotorController();
 
-    virtual int stop(void) override {
-        // Implementation to stop the motor controller
-        return 0;
+    virtual int stopCmd(void) override
+    {
+        return stop();
     }
 
+    virtual int stop(void) override;
 
-    Adapter::AdapterBase* getInputAdapter() override {
+
+    Adapter::AdapterBase* getInputAdapter() override
+    {
         return static_cast<Adapter::AdapterBase*>(static_cast<Adapter::MotorAdapter*>(this));
     }
 
 
-    Device::DeviceBase* getDevice() {
+    Device::DeviceBase* getDevice()
+    {
         return this->peripheralDriver.get();
     }
 
@@ -59,15 +63,6 @@ protected:
     virtual void mainProc() override;
 
     /**
-     * @brief Raw serial interface with the motor cotroller
-     * 
-     * @param pbuf Data pointer
-     * @param len Length of data
-     * @return int 
-     */
-    virtual int moduleCommand_(char* pbuf, size_t len) override;
-
-    /**
      * @brief Transmit telemetry data to the host
      * 
      */
@@ -88,6 +83,33 @@ protected:
      * @return int Return status
      */
     virtual int steer_(int counts) override;
+
+    /**
+     * @brief Handler for set speed command received from adapter
+     * 
+     * @param val Command value (e.g. speed)
+     * @param payload Command payload (if any)
+     * @return int Return status
+     */
+    void cmdHandlerSetSpeed(val_type_t val, const std::vector<char>& payload);
+
+    /**
+     * @brief Handler for steer command received from adapter
+     * 
+     * @param val Command value (e.g. steering angle)
+     * @param payload Command payload (if any)
+     * @return int Return status
+     */
+    void cmdHandlerSteer(val_type_t val, const std::vector<char>& payload);
+
+    /**
+     * @brief Handler for disable command received from adapter
+     * 
+     * @param val Command value (e.g. disable/enable)
+     * @param payload Command payload (if any)
+     * @return int Return status
+     */
+    void cmdHandlerDisable(val_type_t val, const std::vector<char>& payload);
 
     /**
      * @brief Peripheral driver instance
@@ -128,6 +150,6 @@ protected:
     std::mutex mtrControllerMutex;
     
     // Network adapter for telemetry
-    std::unique_ptr<Adapter::CommsAdapter::NetworkAdapter> m_TlmNetAdapter;
+    std::unique_ptr<NetworkAdapter> m_TlmNetAdapter;
 };
 } // namespace Modules

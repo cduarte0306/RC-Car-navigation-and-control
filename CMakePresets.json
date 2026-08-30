@@ -7,7 +7,10 @@
         "displayName": "RC Car (Poky Toolchain)",
         "description": "Cross-compile for Jetson Nano using Poky SDK",
         "generator": "Unix Makefiles",
-        "binaryDir": "${sourceDir}/build"
+        "binaryDir": "${sourceDir}/build",
+        "cacheVariables": {
+          "CMAKE_TOOLCHAIN_FILE": "/opt/poky/5.0.11/sysroots/x86_64-pokysdk-linux/usr/share/cmake/OEToolchainConfig.cmake"
+        }
       }
     ]
 }

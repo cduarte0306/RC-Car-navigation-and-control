@@ -34,7 +34,8 @@
 
 namespace Vision {
 namespace {
-static int clampInt(int value, int lo, int hi) {
+static int clampInt(int value, int lo, int hi)
+{
     return std::max(lo, std::min(value, hi));
 }
 
@@ -43,7 +44,8 @@ static constexpr int kPayloadMaxDisparity = 255;
 }
 
 
-void VideoStereo::sanitizeSettings(Settings& s) {
+void VideoStereo::sanitizeSettings(Settings& s)
+{
     s.numDisparities = kHardMaxDisparity;
     s.minDisparity   = clampInt(s.minDisparity, 0, s.numDisparities);
 
@@ -54,7 +56,8 @@ void VideoStereo::sanitizeSettings(Settings& s) {
 
     s.uniquenessRatio = clampInt(s.uniquenessRatio, 0, 30);
 
-    if (s.maxDisparity != 0 && s.maxDisparity != kPayloadMaxDisparity) {
+    if (s.maxDisparity != 0 && s.maxDisparity != kPayloadMaxDisparity)
+    {
         s.maxDisparity = 0;
     }
     s.confidenceThreshold = clampInt(s.confidenceThreshold, 0, 65535);
@@ -62,26 +65,32 @@ void VideoStereo::sanitizeSettings(Settings& s) {
     s.confidenceType = clampInt(s.confidenceType,
                                 static_cast<int>(VPI_STEREO_CONFIDENCE_ABSOLUTE),
                                 static_cast<int>(VPI_STEREO_CONFIDENCE_INFERENCE));
-    if (!(s.p2Alpha == 0 || s.p2Alpha == 1 || s.p2Alpha == 2 || s.p2Alpha == 4 || s.p2Alpha == 8)) {
+    if (!(s.p2Alpha == 0 || s.p2Alpha == 1 || s.p2Alpha == 2 || s.p2Alpha == 4 || s.p2Alpha == 8))
+    {
         s.p2Alpha = 0;
     }
-    if (s.uniqueness < 0.0f) {
+    if (s.uniqueness < 0.0f)
+    {
         s.uniqueness = -1.0f;
-    } else if (s.uniqueness > 1.0f) {
+    }
+    else if (s.uniqueness > 1.0f)
+    {
         s.uniqueness = 1.0f;
     }
     s.numPasses = clampInt(s.numPasses, 1, 3);
 }
 
 
-VideoStereo::VideoStereo() {
+VideoStereo::VideoStereo()
+{
     vpiInitConvertImageFormatParams(&m_ConvParams);
     vpiInitStereoDisparityEstimatorParams(&m_StereoParams);
     vpiInitStereoDisparityEstimatorCreationParams(&m_CreateParams);
 }
 
 
-VideoStereo::~VideoStereo() {
+VideoStereo::~VideoStereo()
+{
     if (m_ImgL)          { vpiImageDestroy(m_ImgL);          m_ImgL          = nullptr; }
     if (m_ImgR)          { vpiImageDestroy(m_ImgR);          m_ImgR          = nullptr; }
     if (m_ImgL_8u)       { vpiImageDestroy(m_ImgL_8u);       m_ImgL_8u       = nullptr; }
@@ -95,7 +104,8 @@ VideoStereo::~VideoStereo() {
 }
 
 
-int VideoStereo::init(int camWidth, int camHeight, int processWidth, int processHeight) {
+int VideoStereo::init(int camWidth, int camHeight, int processWidth, int processHeight)
+{
     Logger* logger = Logger::getLoggerInst();
     m_CamWidth  = camWidth;
     m_CamHeight = camHeight;
@@ -140,14 +150,16 @@ int VideoStereo::init(int camWidth, int camHeight, int processWidth, int process
 }
 
 
-void VideoStereo::setSettings(const Settings& settings) {
+void VideoStereo::setSettings(const Settings& settings)
+{
     std::lock_guard<std::mutex> guard(m_SettingsMutex);
     m_Settings = settings;
     sanitizeSettings(m_Settings);
 }
 
 
-VideoStereo::Settings VideoStereo::getSettings() {
+VideoStereo::Settings VideoStereo::getSettings()
+{
     std::lock_guard<std::mutex> guard(m_SettingsMutex);
     return m_Settings;
 }
@@ -157,8 +169,10 @@ int VideoStereo::process(const cv::Mat& rectL,
                          const cv::Mat& rectR,
                          cv::Mat& disparityFrame,
                          cv::Mat& pointCloudMat,
-                         cv::Matx44d& Q) {
-    if (rectL.empty() || rectR.empty()) {
+                         cv::Matx44d& Q)
+{
+    if (rectL.empty() || rectR.empty())
+    {
         return -1;
     }
 
@@ -269,7 +283,8 @@ int VideoStereo::process(const cv::Mat& rectL,
         cvPointCloudMat.copyTo(filtered, pc_mask);
 
         // Fallback
-        if (cv::countNonZero(pc_mask) == 0) {
+        if (cv::countNonZero(pc_mask) == 0)
+        {
             cvPointCloudMat.copyTo(filtered, finite_mask);
         }
 
@@ -282,12 +297,14 @@ int VideoStereo::process(const cv::Mat& rectL,
 
     // Fill in the XYZ coordinates and color
     ret = cuda::pointCloudToColor(cvPointCloudMat, colorResized, zMap);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         printf("Failed convert point cloud\n");
     }
 
     ret = cuda::smoothPointCloud(zMap, zMapSmooth, s.depthThreshold, s.minAgreeingPixels, s.colorThreshold);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         printf("Failed to smooth pointcloud\n");
     }
 

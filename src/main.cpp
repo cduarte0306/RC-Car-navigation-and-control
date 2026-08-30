@@ -10,44 +10,54 @@
 
 #include "app/ml/TensorRTEngine.hpp"
 
-#include "Modules/RcMessageLib.hpp"
-#include "Modules/AdapterBase.hpp"
-#include "Modules/RcBase.hpp"
+#include "lib/MessageLib.hpp"
+#include "Modules/Modules_Lib/ModulesDefs.hpp"
+#include "Modules/Modules_Lib/AdapterBase.hpp"
+#include "Modules/Modules_Lib/RcBase.hpp"
 #include "Modules/RcMotorController.hpp"
 #include "Modules/RcCommsController.hpp"
-#include "Modules/RcCommandAndControl.hpp"
 #include "Modules/RcVisionControl.hpp"
 #include "Modules/RcCarTelemetry.hpp"
+#include "Modules/RcUpdater.hpp"
+
+#include "utils/Utils.hpp"
 
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[])
+{
     int ret;
+
+    Utils::ConfigCores();
+    Utils::install_crash_handler();
+
     Logger* logger = Logger::getLoggerInst();
-    logger->log(Logger::LOG_LVL_INFO, "RC Car navigation and control V%u.%u.%u\r\n", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD);
+    std::string versionStr = Utils::GetOEVersion();
+    logger->log(Logger::LOG_LVL_INFO, "RC Car navigation and control V%u.%u.%u\r\nOE version: %s\r\n",
+        VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD, versionStr.c_str());
 
     ret = TensorRTEngine::createEngineFile("/home/models/lanenet/lanenet.onnx", "/data/model-engines/lanenet.engine");
-    if (ret != 0) {
+    if (ret != 0)
+    {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to create engine file for lanenet.onnx\r\n");
         return -1;
     }
 
-    std::unique_ptr<Modules::MotorController  > motorController   = std::make_unique<Modules::MotorController>(Modules::MOTOR_CONTROLLER, "MainMotorController");
-    std::unique_ptr<Modules::NetworkComms     > networkComms      = std::make_unique<Modules::NetworkComms>(Modules::WIRELESS_COMMS, "MainNetworkComms");
-    std::unique_ptr<Modules::CommandController> commandController = std::make_unique<Modules::CommandController>(Modules::COMMAND_CONTROLLER, "MainCommsController");
-    std::unique_ptr<Modules::AppCLI           > cli               = std::make_unique<Modules::AppCLI>(Modules::CLI_INTERFACE, "AppCli");
-    std::unique_ptr<Modules::VisionControls   > rcVision          = std::make_unique<Modules::VisionControls>(Modules::CAMERA_CONTROLLER, "CamController");
-    std::unique_ptr<Modules::RcCarTelemetry   > rcTelemetry       = std::make_unique<Modules::RcCarTelemetry>(Modules::TELEMETRY_MODULE, "TelemetryModule");
+    std::unique_ptr<Modules::MotorController  > motorController   = std::make_unique<Modules::MotorController>  (ModuleDefs::DeviceType::MotorControllerModule, "MainMotorController");
+    std::unique_ptr<Modules::NetworkComms     > networkComms      = std::make_unique<Modules::NetworkComms>     (ModuleDefs::DeviceType::CommsModule, "MainNetworkComms");
+    std::unique_ptr<Modules::AppCLI           > cli               = std::make_unique<Modules::AppCLI>           (ModuleDefs::DeviceType::CliModule, "AppCli");
+    std::unique_ptr<Modules::VisionControls   > rcVision          = std::make_unique<Modules::VisionControls>   (ModuleDefs::DeviceType::CameraControllerModule, "CamController");
+    std::unique_ptr<Modules::RcCarTelemetry   > rcTelemetry       = std::make_unique<Modules::RcCarTelemetry>   (ModuleDefs::DeviceType::TelemetryModule, "TelemetryModule");
+    std::unique_ptr<Modules::Updater          > rcUpdater         = std::make_unique<Modules::Updater>          (ModuleDefs::DeviceType::UpdaterModule, "UpdaterModule");
 
     // Create adapters
     motorController->createAdapter<Adapter::TlmAdapter>();
 
-    commandController->createAdapter<Adapter::MotorAdapter>();
-    commandController->createAdapter<Adapter::CameraAdapter>();
-    commandController->createAdapter<Adapter::CommsAdapter>();
+    networkComms->createAdapter<Adapter::MotorAdapter>();
+    networkComms->createAdapter<Adapter::CameraAdapter>();
+    networkComms->createAdapter<Adapter::UpdateAdapter>();
 
     rcVision->createAdapter<Adapter::MotorAdapter>();
     rcVision->createAdapter<Adapter::CommsAdapter>();
-    rcVision->createAdapter<Adapter::CommandAdapter>();
     rcVision->createAdapter<Adapter::TlmAdapter>();
 
     cli->createAdapter<Adapter::MotorAdapter>();
@@ -56,11 +66,14 @@ int main(int argc, char* argv[]) {
 
     rcTelemetry->createAdapter<Adapter::CommsAdapter>();
 
+    rcUpdater->createAdapter<Adapter::MotorAdapter>();
+    rcUpdater->createAdapter<Adapter::CommsAdapter>();
+
     // Bind modules
+    networkComms->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
+    networkComms->moduleBind<Adapter::CameraAdapter>(rcVision->getInputAdapter());
+    networkComms->moduleBind<Adapter::UpdateAdapter>(rcUpdater->getInputAdapter());
     motorController->moduleBind<Adapter::TlmAdapter>(rcTelemetry->getInputAdapter());
-    commandController->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
-    commandController->moduleBind<Adapter::CameraAdapter>(rcVision->getInputAdapter());
-    commandController->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     cli->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
     cli->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
     cli->moduleBind<Adapter::CameraAdapter>(rcVision->getInputAdapter());
@@ -68,25 +81,24 @@ int main(int argc, char* argv[]) {
     rcVision->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
     rcVision->moduleBind<Adapter::TlmAdapter>(rcTelemetry->getInputAdapter());
     rcTelemetry->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
-
-    // Bind modules to CLI
-    // cli->moduleBind<Adapter::CLIAdapter>(rcVision->getInputAdapter());
+    rcUpdater->moduleBind<Adapter::MotorAdapter>(motorController->getInputAdapter());
+    rcUpdater->moduleBind<Adapter::CommsAdapter>(networkComms->getInputAdapter());
 
     // Preliminary initialization
     motorController->init();
-    commandController->init();
     networkComms->init();
     rcVision->init();
     rcTelemetry->init();
     cli->init();
+    rcUpdater->init();
 
     // Start each module
     motorController->trigger();
-    commandController->trigger();
     networkComms->trigger();
     rcVision->trigger();
     rcTelemetry->trigger();
     cli->trigger();
+    rcUpdater->trigger();
 
     // Connect modules to one another
     Modules::Base::joinThreads();
