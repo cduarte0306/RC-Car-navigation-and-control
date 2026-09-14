@@ -115,7 +115,6 @@ int PeripheralCtrl::getVers(uint8_t& major, uint8_t& minor, uint8_t& build)
     return 0;
 }
 
-
 /**
  * @brief Set the drive mode of the peripheral controller
  * 
@@ -128,7 +127,7 @@ int PeripheralCtrl::setMotorState(bool state)
     val_type_t data;
 
     data.u8 = state;
-    ret = this->xfer(&data, PeripheralCtrl::REG_SET_MOTOR_STATUS);
+    ret = this->xfer(&data, PeripheralCtrl::REG_SET_MOTOR_CTRL_STATUS, true);
     if (!ret)
     {
         return -1;
@@ -136,7 +135,6 @@ int PeripheralCtrl::setMotorState(bool state)
 
     return 0;
 }
-
 
 /**
  * @brief Set the drive mode of the peripheral controller
@@ -346,6 +344,10 @@ int PeripheralCtrl::readData(psocDataStruct& data)
     return 0;
 }
 
+int PeripheralCtrl::readReg(int reg, val_type_t& val)
+{
+    return this->xfer(&val, reg);
+}
 
 /**
  * @brief Configure the SPI device
@@ -414,7 +416,7 @@ bool PeripheralCtrl::configSPI(void)
  * @return true Transfer successful
  * @return false Transfer failed
  */
-bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg)
+bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg, bool wrt)
 {
     if (data == nullptr)
     {
@@ -426,7 +428,7 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg)
         bool ret = false;
         PeripheralCtrl::spiTransactionStruct dataOut;
         dataOut.ack = 0x01;
-        dataOut.transactionType = STAGE_RD_WRT_TRANSACTION;  // Write type transaction
+        dataOut.transactionType = wrt ? WRITE_REG_TRANSACTION : STAGE_RD_WRT_TRANSACTION;  // Transaction type
         dataOut.reg = reg;
         dataOut.data.u32 = data->u32;
 
