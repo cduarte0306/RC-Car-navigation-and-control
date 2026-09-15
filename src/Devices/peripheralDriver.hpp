@@ -4,13 +4,82 @@
 #include "types.h"
 #include <cstddef>
 #include <stdint.h>
+#include <exception>
 
 #include "DeviceBase.hpp"
 
 
 namespace Device {
+
+class PeripheralDisconnectHandler : public std::exception {
+public:
+    explicit PeripheralDisconnectHandler()
+    {
+    }
+
+    const char* what() const noexcept override {
+        return "Peripheral device disconnected";
+    }
+};
+
 class PeripheralCtrl : public Device::DeviceBase {
 public:
+    typedef enum
+    {
+        REG_NOOP,
+        REG_VER_MAJOR,
+        REG_VER_MINOR,
+        REG_VER_BUILD,
+        REG_SPEED,
+        REG_FRONT_DISTANCE,
+        REG_LEFT_DISTANCE,
+        REG_RIGHT_DISTANCE,
+
+        // IMU Registers
+        REG_ACCEL_X,
+        REG_ACCEL_Y,
+        REG_ACCEL_Z,
+        REG_GYRO_X,
+        REG_GYRO_Y,
+        REG_GYRO_Z,
+        
+        MAG_X,
+        MAG_Y,
+        MAG_Z,
+        
+        REG_TEMPERATURE,
+
+        REG_SENSOR_F_STATUS,
+        REG_SENSOR_L_STATUS,
+        REG_SENSOR_R_STATUS,
+        
+        REG_ENCODER_STATUS,
+        REG_IMU_STATUS,
+
+        REG_RO_END
+    } registerEnumsReadOnly;
+    typedef enum
+    {
+        REG_MOTOR_ONOFF_STATE  = REG_RO_END,
+        REG_SET_MOTOR_CTRL_STATUS,
+        REG_SPEED_SETPOINT,
+        REG_PID_P,
+        REG_PID_I,
+        REG_PID_D,
+        REG_WR_END,
+    } registerEnumReadWrites;
+
+    /**
+     * @brief PSoC Motor states
+     * 
+     */
+    typedef enum
+    {
+        eMotorStopped,
+        eMotorInitialized,
+        eMotorStarting,
+        eMotorRunning,
+    } tMotorStates;
     typedef struct {
         val_type_t version_major;   // Major version
         val_type_t version_minor;   // Minor version
@@ -52,11 +121,10 @@ public:
     int doDetectDevice(void);
     int getVers(uint8_t& major, uint8_t& minor, uint8_t& build);
     int readData(psocDataStruct& data);
+    int readReg(int reg, val_type_t& val);
     int setMotorState(bool state);
     int setDriveMode(bool state);
     int setPIParams(float p, float i, float d);
-    bool xferSPI(uint8_t* pbuf, size_t length);
-    bool xfer(val_type_t* data, uint8_t reg);
 
 private:
     enum
@@ -66,51 +134,6 @@ private:
         WRITE_REG_TRANSACTION      // Writes to selected register in register map
     };
 
-    typedef enum
-    {
-        REG_NOOP,
-        REG_VER_MAJOR,
-        REG_VER_MINOR,
-        REG_VER_BUILD,
-        REG_SPEED,
-        REG_FRONT_DISTANCE,
-        REG_LEFT_DISTANCE,
-        REG_RIGHT_DISTANCE,
-
-        // IMU Registers
-        REG_ACCEL_X,
-        REG_ACCEL_Y,
-        REG_ACCEL_Z,
-        REG_GYRO_X,
-        REG_GYRO_Y,
-        REG_GYRO_Z,
-        
-        MAG_X,
-        MAG_Y,
-        MAG_Z,
-        
-        REG_TEMPERATURE,
-
-        REG_SENSOR_F_STATUS,
-        REG_SENSOR_L_STATUS,
-        REG_SENSOR_R_STATUS,
-        
-        REG_ENCODER_STATUS,
-        REG_IMU_STATUS,
-
-        REG_RO_END
-    } registerEnumsReadOnly;
-
-    typedef enum
-    {
-        REG_SET_MOTOR_STATUS = REG_RO_END,
-        REG_SPEED_SETPOINT,
-        REG_PID_P,
-        REG_PID_I,
-        REG_PID_D,
-        REG_WR_END,
-    } registerEnumReadWrites;
-
     typedef struct __attribute__((__packed__))
     {
         uint8_t transactionType;
@@ -119,7 +142,9 @@ private:
         uint8_t ack;
     } spiTransactionStruct;
 
-    bool configSPI(void);  
+    bool configSPI(void);
+    bool xfer(val_type_t* data, uint8_t reg, bool wrt=false);
+    bool xferSPI(uint8_t* pbuf, size_t length);
 private:
     bool isDeviceConnected_ = false;
     int spiFd = -1;

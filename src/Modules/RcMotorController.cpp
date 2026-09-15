@@ -4,11 +4,13 @@
 #include <chrono>
 #include <string>
 #include <algorithm>
+#include <stdlib.h>
 #include "utils/logger.hpp"
 #include <nlohmann/json.hpp>
 #include "app/motor/MotorLogController.hpp"
 #include "lib/RegisterMap.hpp"
 
+#define SLEEP_1SEC usleep(1000000)
 
 namespace Modules {
 MotorController::MotorController(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::MotorAdapter(name)
@@ -208,7 +210,11 @@ void MotorController::pollTlmData(void)
 {
     {
         std::lock_guard<std::mutex> lock(mtrControllerMutex);
-        this->peripheralDriver->readData(psocData);
+        if (this->peripheralDriver->readData(psocData) < 0)
+        {
+            throw Device::PeripheralDisconnectHandler();
+            return;
+        }
     }
     RegisterMap* regMap = RegisterMap::getInstance();
 
@@ -216,7 +222,7 @@ void MotorController::pollTlmData(void)
 
     if (m_isControllerConnected)
     {
-        telemetryJson["status"]        = true;
+        telemetryJson["status"       ] = true;
         telemetryJson["version_major"] = psocData.version_major.u8;
         telemetryJson["version_minor"] = psocData.version_minor.u8;
         telemetryJson["version_build"] = psocData.version_build.u8;
@@ -248,6 +254,19 @@ void MotorController::pollTlmData(void)
 
 void MotorController::mainProc()
 {
+    typedef enum
+    {
+        eRunning,
+        eCheckMotorState,
+        eMotorInitialize,
+        eMotorProblem,
+        eVerifyConnection,
+        eMotorIdle
+    } tMotorCtrlState;
+
+    tMotorCtrlState mtrState, prevState = eVerifyConnection;
+
+    int ret = 0;
     Logger* logger = Logger::getLoggerInst();
     m_isControllerConnected = false;
     Motor::MotorLogController logController; // Start the motor log controller to capture low-level logs from the motor controller
@@ -255,24 +274,77 @@ void MotorController::mainProc()
     // Main processing loop for the motor controller
     while (m_Running.load())
     {
-        if (!m_isControllerConnected)
+        prevState = mtrState;
+        switch(mtrState)
         {
-            this->peripheralDriver->doDetectDevice();
-            int ret = this->peripheralDriver->doDetectDevice();
-            if (ret == 0)
-            {
-                uint8_t major, minor, build;
-                this->peripheralDriver->getVers(major, minor, build);
-                logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
-                m_isControllerConnected = true;
-            }
+            case eVerifyConnection:
+                ret = this->peripheralDriver->doDetectDevice();
+                if (ret == 0)
+                {
+                    uint8_t major, minor, build;
+                    this->peripheralDriver->getVers(major, minor, build);
+                    logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
+                    m_isControllerConnected = true;
+                    peripheralDriver->setMotorState(true);
+                    mtrState = eCheckMotorState;
+                }
+                else
+                {
+                    logger->log(Logger::LOG_LVL_INFO, "Failed to detect PSoC device\r\n");
+                    SLEEP_1SEC;  // Wait 1 second before trying again
+                }
+                break;
+            case eCheckMotorState:
+                logger->log(Logger::LOG_LVL_INFO, "Checking motor state\r\n");
+                {
+                    val_type_t val;
+                    ret = peripheralDriver->readReg(Device::PeripheralCtrl::REG_MOTOR_ONOFF_STATE, val);
+                    if (ret < 0)
+                    {
+                        logger->log(Logger::LOG_LVL_INFO, "Failed to read register: %02X\r\n", 
+                                    Device::PeripheralCtrl::REG_MOTOR_ONOFF_STATE);
+                        mtrState = eMotorIdle;
+                        break;
+                    }
+                    if (val.u8)
+                    {
+                        // Motor is now running
+                        logger->log(Logger::LOG_LVL_INFO, "Motor now running\r\n");
+                        mtrState = eRunning;
+                    }
+                    else
+                    {
+                        logger->log(Logger::LOG_LVL_INFO, "Motor not yet in running state\r\n");
+                        mtrState = eMotorInitialize;
+                        SLEEP_1SEC;
+                        break;
+                    }
+                }
+                break;
+            case eMotorInitialize:
+                logger->log(Logger::LOG_LVL_INFO, "Initializing motor\r\n");
+                peripheralDriver->setMotorState(true);
+                SLEEP_1SEC;  // Allow 1 second for device to initialize
+                mtrState = eCheckMotorState;
+                break;
+            case eRunning:
+                try
+                {
+                    pollTlmData();   
+                }
+                catch (Device::PeripheralDisconnectHandler& e)
+                {
+                    logger->log(Logger::LOG_LVL_ERROR, "Peripheral disconnected: %s\r\n", e.what());
+                    mtrState = eMotorProblem;
+                }
+                break;
+            case eMotorProblem:
+                usleep(1000000);
+                mtrState = eVerifyConnection;
+                break;
+            case eMotorIdle:
+                usleep(1000000);
         }
-        else
-        {
-            pollTlmData();
-        }
-
-        // Process motor commands
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
