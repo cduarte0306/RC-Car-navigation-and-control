@@ -23,6 +23,7 @@
 #include "lib/MessageLib.hpp"
 #include "Modules_Lib/AdapterBase.hpp"
 #include "ModulesDefs.hpp"
+#include "utils/logger.hpp"
 
 #include "lib/Thread.hpp"
 #include "types.h"
@@ -510,6 +511,12 @@ protected:
      * @return int Error code indicating success or failure of the acknowledgment submission process
      */
     int DoReply(Msg::MessageAck<std::vector<char>>& ack);
+
+    /**
+     * @brief Logger pointer
+     * 
+     */
+    Logger* mLogger = nullptr;
 
     /**
      * @brief Global thread can run flag

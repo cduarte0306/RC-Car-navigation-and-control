@@ -10,7 +10,8 @@
 #include <iostream>
 #include <cstring>
 #include <stdexcept>
-
+#include <cassert>
+#include "utils/Utils.hpp"
 #include "utils/logger.hpp"
 
 
@@ -74,6 +75,43 @@ int PeripheralCtrl::doDetectDevice(void)
     return ret;
 }
 
+bool PeripheralCtrl::doDetectBootloader(void)
+{
+    BlDefs::tBlXfer xfer;
+    std::memset((uint8_t*)&xfer, 0, sizeof(xfer));
+    bool ret;
+    for (int i = 0; i < MAX_ATTEMPT_COUNT; i ++)
+    {
+        // Stage the ping
+        xfer.cmd = BlDefs::BootLoader_Ping;
+        ret = this->xferSPI<BlDefs::tBlXfer>(reinterpret_cast<uint8_t*>(&xfer));
+        if ( !ret )
+        {
+            return false;
+        }
+
+        usleep(1000);  // Wait 1ms
+
+        // Attempt to read
+        xfer.cmd = BlDefs::Bootloader_Noop;
+        ret = this->xferSPI<BlDefs::tBlXfer>(reinterpret_cast<uint8_t*>(&xfer));
+        if ( !ret )
+        {
+            return false;
+        }
+
+        // Did it reply with the BL magic number?
+        if (xfer.status == BlDefs::Bl_Ping)
+        {
+            return true;
+        }
+        else
+        {
+            usleep(2000);
+        }
+    }
+    return false;
+}
 
 /**
  * @brief Get the version of the peripheral controller
@@ -195,6 +233,56 @@ int PeripheralCtrl::setPIParams(float p, float i, float d)
     return 0;
 }
 
+int PeripheralCtrl::setToUpdateMode()
+{
+    bool ret;
+    val_type_t data;    
+    ret = this->xfer(&data, PeripheralCtrl::REG_ENTER_BL, true);
+    if (!ret)
+    {
+        return -1;
+    }
+
+    return 0;
+}
+
+int PeripheralCtrl::writeUpdate(size_t row, size_t length, const char* data)
+{
+    if (data == nullptr || length != CY_ROW_LENGTH)
+    {
+        return -1;
+    }
+
+    struct BootloaderWritePacket
+    {
+        BlDefs::tBlXfer header{};
+        uint8_t payload[CY_ROW_LENGTH];
+    } packet;
+
+    packet.header.cmd = BlDefs::BootLoader_WriteRow;
+    packet.header.row = row;
+    packet.header.crc32 = Utils::xCRC32(reinterpret_cast<const uint8*>(data), CY_ROW_LENGTH);
+    std::memcpy(packet.payload, data, length);
+    return this->xferSPI<BootloaderWritePacket>(reinterpret_cast<uint8_t*>(&packet)) ? 0 : -1;
+}
+
+int PeripheralCtrl::endUpdate()
+{
+    BlDefs::tBlXfer cmd;
+    cmd.cmd = BlDefs::Bootloader_Finalize;
+    return this->xferSPI<BlDefs::tBlXfer>((uint8_t*)&cmd) ? 0 : -1;
+}
+
+int PeripheralCtrl::verifyWrite()
+{
+    BlDefs::tBlXfer cmd;
+    cmd.cmd = BlDefs::Bootloader_Verify_Write;
+    if (this->xferSPI<BlDefs::tBlXfer>((uint8_t*)&cmd))
+    {
+        return -1;
+    }
+    return cmd.status;
+}
 
 /**
  * @brief Read data from the peripheral controller
@@ -432,7 +520,7 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg, bool wrt)
         dataOut.reg = reg;
         dataOut.data.u32 = data->u32;
 
-        ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
+        ret = this->xferSPI<PeripheralCtrl::spiTransactionStruct>(reinterpret_cast<uint8_t*>(&dataOut));
         if ( !ret )
         {
             return false;
@@ -441,7 +529,7 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg, bool wrt)
         std::memset(&dataOut, 0x00, sizeof(PeripheralCtrl::spiTransactionStruct));
         dataOut.transactionType = READ_TRANSACTION;
         // The next transaction is a read transaction
-        ret = this->xferSPI(reinterpret_cast<uint8_t*>(&dataOut), sizeof(PeripheralCtrl::spiTransactionStruct));
+        ret = this->xferSPI<PeripheralCtrl::spiTransactionStruct>(reinterpret_cast<uint8_t*>(&dataOut));
         if ( !ret  )
         {
             return false;
@@ -461,24 +549,24 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg, bool wrt)
  * @brief Transfer via the spi file write
  * 
  * @param pbuf Pointer to the transmissio buffer
- * @param length Length of data to send
  * @return true 
  * @return false 
  */
-bool PeripheralCtrl::xferSPI(uint8_t* pbuf, size_t length)
+template<typename T>
+bool PeripheralCtrl::xferSPI(uint8_t* pbuf)
 {
-    if (pbuf == nullptr || length == 0)
+    if (pbuf == nullptr)
     {
         return false;
     }
 
-    uint8_t rxbuf[sizeof(PeripheralCtrl::spiTransactionStruct)] = {0};  // receive buffer
+    uint8_t rxbuf[sizeof(T)] = {0};  // receive buffer
     Logger* logger = Logger::getLoggerInst();
-    
+
     struct spi_ioc_transfer tr = {};
     tr.tx_buf = reinterpret_cast<unsigned long>(pbuf);
     tr.rx_buf = reinterpret_cast<unsigned long>(rxbuf);
-    tr.len = static_cast<uint32_t>(length);
+    tr.len = static_cast<uint32_t>(sizeof(T));
     tr.delay_usecs = 0;
     tr.speed_hz = this->speed;
     tr.bits_per_word = this->bitsPerWord;
@@ -490,7 +578,7 @@ bool PeripheralCtrl::xferSPI(uint8_t* pbuf, size_t length)
         return false;
     }
 
-    memcpy(pbuf, rxbuf, length);
+    memcpy(pbuf, rxbuf, sizeof(T));
     return true;
 }
 }

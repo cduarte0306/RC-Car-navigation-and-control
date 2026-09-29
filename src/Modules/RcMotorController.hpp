@@ -5,11 +5,11 @@
 #include "RcBase.hpp"
 #include "lib/MessageLib.hpp"
 #include "Devices/peripheralDriver.hpp"
+#include "utils/CFile.hpp"
 #include "Devices/Pwm.hpp"
 #include "Devices/DeviceBase.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
 #include "Devices/Gpio.hpp"
-
 
 namespace Modules {
 class MotorController : public Modules::Base, public Adapter::MotorAdapter {
@@ -110,6 +110,13 @@ protected:
      * @return int Return status
      */
     void cmdHandlerDisable(val_type_t val, const std::vector<char>& payload);
+
+    /**
+     * @brief Perform update on the device
+     * 
+     * @return int 
+     */
+    int RunUpdate();
 
     /**
      * @brief Peripheral driver instance

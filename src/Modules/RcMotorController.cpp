@@ -12,10 +12,15 @@
 
 #define SLEEP_1SEC usleep(1000000)
 
+
+static const uint8_t periCtrlMajor = 1;
+static const uint8_t periCtrlMinor = 5;
+static const uint8_t periCtrlBuild = 0;
+
 namespace Modules {
 MotorController::MotorController(ModuleDefs::DeviceType moduleID_, std::string name) : Base(moduleID_, name), Adapter::MotorAdapter(name)
 {
-    Logger* logger = Logger::getLoggerInst();
+    mLogger = Logger::getLoggerInst();
 
     setInputAdapter(static_cast<Adapter::AdapterBase*>(static_cast<Adapter::MotorAdapter*>(this)));
 
@@ -27,19 +32,19 @@ MotorController::MotorController(ModuleDefs::DeviceType moduleID_, std::string n
         int ret = this->m_PwmFwd->writeEnable(true);
         if (ret < 0)
         {
-            logger->log(Logger::LOG_LVL_ERROR, "Failed to enable Motor control PWM\r\n");
+            mLogger->log(Logger::LOG_LVL_ERROR, "Failed to enable Motor control PWM\r\n");
         }
 
         this->m_PwmSteer = std::make_unique<Device::Pwm>("/dev/pwm2", 50);
         ret = this->m_PwmSteer->writeEnable(true);
         if (ret < 0)
         {
-            logger->log(Logger::LOG_LVL_ERROR, "Failed to enable Servo control PWM\r\n");
+            mLogger->log(Logger::LOG_LVL_ERROR, "Failed to enable Servo control PWM\r\n");
         }
     }
     catch (const std::exception& e)
     {
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to initialize PeripheralCtrl and motor control: %s\r\n", e.what());
+        mLogger->log(Logger::LOG_LVL_ERROR, "Failed to initialize PeripheralCtrl and motor control: %s\r\n", e.what());
     }
 
     // Open GPIO for enabling motor direction
@@ -53,7 +58,6 @@ MotorController::~MotorController()
     this->peripheralDriver.reset();
 }
 
-
 /**
  * @brief Initialize the motor controller module
  * 
@@ -62,13 +66,12 @@ MotorController::~MotorController()
 int MotorController::init(void)
 {
     // Open a network adapter for telemetry
-    Logger* logger = Logger::getLoggerInst();
 
     // Register as telemetry source
     int ret = this->TlmAdapter->registerTelemetrySource(this->getName());
     if (ret < 0)
     {
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to register motor controller as telemetry source\r\n");
+        mLogger->log(Logger::LOG_LVL_ERROR, "Failed to register motor controller as telemetry source\r\n");
         return -1;
     }
 
@@ -78,20 +81,17 @@ int MotorController::init(void)
     Base::moduleRegisterCommand(MotorCmdDisable, &MotorController::cmdHandlerDisable);
     Base::DefinePayloadLoc(sizeof(MotorCommand_t));  // Define the payload location and size for incoming commands
 
-    logger->log(Logger::LOG_LVL_INFO, "Opened motor telemetry network adapter at port 65001\r\n");
+    mLogger->log(Logger::LOG_LVL_INFO, "Opened motor telemetry network adapter at port 65001\r\n");
     return 0;
 }
 
-
 int MotorController::stop(void)
 {
-    Logger* logger = Logger::getLoggerInst();
-    logger->log(Logger::LOG_LVL_INFO, "Stopping motor operations...\r\n");
+    mLogger->log(Logger::LOG_LVL_INFO, "Stopping motor operations...\r\n");
     peripheralDriver->setDriveMode(false);   // Set to manual
     peripheralDriver->setMotorState(false);  // Disable motor
     return 0;
 }
-
 
 /**
  * @brief Set the motor speed
@@ -125,16 +125,14 @@ int MotorController::setMotorSpeed_(int speed)
     int dutyCycle = (static_cast<int>((static_cast<float>(speed) / 127.0f) * 100.0f));
     speed = std::min(100, std::max(0, dutyCycle));
 
-    Logger* logger = Logger::getLoggerInst();
     // int ret =0;
     int ret = this->m_PwmFwd->writeDutyCycle(speed);
     if (ret < 0)
     {
-        logger->log(Logger::LOG_LVL_ERROR, "Failed to set PWM duty cycle: %d\r\n", speed);
+        mLogger->log(Logger::LOG_LVL_ERROR, "Failed to set PWM duty cycle: %d\r\n", speed);
     }
     return ret;
 }
-
 
 /**
  * @brief Steers the motor 
@@ -201,6 +199,37 @@ void MotorController::cmdHandlerDisable(val_type_t val, const std::vector<char>&
     return;
 }
 
+int MotorController::RunUpdate()
+{
+    constexpr int numTries = 5;
+    const char* fileName = "firmware/rc-car-firmware.bin";
+    CFile updateFile(fileName, 0);
+    size_t row = 0;
+    while(true)
+    {
+        std::vector<char> data = updateFile.read(CY_ROW_LENGTH);
+        this->peripheralDriver->writeUpdate(row, data.size(), data.data());
+        int i = 0;
+        int verifyStatus = BlDefs::Bl_Ok;
+        for (i = 0; i < numTries; i ++)
+        {
+            verifyStatus = this->peripheralDriver->verifyWrite();
+            if (verifyStatus == BlDefs::Bl_Ok)
+            {
+                break;
+            }
+        }
+        if (i == numTries)
+        {
+            mLogger->log(Logger::LOG_LVL_ERROR, "Failed write at row %d\r\n", row);
+            return -1;
+        }
+        i = 0;
+    }
+
+    mLogger->log(Logger::LOG_LVL_INFO, "Motor controller update finalized\r\n");
+    return 0;
+}
 
 /**
  * @brief Polls telemetry data
@@ -256,18 +285,18 @@ void MotorController::mainProc()
 {
     typedef enum
     {
+        eVerifyConnection,
         eRunning,
+        eRunUpdate,
         eCheckMotorState,
         eMotorInitialize,
         eMotorProblem,
-        eVerifyConnection,
         eMotorIdle
     } tMotorCtrlState;
 
     tMotorCtrlState mtrState, prevState = eVerifyConnection;
 
     int ret = 0;
-    Logger* logger = Logger::getLoggerInst();
     m_isControllerConnected = false;
     Motor::MotorLogController logController; // Start the motor log controller to capture low-level logs from the motor controller
 
@@ -283,25 +312,44 @@ void MotorController::mainProc()
                 {
                     uint8_t major, minor, build;
                     this->peripheralDriver->getVers(major, minor, build);
-                    logger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
+                    mLogger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
+                 
+                    if ((major < periCtrlMajor) ||
+                        (minor < periCtrlMinor) ||
+                        (build < periCtrlBuild))
+                    {
+                        mtrState = eRunUpdate;
+                        (void) peripheralDriver->setToUpdateMode();
+                    }
                     m_isControllerConnected = true;
                     peripheralDriver->setMotorState(true);
                     mtrState = eCheckMotorState;
                 }
                 else
                 {
-                    logger->log(Logger::LOG_LVL_INFO, "Failed to detect PSoC device\r\n");
-                    SLEEP_1SEC;  // Wait 1 second before trying again
+                    mLogger->log(Logger::LOG_LVL_INFO, "Failed to detect PSoC device. Attempting bootloader...\r\n");
+                    if (this->peripheralDriver->doDetectBootloader())
+                    {
+                        mtrState = eRunUpdate;  // Enter software update mode
+                    }
+                    else
+                    {
+                        SLEEP_1SEC;  // Wait 1 second before trying again
+                    }
                 }
                 break;
+            case eRunUpdate:
+                RunUpdate();
+                mtrState = eVerifyConnection;
+                break;
             case eCheckMotorState:
-                logger->log(Logger::LOG_LVL_INFO, "Checking motor state\r\n");
+                mLogger->log(Logger::LOG_LVL_INFO, "Checking motor state\r\n");
                 {
                     val_type_t val;
                     ret = peripheralDriver->readReg(Device::PeripheralCtrl::REG_MOTOR_ONOFF_STATE, val);
                     if (ret < 0)
                     {
-                        logger->log(Logger::LOG_LVL_INFO, "Failed to read register: %02X\r\n", 
+                        mLogger->log(Logger::LOG_LVL_INFO, "Failed to read register: %02X\r\n", 
                                     Device::PeripheralCtrl::REG_MOTOR_ONOFF_STATE);
                         mtrState = eMotorIdle;
                         break;
@@ -309,12 +357,12 @@ void MotorController::mainProc()
                     if (val.u8)
                     {
                         // Motor is now running
-                        logger->log(Logger::LOG_LVL_INFO, "Motor now running\r\n");
+                        mLogger->log(Logger::LOG_LVL_INFO, "Motor now running\r\n");
                         mtrState = eRunning;
                     }
                     else
                     {
-                        logger->log(Logger::LOG_LVL_INFO, "Motor not yet in running state\r\n");
+                        mLogger->log(Logger::LOG_LVL_INFO, "Motor not yet in running state\r\n");
                         mtrState = eMotorInitialize;
                         SLEEP_1SEC;
                         break;
@@ -322,7 +370,7 @@ void MotorController::mainProc()
                 }
                 break;
             case eMotorInitialize:
-                logger->log(Logger::LOG_LVL_INFO, "Initializing motor\r\n");
+                mLogger->log(Logger::LOG_LVL_INFO, "Initializing motor\r\n");
                 peripheralDriver->setMotorState(true);
                 SLEEP_1SEC;  // Allow 1 second for device to initialize
                 mtrState = eCheckMotorState;
@@ -334,7 +382,7 @@ void MotorController::mainProc()
                 }
                 catch (Device::PeripheralDisconnectHandler& e)
                 {
-                    logger->log(Logger::LOG_LVL_ERROR, "Peripheral disconnected: %s\r\n", e.what());
+                    mLogger->log(Logger::LOG_LVL_ERROR, "Peripheral disconnected: %s\r\n", e.what());
                     mtrState = eMotorProblem;
                 }
                 break;

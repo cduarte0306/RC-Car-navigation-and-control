@@ -171,14 +171,6 @@ if (RC_CAR_ENABLE_JETSON_MULTIMEDIA)
             target_compile_definitions(${PROJECT_NAME} PRIVATE RC_CAR_HAVE_JETSON_MULTIMEDIA=0)
         endif()
     endif()
-
-    if (RC_CAR_ARGUS_LIBRARY AND RC_CAR_NVBUF_UTILS_LIBRARY)
-        target_compile_definitions(${PROJECT_NAME} PRIVATE RC_CAR_HAVE_JETSON_MULTIMEDIA=1)
-        target_link_libraries(${PROJECT_NAME} PRIVATE ${RC_CAR_ARGUS_LIBRARY} ${RC_CAR_NVBUF_UTILS_LIBRARY})
-    else()
-        message(STATUS "Jetson multimedia libs not found (argus/nvbuf_utils); building without Jetson multimedia support")
-        target_compile_definitions(${PROJECT_NAME} PRIVATE RC_CAR_HAVE_JETSON_MULTIMEDIA=0)
-    endif()
 else()
     target_compile_definitions(${PROJECT_NAME} PRIVATE RC_CAR_HAVE_JETSON_MULTIMEDIA=0)
 endif()
@@ -227,6 +219,10 @@ target_link_directories(${PROJECT_NAME} PRIVATE
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${GPIOD_INCLUDE_DIRS}
+)
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE

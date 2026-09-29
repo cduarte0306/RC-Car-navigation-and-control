@@ -7,7 +7,7 @@
 #include <exception>
 
 #include "DeviceBase.hpp"
-
+#include "app/motor/MotorBootloaderDefs.h"
 
 namespace Device {
 
@@ -66,6 +66,7 @@ public:
         REG_PID_P,
         REG_PID_I,
         REG_PID_D,
+        REG_ENTER_BL,
         REG_WR_END,
     } registerEnumReadWrites;
 
@@ -119,12 +120,17 @@ public:
     bool isDeviceConnected(void) const { return this->isDeviceConnected_; }
     bool doConfigureDevice(void);
     int doDetectDevice(void);
+    bool doDetectBootloader(void);
     int getVers(uint8_t& major, uint8_t& minor, uint8_t& build);
     int readData(psocDataStruct& data);
     int readReg(int reg, val_type_t& val);
     int setMotorState(bool state);
     int setDriveMode(bool state);
     int setPIParams(float p, float i, float d);
+    int setToUpdateMode();
+    int writeUpdate(size_t row, size_t length, const char* data);
+    int endUpdate();
+    int verifyWrite();
 
 private:
     enum
@@ -144,7 +150,7 @@ private:
 
     bool configSPI(void);
     bool xfer(val_type_t* data, uint8_t reg, bool wrt=false);
-    bool xferSPI(uint8_t* pbuf, size_t length);
+    template<typename T> bool xferSPI(uint8_t* pbuf);
 private:
     bool isDeviceConnected_ = false;
     int spiFd = -1;
