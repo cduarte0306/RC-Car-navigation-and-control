@@ -199,6 +199,10 @@ std::vector<char> CFile::read(size_t length)
         length = m_Size; // Clamp to available file size
     }
 
+    // A previous short read at EOF leaves eofbit|failbit set, which would make
+    // every later read return 0 bytes.
+    m_FileStream.clear();
+
     buffer.resize(length);
 
     m_FileStream.seekg(m_Offset, std::ios::beg);

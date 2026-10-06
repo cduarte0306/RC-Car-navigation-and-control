@@ -13,6 +13,7 @@ JETSON_USER="root"
 JETSON_TARGET_DIR="/tmp/"
 REMOTE_APP_PATH="${JETSON_TARGET_DIR}/rc-car-nav/rc-car-nav"
 GDBSERVER_PATH="/usr/bin/gdbserver"    # explicit path
+GDBSERVER_LOG="${JETSON_TARGET_DIR}/gdbserver.log"   # gdbserver + app stdout/stderr on the Jetson
 
 MODE="$1"
 
@@ -33,7 +34,7 @@ elif [[ "$MODE" == "remote" ]]; then
 
     echo "[*] Killing any previous gdbserver on Jetson..."
     ssh "${JETSON_USER}@${JETSON_IP}" \
-        "pkill -9 gdbserver || true; rm -f ${JETSON_TARGET_DIR}/gdbserver.log"
+        "pkill -9 gdbserver || true; rm -f ${GDBSERVER_LOG}"
 
     rm -f "./.gdbserver-log-follow.pid"
     rm -f "./gdbserver.log"
@@ -49,7 +50,7 @@ elif [[ "$MODE" == "remote" ]]; then
 
     echo "[*] Starting gdbserver on Jetson..."
     ssh "${JETSON_USER}@${JETSON_IP}" \
-        "nohup ${GDBSERVER_PATH} :${PORT} ${REMOTE_APP_PATH} > /tmp/gdbserver-app.log 2>&1 &"
+        "cd '${RC_CAR_DIR}' && { nohup ${GDBSERVER_PATH} :${PORT} ${REMOTE_APP_PATH} > ${GDBSERVER_LOG} 2>&1 < /dev/null & }"
 
     sleep 1  # Give gdbserver time to start and begin logging
     

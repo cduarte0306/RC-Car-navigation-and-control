@@ -1,7 +1,13 @@
 #ifndef UTILS_HPP
+#define UTILS_HPP
 #include <string>
 #include <cstddef>
 #include "types.h"
+#include <cassert>
+
+#include "logger.hpp"
+
+#define CHECK(x) if (!(x)) { Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Check failed: %s\r\n", #x); assert(false); }
 
 namespace Utils {
 

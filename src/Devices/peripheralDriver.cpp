@@ -79,26 +79,17 @@ bool PeripheralCtrl::doDetectBootloader(void)
 {
     BlDefs::tBlXfer xfer;
     std::memset((uint8_t*)&xfer, 0, sizeof(xfer));
-    bool ret;
     for (int i = 0; i < MAX_ATTEMPT_COUNT; i ++)
     {
         // Stage the ping
         xfer.cmd = BlDefs::BootLoader_Ping;
-        ret = this->xferSPI<BlDefs::tBlXfer>(reinterpret_cast<uint8_t*>(&xfer));
-        if ( !ret )
-        {
-            return false;
-        }
+        CHECK(this->xferSPI<BlDefs::tBlXfer>(reinterpret_cast<uint8_t*>(&xfer)));
 
         usleep(1000);  // Wait 1ms
 
         // Attempt to read
         xfer.cmd = BlDefs::Bootloader_Noop;
-        ret = this->xferSPI<BlDefs::tBlXfer>(reinterpret_cast<uint8_t*>(&xfer));
-        if ( !ret )
-        {
-            return false;
-        }
+        CHECK(this->xferSPI<BlDefs::tBlXfer>(reinterpret_cast<uint8_t*>(&xfer)));
 
         // Did it reply with the BL magic number?
         if (xfer.status == BlDefs::Bl_Ping)
@@ -257,30 +248,37 @@ int PeripheralCtrl::writeUpdate(size_t row, size_t length, const char* data)
     {
         BlDefs::tBlXfer header{};
         uint8_t payload[CY_ROW_LENGTH];
-    } packet;
+    } __attribute__((__packed__)) packet;
 
     packet.header.cmd = BlDefs::BootLoader_WriteRow;
     packet.header.row = row;
     packet.header.crc32 = Utils::xCRC32(reinterpret_cast<const uint8*>(data), CY_ROW_LENGTH);
     std::memcpy(packet.payload, data, length);
-    return this->xferSPI<BootloaderWritePacket>(reinterpret_cast<uint8_t*>(&packet)) ? 0 : -1;
+    CHECK(this->xferSPI<BootloaderWritePacket>(reinterpret_cast<uint8_t*>(&packet)));
+    return 0;
 }
 
 int PeripheralCtrl::endUpdate()
 {
     BlDefs::tBlXfer cmd;
     cmd.cmd = BlDefs::Bootloader_Finalize;
-    return this->xferSPI<BlDefs::tBlXfer>((uint8_t*)&cmd) ? 0 : -1;
+    CHECK(this->xferSPI<BlDefs::tBlXfer>((uint8_t*)&cmd));
+    return 0;
 }
 
 int PeripheralCtrl::verifyWrite()
 {
+    // SPI is full duplex: the slave's reply to a frame is clocked out on the
+    // *next* frame (same pattern as doDetectBootloader), so send the command,
+    // give the PSoC time to program the row, then clock in the reply with a Noop.
     BlDefs::tBlXfer cmd;
+    std::memset(&cmd, 0, sizeof(cmd));
     cmd.cmd = BlDefs::Bootloader_Verify_Write;
-    if (this->xferSPI<BlDefs::tBlXfer>((uint8_t*)&cmd))
-    {
-        return -1;
-    }
+    CHECK(this->xferSPI<BlDefs::tBlXfer>((uint8_t*)&cmd));
+
+    std::memset(&cmd, 0, sizeof(cmd));
+    cmd.cmd = BlDefs::Bootloader_Noop;
+    CHECK(this->xferSPI<BlDefs::tBlXfer>((uint8_t*)&cmd));
     return cmd.status;
 }
 
@@ -520,22 +518,14 @@ bool PeripheralCtrl::xfer(val_type_t* data, uint8_t reg, bool wrt)
         dataOut.reg = reg;
         dataOut.data.u32 = data->u32;
 
-        ret = this->xferSPI<PeripheralCtrl::spiTransactionStruct>(reinterpret_cast<uint8_t*>(&dataOut));
-        if ( !ret )
-        {
-            return false;
-        }
+        CHECK(this->xferSPI<PeripheralCtrl::spiTransactionStruct>(reinterpret_cast<uint8_t*>(&dataOut)));
 
         std::memset(&dataOut, 0x00, sizeof(PeripheralCtrl::spiTransactionStruct));
         dataOut.transactionType = READ_TRANSACTION;
         // The next transaction is a read transaction
-        ret = this->xferSPI<PeripheralCtrl::spiTransactionStruct>(reinterpret_cast<uint8_t*>(&dataOut));
-        if ( !ret  )
-        {
-            return false;
-        }
+        CHECK(this->xferSPI<PeripheralCtrl::spiTransactionStruct>(reinterpret_cast<uint8_t*>(&dataOut)));
 
-        if (!dataOut.ack || (dataOut.reg != reg))
+        if ((dataOut.ack != true) || (dataOut.reg != reg))
             continue;
 
         data->u32 = dataOut.data.u32;
@@ -572,7 +562,7 @@ bool PeripheralCtrl::xferSPI(uint8_t* pbuf)
     tr.bits_per_word = this->bitsPerWord;
 
     int ret = ioctl(this->spiFd, SPI_IOC_MESSAGE(1), &tr);
-    if (ret < 1)
+    if (ret != sizeof(T))
     {
         logger->log(Logger::LOG_LVL_ERROR, "Failed to perform SPI transfer: %d\r\n", strerror(errno));
         return false;

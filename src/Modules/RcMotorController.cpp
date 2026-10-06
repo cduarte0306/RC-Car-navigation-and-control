@@ -201,14 +201,41 @@ void MotorController::cmdHandlerDisable(val_type_t val, const std::vector<char>&
 
 int MotorController::RunUpdate()
 {
-    constexpr int numTries = 5;
-    const char* fileName = "firmware/rc-car-firmware.bin";
-    CFile updateFile(fileName, 0);
-    size_t row = 0;
-    while(true)
+    constexpr int numTries = 200;
+    const char* fileName = "./firmware/rc-car-firmware.bin";
+    CFile updateFile(fileName, "r");
+    if (!updateFile.isOpen())
+    {
+        mLogger->log(Logger::LOG_LVL_ERROR, "Failed to open firmware file: %s\r\n", fileName);
+        return -1;
+    }
+
+    mLogger->log(Logger::LOG_LVL_INFO, "Firmware file info:\r\n\tFirmware file name: %s\r\n\tFirmware file size: %zu\r\n",
+        fileName, updateFile.size());
+
+    size_t row = CY_FIRST_APP_ROW;
+    while(row < CY_BL_NUM_ROWS)
     {
         std::vector<char> data = updateFile.read(CY_ROW_LENGTH);
-        this->peripheralDriver->writeUpdate(row, data.size(), data.data());
+        if (data.empty())
+        {
+            if (row == 0)
+            {
+                mLogger->log(Logger::LOG_LVL_ERROR, "Failed to read firmware file at row 0\r\n");
+                return -1;
+            }
+            break;  // End of file: every row has been written
+        }
+
+        // The last chunk is usually shorter than a flash row; pad with erased-flash value.
+        data.resize(CY_ROW_LENGTH, static_cast<char>(0xFF));
+
+        mLogger->log(Logger::LOG_LVL_INFO, "Writing firmware data at row %zu\r\n", row);
+        if (this->peripheralDriver->writeUpdate(row, data.size(), data.data()) < 0)
+        {
+            mLogger->log(Logger::LOG_LVL_ERROR, "Failed to send row %zu\r\n", row);
+            return -1;
+        }
         int i = 0;
         int verifyStatus = BlDefs::Bl_Ok;
         for (i = 0; i < numTries; i ++)
@@ -218,16 +245,29 @@ int MotorController::RunUpdate()
             {
                 break;
             }
+            else if (verifyStatus == BlDefs::Bl_Err)
+            {
+                mLogger->log(Logger::LOG_LVL_ERROR, "Verification error at row %zu\r\n", row);
+                return -1;
+            }
+            mLogger->log(Logger::LOG_LVL_DEBUG, "Row %zu verify status: 0x%X\r\n", row, (unsigned)verifyStatus);
         }
         if (i == numTries)
         {
-            mLogger->log(Logger::LOG_LVL_ERROR, "Failed write at row %d\r\n", row);
+            mLogger->log(Logger::LOG_LVL_ERROR, "Failed write at row %zu\r\n", row);
             return -1;
         }
+        row ++;
         i = 0;
     }
 
-    mLogger->log(Logger::LOG_LVL_INFO, "Motor controller update finalized\r\n");
+    if (this->peripheralDriver->endUpdate() < 0)
+    {
+        mLogger->log(Logger::LOG_LVL_ERROR, "Failed to finalize update\r\n");
+        return -1;
+    }
+
+    mLogger->log(Logger::LOG_LVL_INFO, "Motor controller update finalized (%zu rows)\r\n", row);
     return 0;
 }
 
@@ -294,7 +334,7 @@ void MotorController::mainProc()
         eMotorIdle
     } tMotorCtrlState;
 
-    tMotorCtrlState mtrState, prevState = eVerifyConnection;
+    tMotorCtrlState mtrState = eVerifyConnection, prevState = eVerifyConnection;
 
     int ret = 0;
     m_isControllerConnected = false;
@@ -314,13 +354,13 @@ void MotorController::mainProc()
                     this->peripheralDriver->getVers(major, minor, build);
                     mLogger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
                  
-                    if ((major < periCtrlMajor) ||
-                        (minor < periCtrlMinor) ||
-                        (build < periCtrlBuild))
-                    {
-                        mtrState = eRunUpdate;
-                        (void) peripheralDriver->setToUpdateMode();
-                    }
+                    // if ((major < periCtrlMajor) ||
+                    //     (minor < periCtrlMinor) ||
+                    //     (build < periCtrlBuild))
+                    // {
+                    //     mtrState = eRunUpdate;
+                    //     (void) peripheralDriver->setToUpdateMode();
+                    // }
                     m_isControllerConnected = true;
                     peripheralDriver->setMotorState(true);
                     mtrState = eCheckMotorState;
