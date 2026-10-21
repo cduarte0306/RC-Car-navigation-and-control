@@ -1,4 +1,4 @@
-#include "AdapterBase.hpp"
+#include "AdapterCamera.hpp"
 
 namespace Adapter {
 

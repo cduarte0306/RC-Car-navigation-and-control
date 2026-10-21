@@ -1,4 +1,4 @@
-#include "Modules_Lib/AdapterBase.hpp"
+#include "AdapterComms.hpp"
 
 namespace Adapter {
 

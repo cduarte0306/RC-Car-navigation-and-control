@@ -22,6 +22,12 @@
 
 #include "lib/MessageLib.hpp"
 #include "Modules_Lib/AdapterBase.hpp"
+#include "Modules_Lib/AdapterCamera.hpp"
+#include "Modules_Lib/AdapterCli.hpp"
+#include "Modules_Lib/AdapterComms.hpp"
+#include "Modules_Lib/AdapterMotor.hpp"
+#include "Modules_Lib/AdapterTlm.hpp"
+#include "Modules_Lib/AdapterUpdater.hpp"
 #include "ModulesDefs.hpp"
 #include "utils/logger.hpp"
 
@@ -485,6 +491,27 @@ protected:
     int dispatchToModule(std::vector<char>& msg);
 
     /**
+     * @brief Send a message to the specified module.
+     * 
+     * @param msgData Vector containing the raw message data to be sent
+     * @return int Error code indicating success or failure of the message sending process
+     */
+    int DoSendMsg(const std::vector<char>& msgData, ModuleDefs::DeviceType modID=ModuleDefs::DeviceType::CommsModule, val_type_t data={0});
+
+    /**
+     * @brief Send a message to the specified module with a templated payload.
+     * 
+     * @tparam T Type of the payload
+     * @param msgData Payload to be sent
+     * @return int Error code indicating success or failure of the message sending process
+     */
+    template<typename T>
+    int sendMsg(const T& msgData)
+    {
+        return sendMsg(Msg::PayloadCodec::serialize(msgData));
+    }
+
+    /**
      * @brief Handle an acknowledgment message received from a command handler. This function is called when a command handler sets acknowledgment data to be sent back to the adapter as part of the reply, allowing the module to process the acknowledgment data and prepare it for transmission back to the adapter.
      * 
      * @param ack Reference to the MessageAck object containing the acknowledgment data set by the command handler
@@ -592,6 +619,8 @@ protected:
     std::atomic<bool> m_Running{true};  // Flag to control the main processing loop and allow for graceful shutdown
 
     static std::vector<std::thread> workerThreads;
+
+    uint16_t m_SeqID = 0; // Sequence ID for tracking command messages
 private:
     std::thread thread;                                              // Main thread for the module's main processing loop
     std::thread m_TimerThread;                                       // This thread handles time-based events per object

@@ -9,6 +9,7 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/dnn.hpp>
 #include "RcBase.hpp"
+#include "Modules_Lib/AdapterCamera.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
 #include "Devices/StereoCam.hpp"
 #include "Devices/GyroScope.hpp"
@@ -134,38 +135,6 @@ protected:
         StreamMaxSources
     };
 
-    // Camera module commands
-    enum {
-        CmdStartStream,           // start video stream
-        CmdStopStream,            // stop video stream
-        CmdSelCameraStream,       // select camera stream (Normal or training)
-        CmdSetFps,                // set streaming parameters (host IP, port, etc)
-        CmdSetQuality,            // Set the stream compresison quality
-        
-        // Stereo parameters
-        CmdSetMinDisparities,      // Set maximum disparities
-        CmdSetMaxDisparities,
-        CmdSetConfidenceThreshold,
-        CmdSetUniquenessRatio,    // Sets the uniqueness ratio
-        CmdSetP1,                 // Sets StereoSGM P1
-        CmdSetP2,                 // Sets StereoSGM P2
-        CmdSetZMax,
-        CmdSetZMin,
-        CmdSetDepthThreshold,
-        CmdSetMinAgreeingPixels,
-        CmdSetColorThreshold,
-
-        CmdRdParams,              // Command to read all configured parameteres
-        CmdClrVideoRec,           // clear video recording buffer
-        CmdSaveVideo,             // save video recording to disks
-        CmdLoadStoredVideos,      // Read stored videos from disk
-        CmdLoadSelectedVideo,     // load selected video from disk
-        CmdDeleteVideo,           // Delete video
-        CmdCalibrationSetState,   // Start video calibration
-        CmdCalibrationWrtParams,  // Sets calibration paramters
-        CmdCalibrationReset,      // Reset calibration
-        CmdCalibrationSave,       // Save calibration to disk
-    };
 
     // Camera process enums
     enum {

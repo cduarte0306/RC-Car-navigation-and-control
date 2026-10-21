@@ -6,6 +6,7 @@
 #include <mutex>
 #include "utils/CFile.hpp"
 #include "RcBase.hpp"
+#include "Modules_Lib/AdapterUpdater.hpp"
 #include "Devices/network_interface/UdpServer.hpp"
 
 namespace Modules {
@@ -48,21 +49,6 @@ public:
     virtual int init(void) override;
 
 protected:
-    enum {
-        RequestFirmwareRev = 1,  // Command to request the firmware revision from the updater module
-        PrepareForUpdate,        // Command to prepare the system for an update (e.g., stop motors, close connections)
-        UploadFirmwareData,      // Download firmware data command
-        InstallFirmware,         // Install firmware command
-        QueryUpdateStatus,       // Query update status command
-        UpdaterCleanState,       // Clean state command
-        UpdaterFinalize,         // Reboot command
-    };
-
-    struct UpdaterReqHeader {
-        uint8_t command;      // Command identifier
-        uint64_t payloadLen;  // Length of the payload following the header
-    };
-
     struct FileInfo {
       std::string fileName;
       size_t fileLen;  

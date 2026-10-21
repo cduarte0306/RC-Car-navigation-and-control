@@ -28,12 +28,10 @@ bitsPerWord(8)
     }
 }
 
-
 PeripheralCtrl::~PeripheralCtrl()
 {
     close(this->spiFd);
 }
-
 
 bool PeripheralCtrl::doConfigureDevice(void)
 {
@@ -46,7 +44,6 @@ bool PeripheralCtrl::doConfigureDevice(void)
 
     return true;
 }
-
 
 /**
  * @brief Detect whether the peripheral controller is connected

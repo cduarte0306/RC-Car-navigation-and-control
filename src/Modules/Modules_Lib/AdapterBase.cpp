@@ -248,10 +248,10 @@ int AdapterBase::AckMsg(Msg::MessageCapsule<std::vector<char>>& capsule, char* r
 	ack.mCommandID = capsule.getCommand();
 	ack.mSeqID = capsule.getSeqID();
 	ack.mReplyDestID = capsule.getSource();
-	return ConnectModuleReply(ack);
+	return ConnectedModuleReply(ack);
 }
 
-int AdapterBase::ConnectModuleReply(Msg::MessageAck<std::vector<char>>& ack)
+int AdapterBase::ConnectedModuleReply(Msg::MessageAck<std::vector<char>>& ack)
 {
 	if (moduleReplyCmd)
 	{

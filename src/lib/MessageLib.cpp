@@ -128,6 +128,8 @@ template<typename T>
 MessageAck<T>::MessageAck(int commandID, uint16_t seqID, const T& replyData)
 	: mCommandID(commandID), mSeqID(seqID), mReplyData(replyData)
 {
+	mCommandID = commandID;
+	mSeqID = seqID;
 }
 
 template<typename T>

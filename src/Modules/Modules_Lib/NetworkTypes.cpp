@@ -1,5 +1,5 @@
 #include "NetworkTypes.hpp"
-#include "AdapterBase.hpp"
+#include "AdapterComms.hpp"
 
 using namespace Adapter;
 

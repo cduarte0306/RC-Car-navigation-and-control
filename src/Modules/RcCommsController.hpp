@@ -4,6 +4,7 @@
 #include <types.h>
 #include <map>
 #include "RcBase.hpp"
+#include "Modules_Lib/AdapterComms.hpp"
 
 #include "Devices/network_interface/UdpServer.hpp"
 #include "Devices/network_interface/TcpServer.hpp"

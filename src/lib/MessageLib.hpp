@@ -201,7 +201,7 @@ namespace Msg {
             return PayloadSerializer<std::decay_t<T>>::deserialize(data, size, out);
         }
     };
-    
+
     template<typename T, typename StorageT = DefaultCapsuleStorage<T>>
     class MessageCapsule {
     public:
@@ -455,7 +455,7 @@ namespace Msg {
     public:
         MessageAck() = default;
         MessageAck(int commandID, uint16_t seqID, const T& replyData);
-        MessageAck(bool status, const T& replyData) : mStatus(status), mReplyData(replyData) {}
+        MessageAck(bool status, const T& replyData) : mReplyData(replyData) { mStatus = status; }
         MessageAck(const MessageAck&) = default;
         MessageAck(MessageAck&&) noexcept = default;
         ~MessageAck();

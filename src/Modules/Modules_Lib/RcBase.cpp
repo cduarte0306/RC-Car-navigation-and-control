@@ -341,7 +341,6 @@ namespace Modules {
         {
             auto handler = m_CommandHandlers[commandID];
             handler(val, payload);
-            return 0;
         }
         catch (const std::out_of_range& e)
         {
@@ -350,6 +349,14 @@ namespace Modules {
         }
 
         return 0; // Success
+    }
+
+    int Base::DoSendMsg(const std::vector<char>& msgData, ModuleDefs::DeviceType modID, val_type_t data)
+    {
+        mLogger->log(Logger::LOG_LVL_DEBUG, "Sending message of size: %zu\r\n", msgData.size());
+        Msg::MessageCapsule<std::vector<char>> capsule(m_SeqID ++, static_cast<uint8_t>(modID), 0, msgData, 0);
+        CommsAdapter->dispatchCommand(capsule);
+        return 0;
     }
 
     int Base::DoAck(bool status, const std::vector<char>& replyData)
@@ -448,7 +455,7 @@ namespace Modules {
 
         logger->log(Logger::LOG_LVL_DEBUG, "Submitting reply - Command ID: %d, Seq ID: %d, Status: %s, Reply data size: %zu\r\n", 
             ack.mCommandID, ack.mSeqID, ack.GetStatus() ? "Success" : "Failure", ack.mReplyData.size());
-        return it->second->ConnectModuleReply(ack);
+        return it->second->ConnectedModuleReply(ack);
     }
 
     int Base::OnModuleMsgReceived_(std::vector<char>& buffer, int srcId)
@@ -488,8 +495,6 @@ namespace Modules {
             std::vector<char> replyData = capsule.GetAckRaw();
             buffer.insert(buffer.end(), replyData.begin(), replyData.end());
         }
-
-
         return ret;
     }
 }

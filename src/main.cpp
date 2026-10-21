@@ -13,6 +13,7 @@
 #include "lib/MessageLib.hpp"
 #include "Modules/Modules_Lib/ModulesDefs.hpp"
 #include "Modules/Modules_Lib/AdapterBase.hpp"
+#include "Modules/Modules_Lib/AdapterComms.hpp"
 #include "Modules/Modules_Lib/RcBase.hpp"
 #include "Modules/RcMotorController.hpp"
 #include "Modules/RcCommsController.hpp"

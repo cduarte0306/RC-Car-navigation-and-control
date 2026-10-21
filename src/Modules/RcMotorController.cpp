@@ -76,9 +76,11 @@ int MotorController::init(void)
     }
 
     // Register commands,
-    Base::moduleRegisterCommand(MotorCmdSetSpeed, &MotorController::cmdHandlerSetSpeed);
-    Base::moduleRegisterCommand(MotorCmdSteer, &MotorController::cmdHandlerSteer);
-    Base::moduleRegisterCommand(MotorCmdDisable, &MotorController::cmdHandlerDisable);
+    Base::moduleRegisterCommand(MotorCmdSetSpeed,       &MotorController::cmdHandlerSetSpeed    );
+    Base::moduleRegisterCommand(MotorCmdSteer,          &MotorController::cmdHandlerSteer       );
+    Base::moduleRegisterCommand(MotorCmdDisable,        &MotorController::cmdHandlerDisable     );
+    Base::moduleRegisterCommand(MotorCmdInstallUpdate,  &MotorController::cmdHandlerStartUpdate );
+    Base::moduleRegisterCommand(MotorCmdReadVersion,    &MotorController::CmdHandlerReadVersion );
     Base::DefinePayloadLoc(sizeof(MotorCommand_t));  // Define the payload location and size for incoming commands
 
     mLogger->log(Logger::LOG_LVL_INFO, "Opened motor telemetry network adapter at port 65001\r\n");
@@ -172,6 +174,7 @@ void MotorController::cmdHandlerSetSpeed(val_type_t val, const std::vector<char>
     {
         Base::DoAck(false, {});
     }
+    Base::DoAck(true, {});
     return;
 }
 
@@ -182,6 +185,8 @@ void MotorController::cmdHandlerSteer(val_type_t val, const std::vector<char>& p
     {
         Base::DoAck(false, {});
     }
+
+    Base::DoAck(true, {});
     return;
 }
 
@@ -196,7 +201,43 @@ void MotorController::cmdHandlerDisable(val_type_t val, const std::vector<char>&
             Base::DoAck(false, {});
         }
     }
+    Base::DoAck(true, {});
     return;
+}
+
+void MotorController::cmdHandlerStartUpdate(val_type_t val, const std::vector<char>& payload)
+{
+    if (this->peripheralDriver->setToUpdateMode() < 0)
+    {
+        mLogger->log(Logger::LOG_LVL_ERROR, "Failed to set update mode\r\n");
+        Base::DoAck(false, {});
+    }
+    else
+    {
+        mLogger->log(Logger::LOG_LVL_INFO, "Starting firmware update...\r\n");
+        Base::DoAck(true, {});
+    }
+}
+
+void MotorController::CmdHandlerReadVersion(val_type_t val, const std::vector<char>& payload)
+{
+    (void)payload;
+    uint8_t major, minor, build;
+    if (this->peripheralDriver->getVers(major, minor, build) < 0)
+    {
+        mLogger->log(Logger::LOG_LVL_ERROR, "Failed to read version information\r\n");
+        Base::DoAck(false, {});
+        return;
+    }
+    else
+    {
+        std::vector<char> versionPayload;
+        versionPayload.resize(sizeof(major) + sizeof(minor) + sizeof(build));
+        std::memcpy(versionPayload.data(), &major, sizeof(major));
+        std::memcpy(versionPayload.data() + sizeof(major), &minor, sizeof(minor));
+        std::memcpy(versionPayload.data() + sizeof(major) + sizeof(minor), &build, sizeof(build));
+        Base::DoAck(true, versionPayload);
+    }
 }
 
 int MotorController::RunUpdate()
@@ -334,7 +375,7 @@ void MotorController::mainProc()
         eMotorIdle
     } tMotorCtrlState;
 
-    tMotorCtrlState mtrState = eVerifyConnection, prevState = eVerifyConnection;
+    tMotorCtrlState mtrState = eVerifyConnection;
 
     int ret = 0;
     m_isControllerConnected = false;
@@ -343,7 +384,12 @@ void MotorController::mainProc()
     // Main processing loop for the motor controller
     while (m_Running.load())
     {
-        prevState = mtrState;
+        if (mEnterUpdate)
+        {
+            mEnterUpdate = false;
+            mtrState = eRunUpdate;
+        }
+
         switch(mtrState)
         {
             case eVerifyConnection:
@@ -353,7 +399,7 @@ void MotorController::mainProc()
                     uint8_t major, minor, build;
                     this->peripheralDriver->getVers(major, minor, build);
                     mLogger->log(Logger::LOG_LVL_INFO, "PSoC Version detected: %u.%u.%u\r\n", major, minor, build);
-                 
+
                     // if ((major < periCtrlMajor) ||
                     //     (minor < periCtrlMinor) ||
                     //     (build < periCtrlBuild))

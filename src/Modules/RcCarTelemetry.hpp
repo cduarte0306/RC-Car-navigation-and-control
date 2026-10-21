@@ -6,6 +6,7 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include "Modules/Modules_Lib/RcBase.hpp"
+#include "Modules/Modules_Lib/AdapterTlm.hpp"
 #include "lib/MessageLib.hpp"
 
 

@@ -1,7 +1,7 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
-#include "Modules_Lib/AdapterBase.hpp"
+#include "Modules_Lib/AdapterMotor.hpp"
 #include "RcBase.hpp"
 #include "lib/MessageLib.hpp"
 #include "Devices/peripheralDriver.hpp"
@@ -38,28 +38,12 @@ public:
 
     int init(void) override;
 
-    enum {
-        MotorCmdSetSpeed,
-        MotorCmdSteer,
-        MotorCmdDisable,
-        MOTOR_CMD_GET_STATUS,
-        MotorCmdReadData,
-        MotorCmdSpiWrite,
-        MotorCmdSpiRead
-    };
-
-    typedef struct {
-        uint8_t command;
-        val_type_t data_1;
-        val_type_t data_2;
-    } MotorCommand_t;
 protected:
-    enum {
-        CMD_NOOP,
-        CMD_FWD_DIR,
-        CMD_STEER,
-    };
 
+    /**
+     * @brief Main processing loop for the motor controller
+     * 
+     */
     virtual void mainProc() override;
 
     /**
@@ -112,6 +96,24 @@ protected:
     void cmdHandlerDisable(val_type_t val, const std::vector<char>& payload);
 
     /**
+     * @brief Handler for start update command received from adapter
+     * 
+     * @param val Command value (e.g. start/stop)
+     * @param payload Command payload (if any)
+     * @return int Return status
+     */
+    void cmdHandlerStartUpdate(val_type_t val, const std::vector<char>& payload);
+
+    /**
+     * @brief Handler for verify update command received from adapter
+     * 
+     * @param val Command value (e.g. verify/abort)
+     * @param payload Command payload (if any)
+     * @return int Return status
+     */
+    void CmdHandlerReadVersion(val_type_t val, const std::vector<char>& payload);
+
+    /**
      * @brief Perform update on the device
      * 
      * @return int 
@@ -158,5 +160,11 @@ protected:
     
     // Network adapter for telemetry
     std::unique_ptr<NetworkAdapter> m_TlmNetAdapter;
+
+    /**
+     * @brief Flag indicating if the motor controller should enter update mode
+     * 
+     */
+    bool mEnterUpdate{false};
 };
 } // namespace Modules

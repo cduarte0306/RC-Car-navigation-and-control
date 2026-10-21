@@ -1,4 +1,4 @@
-#include "AdapterBase.hpp"
+#include "AdapterMotor.hpp"
 
 namespace Adapter {
 

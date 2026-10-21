@@ -51,13 +51,13 @@ int Updater::init(void)
 {
     int ret = 0;
 
-    ret = Base::moduleRegisterCommand(RequestFirmwareRev,  &Updater::reqRevHandler                  );
-    ret = Base::moduleRegisterCommand(PrepareForUpdate,    &Updater::initUpdateHandler              );
-    ret = Base::moduleRegisterCommand(UploadFirmwareData,  &Updater::uploadFirmwareDataHandler      );
-    ret = Base::moduleRegisterCommand(InstallFirmware,     &Updater::installFirmwareHandler         );
-    ret = Base::moduleRegisterCommand(UpdaterCleanState,   &Updater::OnUpdateServerCleanStateHandler);
-    ret = Base::moduleRegisterCommand(QueryUpdateStatus,   &Updater::queryUpdateStatusHandler       );
-    ret = Base::moduleRegisterCommand(UpdaterFinalize,     &Updater::finalizeUpdateHandler          );
+    ret = Base::moduleRegisterCommand(RequestFirmwareRev, &Updater::reqRevHandler                  );
+    ret = Base::moduleRegisterCommand(PrepareForUpdate,   &Updater::initUpdateHandler              );
+    ret = Base::moduleRegisterCommand(UploadFirmwareData, &Updater::uploadFirmwareDataHandler      );
+    ret = Base::moduleRegisterCommand(InstallFirmware,    &Updater::installFirmwareHandler         );
+    ret = Base::moduleRegisterCommand(UpdaterCleanState,  &Updater::OnUpdateServerCleanStateHandler);
+    ret = Base::moduleRegisterCommand(QueryUpdateStatus,  &Updater::queryUpdateStatusHandler       );
+    ret = Base::moduleRegisterCommand(UpdaterFinalize,    &Updater::finalizeUpdateHandler          );
 
     // Define the module payload
     Base::DefinePayloadLoc(sizeof(UpdaterReqHeader));
@@ -194,9 +194,31 @@ void Updater::initUpdateHandler(val_type_t val, const std::vector<char>& payload
 
 void Updater::uploadFirmwareDataHandler(val_type_t val, const std::vector<char>& payload)
 {
+    using json = nlohmann::json;
     (void) val;
+    json j = json::parse(payload.begin(), payload.end());
+    if (j.contains("path"))
+    {
+        std::string path = j["path"].get<std::string>();
+        CFile file(path.c_str(), "rw");
+        if (!file.isOpen())
+        {
+            Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Failed to open firmware file for writing: %s\r\n", path.c_str());
+            Base::DoAck(false, {});
+            return;
+        }
+
+        // Forwards to the motor controller
+        
+    }
+    else
+    {
+        Logger::getLoggerInst()->log(Logger::LOG_LVL_ERROR, "Missing 'path' field in firmware upload command\r\n");
+        Base::DoAck(false, {});
+        return;
+    }
+
     Base::DoAck(true, {});
-    return;
 }
 
 void Updater::installFirmwareHandler(val_type_t val, const std::vector<char>& payload)

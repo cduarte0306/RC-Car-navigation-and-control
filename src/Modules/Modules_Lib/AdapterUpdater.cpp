@@ -1,4 +1,4 @@
-#include "AdapterBase.hpp"
+#include "AdapterUpdater.hpp"
 
 namespace Adapter {
 
